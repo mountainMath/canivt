@@ -67,8 +67,9 @@ sibling reverse-engineering repo where the format was originally cracked).
 
 - Add a format detector + decoder for the **1991** layout (see the bottom of
   `inst/notes/ivt-format.md` for what differs).
-- Tighten footnote parsing (currently best-effort text; could attribute
-  footnotes to specific dimensions/members via the metadata note ids).
+- Footnote *text* extraction is robust (maximal text-byte runs; all 10 EN + 10
+  FR recovered, exact vs the metadata). Remaining nicety: attribute each footnote
+  to the dimension/member it annotates (by codebook proximity or note ids).
 - Optional: expose the per-dimension `depth` directly on `ivt_tidy()` output.
 - Consider an `Rcpp` fast path only if pure-R decode becomes a bottleneck (it is
   fine at ~5 s for the reference table).

@@ -25,6 +25,21 @@ test_that("codebook parses identity, members and geo DGUIDs", {
   expect_equal(counts, c(166L, 9L, 16L, 13L, 3L, 6L, 7L))
 })
 
+test_that("footnotes are extracted in both languages", {
+  p <- sample_ivt()
+  skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
+  m <- ivt_metadata(p)
+  langs <- vapply(m$footnotes, function(f) f$language, "")
+  expect_equal(sum(langs == "en"), 10L)
+  expect_equal(sum(langs == "fr"), 10L)
+  en <- vapply(m$footnotes[langs == "en"], function(f) f$text, "")
+  # whole footnote bodies are captured (one maximal text run each), incl. a long
+  # multi-paragraph one and a short one-liner
+  expect_true(any(grepl("^Includes data up to May 11, 2021\\.$", en)))
+  expect_true(any(grepl("Dwelling condition.*Housing suitability", en)))
+  expect_true(all(nchar(en) > 0L))
+})
+
 test_that("Canada decodes to the published tenure totals", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")

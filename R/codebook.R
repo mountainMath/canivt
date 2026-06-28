@@ -108,30 +108,45 @@ ivt_pick_english_block <- function(blocks, count, keyword) {
   NULL
 }
 
-# Best-effort footnote / "Renvoi" extraction: pull readable text chunks anchored
-# at each "Footnote N" (en) / "Renvoi N" (fr) marker in the codebook tail.
+# A "text byte": printable ASCII, tab/newline/carriage-return, or latin-1
+# accented range. Footnote prose is built only from these; the record framing
+# (`00 01 01 <u16 length>`) always contains a NUL or sub-0x09 control byte, so
+# each footnote is one maximal run of text bytes -- a far more robust delimiter
+# than NULs alone (consecutive footnotes are sometimes separated only by the
+# framing, with no NUL between them).
+is_text_byte <- function(v) {
+  (v >= 32L & v <= 126L) | v %in% c(9L, 10L, 13L) | (v >= 160L & v <= 255L)
+}
+
+# Extract footnotes from the codebook tail by isolating maximal text-byte runs
+# and keeping those that begin (after optional leading whitespace) with a
+# "Footnote N" (en) / "Renvoi N" (fr) marker. The text length prefix's high byte
+# can be a whitespace text byte (\t \n \r), so it may prepend a stray space to
+# the run -- hence the leading-whitespace tolerance. `number` is the footnote's
+# position within its language in file order (not the StatCan Note ID, which the
+# IVT does not record per footnote).
 ivt_footnotes <- function(raw, search_start) {
-  txt <- raw_to_latin1(raw[(search_start + 1L):length(raw)])
-  # collapse control-character runs to single spaces so chunks read as prose
-  flat <- gsub("[[:cntrl:]]+", " ", txt)
+  v <- as.integer(raw[(search_start + 1L):length(raw)])
+  txt <- is_text_byte(v)
+  r <- rle(txt)
+  ends <- cumsum(r$lengths)
+  starts <- ends - r$lengths + 1L
+  marker <- "^[[:space:]]*(Footnote|Renvoi)[[:space:]]*([0-9]+)[[:space:]]*"
+  langs <- c(Footnote = "en", Renvoi = "fr")
+  counts <- c(en = 0L, fr = 0L)
   out <- list()
-  for (lang in c(en = "Footnote", fr = "Renvoi")) {
-    pat <- paste0(lang, "\\s*[0-9]+")
-    m <- gregexpr(pat, flat)[[1]]
-    if (m[1] == -1) next
-    lens <- attr(m, "match.length")
-    starts <- as.integer(m)
-    ends <- c(starts[-1] - 1L, nchar(flat))
-    for (k in seq_along(starts)) {
-      chunk <- trimws(substr(flat, starts[k], ends[k]))
-      chunk <- gsub("\\s+", " ", chunk)
-      num <- as.integer(sub(paste0("^", lang, "\\s*([0-9]+).*"), "\\1", chunk))
-      body <- trimws(sub(paste0("^", lang, "\\s*[0-9]+\\s*"), "", chunk))
-      if (nchar(body) < 5L) next
-      out[[length(out) + 1L]] <- list(
-        language = names(which(c(en = "Footnote", fr = "Renvoi") == lang)),
-        number = num, text = body)
-    }
+  for (i in which(r$values)) {
+    if (r$lengths[i] < 12L) next  # too short to be a footnote
+    s <- raw_to_latin1(raw[search_start + starts[i]:ends[i]])
+    m <- regmatches(s, regexec(marker, s))[[1]]
+    if (length(m) < 3L) next
+    lang <- unname(langs[m[2]])
+    body <- trimws(gsub(" ", " ", sub(marker, "", s)))
+    body <- gsub("[[:space:]]+", " ", body)
+    if (!nzchar(body)) next
+    counts[lang] <- counts[lang] + 1L
+    out[[length(out) + 1L]] <- list(language = lang,
+                                    number = counts[[lang]], text = body)
   }
   out
 }

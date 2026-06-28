@@ -179,13 +179,23 @@ ivt_tidy(tab)
 ivt_write_metadata(tab, "98100241_metadata")
 ```
 
-Footnotes use a looser framing than the member arrays; `canivt` extracts them
-best-effort by anchoring on the `Footnote N` (English) and `Renvoi N` (French)
-markers:
+Footnotes sit just before the member arrays, each framed as
+`01 01 <u16 length> <text>` and tagged by a leading `Footnote N` (English) /
+`Renvoi N` (French) marker. NULs do *not* reliably separate them — consecutive
+footnotes can be back to back. The reliable structure is that footnote prose is
+built only from "text bytes" (printable, `\t\r\n`, latin-1), whereas every
+record's framing contains a NUL or a low control byte. `canivt` therefore
+extracts footnotes as **maximal runs of text bytes** that begin with a
+`Footnote`/`Renvoi` marker — recovering each whole footnote exactly (validated
+against the StatCan metadata `Note` texts).
 
 ```{r}
 str(meta$footnotes[[1]])
+length(meta$footnotes)  # 10 English + 10 French for the reference table
 ```
+
+They are returned in file order within each language; the `number` field is that
+position, not the StatCan Note ID (the IVT does not store it per footnote).
 
 ## How `canivt` maps to the format
 

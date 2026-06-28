@@ -56,7 +56,8 @@ You can also read a local file directly with `read_ivt("path/to/file.ivt")`.
   is fully decoded and validated: all 166 geographies, 7,489,464 cells, exact
   against the StatCan CSV download.
 - Dimension member labels (with hierarchy indentation), geography names and full
-  **DGUIDs**, and footnotes (best-effort text) are read from the codebook.
+  **DGUIDs**, and footnotes (all 10 EN + 10 FR for the reference table, matching
+  the StatCan metadata exactly) are read from the codebook.
 
 ## Not yet supported
 

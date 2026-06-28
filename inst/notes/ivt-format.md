@@ -100,8 +100,29 @@ geographic identifiers and align with the geography index order.
 - English member-name blocks start with `Total - <dimension>` (except Statistics,
   whose first member is `Number of private households`); `canivt` selects the
   English block by that keyword + the expected member count.
-- Footnotes use irregular framing and are extracted best-effort by anchoring on
-  the `Footnote N` (EN) / `Renvoi N` (FR) markers.
+### Footnotes
+
+Footnotes live just before the member arrays. Each is framed as
+`00? 01 01 <u16 length LE> [01] <text>` — the text is the footnote prose, the
+`<length>` is its byte length (±1), and the language is given by the leading
+`Footnote N` (EN) / `Renvoi N` (FR) marker (the `N` is always `1` and is **not**
+the StatCan Note ID; the IVT does not record the Note ID per footnote).
+
+NULs do **not** reliably separate footnotes — consecutive ones can be back to
+back with only `\r\n` + framing between them. Instead, the robust delimiter is
+that **footnote prose contains only "text bytes"** (printable ASCII, `\t\r\n`,
+or latin-1 `0xA0..0xFF`), while every record's framing contains a NUL or a
+sub-`0x09` control byte. So `canivt` extracts footnotes as **maximal runs of
+text bytes** (`is_text_byte()` + `rle()`), keeping the runs that begin — after
+optional leading whitespace — with a `Footnote`/`Renvoi` marker. The leading
+whitespace tolerance matters because the length prefix's high byte is itself a
+text byte when it is `\t`/`\n`/`\r` (e.g. a 2571-byte footnote has high byte
+`0x0a`), which prepends a stray newline to the run.
+
+This recovers all 10 EN + 10 FR footnotes for the reference table, each matching
+the StatCan metadata `Note` text exactly. Footnotes are returned in file order
+within each language (`number` = that position), since the IVT order differs from
+the metadata Note IDs (footnotes are stored next to their dimensions).
 
 ## Validation
 
