@@ -1,0 +1,28 @@
+Package: canivt
+Title: Download and Parse StatCan Beyond 20/20 IVT Tables
+Version: 0.0.0.9000
+Authors@R:
+    person("Jens", "von Bergmann", , "jens@mountainmath.ca", role = c("aut", "cre"))
+Description: Downloads and parses Statistics Canada Beyond 20/20 .ivt data
+    tables into tidy data frames, Parquet, or CSV, and extracts table
+    metadata such as dimension members, geographic identifiers, and
+    footnotes that are not part of the data itself.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Imports:
+    cli,
+    tibble,
+    utils
+Suggests:
+    arrow,
+    httr2,
+    knitr,
+    readr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+URL: https://github.com/mountainMath/canivt
+BugReports: https://github.com/mountainMath/canivt/issues

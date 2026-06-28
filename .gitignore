@@ -1,0 +1,19 @@
+# Data files (large; download at runtime)
+*.ivt
+*.IVT
+*.zip
+# only ignore large data CSVs, keep package/test CSVs if any
+/data-raw/*.csv
+
+# R artefacts
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rcheck/
+canivt_*.tar.gz
+inst/doc
+doc/
+Meta/
+
+.DS_Store

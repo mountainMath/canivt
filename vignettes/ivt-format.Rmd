@@ -1,0 +1,214 @@
+---
+title: "The Beyond 20/20 IVT file format"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{The Beyond 20/20 IVT file format}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+This vignette documents the Statistics Canada *Beyond 20/20* `.ivt` binary
+format as reverse-engineered for `canivt`, and shows how the package's functions
+map onto each part of the file. It is aimed at anyone who wants to understand,
+validate, or extend the parser. For day-to-day use see `?read_ivt`.
+
+The running example is StatCan table **98-10-0241** ("Housing indicators by
+tenure … by household type and period of construction"), whose `.ivt` is the
+reference the parser is validated against.
+
+```{r}
+library(canivt)
+path <- ivt_download("98100241")
+tab  <- read_ivt(path)
+tab
+```
+
+## Dimensions
+
+The table has 7 dimensions. The first, **Geography**, indexes the data blocks;
+the remaining six are the "inner" dimensions of every data page. The innermost
+dimension, **Tenure** (7 members), is the unit of value storage.
+
+| # | Dimension | Members |
+|---|-----------|--------:|
+| 1 | Geography | 166 |
+| 2 | Age of primary household maintainer | 9 |
+| 3 | Household type incl. census family structure | 16 |
+| 4 | Period of construction | 13 |
+| 5 | Statistics | 3 |
+| 6 | Housing indicators | 6 |
+| 7 | Tenure incl. mortgage/subsidy | 7 |
+
+That is `9 × 16 × 13 × 3 × 6 × 7 = 235,872` cells per geography. Cells that are
+zero are not stored, so the decoded table is sparse (~7.49 M non-zero cells
+across all 166 geographies).
+
+## File layout
+
+An `.ivt` file is one contiguous binary with five regions:
+
+```
+[0]            header: table identity + dimension names (starts 04 00 20 00)
+[37167]        geography index: one page-directory per geography
+~1.08M..~55.4M page data: the value pages (~98% of the file)
+~56.93M        footnote legend (EN "Footnote N", FR "Renvoi N")
+~56.94M..EOF   codebook: member labels + geography DGUIDs
+```
+
+All multi-byte integers are **little-endian**, and value runs frequently begin on
+**odd (unaligned) byte offsets** — a property that defeats naive aligned scans.
+Throughout the parser, byte offsets are 0-based to match the layout; the helpers
+in `R/utils-bytes.R` convert to R's 1-based indexing.
+
+## The geography index
+
+Per-geography *page directories* begin at byte `37167` with a stride of
+`0x1000` (4096 bytes). Directory `n` (0-based) is geography **Member ID `n + 1`**
+in the StatCan metadata — i.e. geographies are in member order.
+
+> **Gotcha.** The directories are grouped 8 to a `0x8000` region (288 entries
+> used per `0x1000` slot, the rest zero-padded). Striding by `0x8000` instead of
+> `0x1000` silently reads only every 8th geography — 21 of 166. This was the
+> original bug; the correct stride is `0x1000`.
+
+Each directory holds up to 288 entries of `[u32 offset][u16 size][u16 size]`
+(the two size fields are equal; an entry is valid when they agree and the offset
+lands in the data region). The 288 entries are **positional** over the three
+outermost inner dimensions:
+
+```
+age    = k %/% 32          # k = 0-based entry index
+hh     = (k %/% 2) %% 16   # household type
+window = k %% 2            # 0 -> Period 0..7, 1 -> Period 8..12
+```
+
+```{r}
+# canivt exposes the geography count and member-order mapping internally;
+# the codebook gives the human labels and the canonical DGUID per geography:
+meta <- ivt_metadata(path)
+head(data.frame(member_id = meta$geographies$member_id,
+                name      = meta$geographies$name,
+                dguid     = meta$geographies$dguid))
+```
+
+## A data page
+
+Each directory entry points at a *page*:
+
+```
+[4-byte header][presence bitmap (256 bytes)][dense value array]
+```
+
+The first header byte encodes the value layout:
+
+* low nibble `0x4` → `int32` cells, `0x2` → `int16` cells;
+* high nibble `0x8` → values follow the presence bitmap directly, `0xa` → a
+  `0xFF` separator run plus a 2-byte prefix precede the values.
+
+So `84` = int32/plain, `a4` = int32/sep, `a2` = int16/sep, `82` = int16/plain.
+Large geographies (big counts) use int32; small ones use int16.
+
+## Presence bitmap
+
+The 256-byte bitmap says which of the inner cells are stored. It is a
+**positional, dimension-padded** map:
+
+* 32-byte rows = one Period (row `r` → period `window*8 + r`);
+* within a row, Statistics occupy 8-byte blocks at `stat*8` (the 4th stat slot
+  is padding);
+* within a block, Housing indicators 0..5 are used (6, 7 are padding) — **but the
+  two bytes of each adjacent housing pair are stored byte-swapped**, so the
+  presence byte for housing `h` is read at `stat*8 + bitwXor(h, 1)`;
+* each presence byte's bits 7..1 flag Tenure members 0..6 (bit 0 is padding).
+  `0xFE` therefore means "all 7 tenure values present", and `popcount(byte)` is
+  the number of values stored for that group.
+
+```{r, eval = TRUE}
+# bits 7..1 of 0xFE flag the 7 tenure members; bit 0 is padding
+present <- bitwAnd(bitwShiftR(0xFE, 7:1), 1L)
+present
+#> [1] 1 1 1 1 1 1 1
+```
+
+## Value codec
+
+Values are stored **densely over the present cells** (zeros omitted), as
+unaligned little-endian integers of the page's width, in plain
+`(period, stat, housing, tenure)` order. Only the presence *bytes* are
+pair-swapped — the value stream is not. To decode a page you walk the groups
+period-outer → stat → housing-inner, and within each present group emit tenure
+`t = 0..6` for the set bits (`t` uses bit `7 - t`), reading one integer per set
+bit.
+
+A useful generalisation (it also holds for the 1991 census IVTs): the presence
+granularity is the innermost dimension, the "all present" marker is `2^n − 2`
+over that bit width (Tenure `n = 7` → `0xFE`), and the bitmap is padded to fixed
+per-dimension strides.
+
+```{r}
+# read_ivt() applies the codec to every page of every geography; the result is
+# a long tibble of one value per row, keyed by 1-based member ids:
+head(tab$cells)
+```
+
+## The codebook: labels, geographic ids, footnotes
+
+The end of the file holds the codebook. For each dimension it stores several
+parallel, **member-ordered** arrays of length-prefixed ("Pascal": one length
+byte then that many text bytes, `0x00`-separated) **latin-1** strings:
+
+* member ordinals, then the member **name** in English, then French;
+* for Geography additionally: the level name, abbreviations, the classification
+  code, and the full **DGUID** (`2021A000011124` = Canada, `2021A000210` =
+  Newfoundland and Labrador, …) — the canonical geographic identifier, aligned
+  with the geography index order.
+
+Member names carry **leading-space indentation** that encodes the member
+hierarchy (`Owner` → `  With mortgage`). `canivt` keeps the raw label and can
+report the implied depth.
+
+```{r}
+# labelled, tidy long table (joins cells to the codebook)
+ivt_tidy(tab)
+
+# export the non-table metadata (members, geographies, footnotes, identity)
+ivt_write_metadata(tab, "98100241_metadata")
+```
+
+Footnotes use a looser framing than the member arrays; `canivt` extracts them
+best-effort by anchoring on the `Footnote N` (English) and `Renvoi N` (French)
+markers:
+
+```{r}
+str(meta$footnotes[[1]])
+```
+
+## How `canivt` maps to the format
+
+| Region | Function(s) | Source file |
+|--------|-------------|-------------|
+| Header identity & dimension names | `ivt_metadata()` | `R/codebook.R` |
+| Geography index / page directory | (internal) `read_ivt()` | `R/container.R` |
+| Page presence + value codec | (internal) `read_ivt()` | `R/decode.R` |
+| Codebook labels, DGUIDs, footnotes | `ivt_metadata()` | `R/codebook.R` |
+| Tidy / write outputs | `ivt_tidy()`, `ivt_write_*()` | `R/read.R`, `R/write.R` |
+
+## Validation
+
+The parser is validated against the StatCan CSV download for the reference table:
+all 166 geographies, every DGUID present, dimension member counts
+`166, 9, 16, 13, 3, 6, 7`, 7,489,464 decoded cells, and Canada's published tenure
+totals `14687350, 9787420, 5870875, 3916550, 4899925, 576625, 4323300`.
+
+## Other format variants
+
+The 1991 census Beyond 20/20 files are the same container *family* with
+different constants (page marker `82 01 80 08`, 1-byte note lengths, geography
+codes inline in the label as `"(code)"`, presence keyed to Sex). They are **not**
+yet supported; `read_ivt()` rejects unrecognised files. See
+`system.file("notes/ivt-format.md", package = "canivt")` for the full spec,
+including what differs for 1991.
