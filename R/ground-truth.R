@@ -121,12 +121,34 @@ ivt_gt_fixed_dims <- function(doc) {
 }
 
 # Parse the displayed data table into a tidy tibble (one row per cell), folding
-# in the fixed-dimension state and the geography.
+# in the fixed-dimension state and the geography. Dispatches on viewer layout:
+# the crosstab viewer tags each cell with a `[Row N: …] [Column M: …]` title; the
+# profile viewer (`/profiles/Rp-eng.cfm`) lists one characteristic per row with a
+# single value column and no cell titles.
 ivt_gt_parse_table <- function(doc) {
   tab <- rvest::html_element(doc, "table#tabulation")
   if (length(tab) == 0L || inherits(tab, "xml_missing")) {
     cli::cli_abort("No data table (table#tabulation) found; the viewer URL or pivot state may be wrong.")
   }
+  if (length(rvest::html_elements(tab, "td[title^='[Row']"))) {
+    ivt_gt_parse_crosstab(doc, tab)
+  } else {
+    ivt_gt_parse_profile(doc, tab)
+  }
+}
+
+# Geography for the current page: the selected d0/GID option (gid + label).
+ivt_gt_selected_geo <- function(doc) {
+  geo <- ivt_gt_geographies(doc)
+  sel_gid <- rvest::html_attr(
+    rvest::html_element(doc, "select#d0 option[selected], select[name='GID'] option[selected]"),
+    "value")
+  list(gid = sel_gid, label = geo$label[match(sel_gid, geo$gid)])
+}
+
+# Crosstab layout: 2 displayed dims (member labels/positions in cell titles) plus
+# the geography and any fixed dimensions.
+ivt_gt_parse_crosstab <- function(doc, tab) {
   row_dim <- trimws(rvest::html_text2(rvest::html_element(tab, "th#col-0")))
   col_dims <- rvest::html_elements(tab, "th[id^='colgroup-']")
   col_dim <- paste(trimws(rvest::html_text2(col_dims)), collapse = " | ")
@@ -137,7 +159,7 @@ ivt_gt_parse_table <- function(doc) {
     "\\[Row ([0-9]+): (.*?)\\] \\[Column ([0-9]+): (.*?)\\]", title))
   ok <- lengths(m) == 5L
   m <- m[ok]; cells <- cells[ok]
-  if (!length(m)) cli::cli_abort("Could not parse any data cells from the table.")
+  if (!length(m)) cli::cli_abort("Could not parse any data cells from the crosstab.")
 
   n <- length(m)
   row_id  <- as.integer(vapply(m, `[`, "", 2))
@@ -146,18 +168,11 @@ ivt_gt_parse_table <- function(doc) {
   col_lab <- trimws(vapply(m, `[`, "", 5))
   value   <- ivt_gt_parse_value(rvest::html_text2(cells))
 
-  # geography (selected d0 option)
-  geo <- ivt_gt_geographies(doc)
-  sel_gid <- rvest::html_attr(
-    rvest::html_element(doc, "select#d0 option[selected], select[name='GID'] option[selected]"),
-    "value")
-  sel_lab <- geo$label[match(sel_gid, geo$gid)]
+  g <- ivt_gt_selected_geo(doc)
   fx <- ivt_gt_fixed_dims(doc)
-
-  # unique slugs for every dimension column (row, col, each fixed dim)
   slugs <- ivt_gt_unique_slugs(c(row_dim, col_dim, fx$name))
 
-  cols <- list(gid = rep(sel_gid, n), geo = rep(sel_lab, n))
+  cols <- list(gid = rep(g$gid, n), geo = rep(g$label, n))
   cols[[slugs[1]]] <- row_lab
   cols[[paste0(slugs[1], "_id")]] <- row_id
   cols[[slugs[2]]] <- col_lab
@@ -169,6 +184,38 @@ ivt_gt_parse_table <- function(doc) {
   }
   cols$value <- value
   tibble::as_tibble(cols)
+}
+
+# Profile layout: one geography per page; each body row is a characteristic
+# (`th[scope=row]`, often prefixed with its StatCan line code) and a single value
+# `td`. The characteristic dimension is named `values` to match the binary's
+# leading "Values" dimension; `values_id` is the 1-based row position (the join
+# key), `values_code` the StatCan line number when present.
+ivt_gt_parse_profile <- function(doc, tab) {
+  rows <- rvest::html_elements(tab, "tbody tr")
+  th <- lapply(rows, function(r) rvest::html_element(r, "th[scope='row']"))
+  td <- lapply(rows, function(r) rvest::html_element(r, "td"))
+  keep <- !vapply(th, inherits, logical(1), "xml_missing") &
+          !vapply(td, inherits, logical(1), "xml_missing")
+  rows <- rows[keep]; th <- th[keep]; td <- td[keep]
+  if (!length(rows)) cli::cli_abort("Could not parse any data cells from the profile.")
+
+  label_raw <- trimws(vapply(th, rvest::html_text2, ""))
+  code <- suppressWarnings(as.integer(sub("^([0-9]+)\\b.*$", "\\1", label_raw)))
+  has_code <- grepl("^[0-9]+\\b", label_raw)
+  code[!has_code] <- NA_integer_
+  label <- ifelse(has_code, trimws(sub("^[0-9]+\\b", "", label_raw)), label_raw)
+  value <- ivt_gt_parse_value(vapply(td, rvest::html_text2, ""))
+
+  g <- ivt_gt_selected_geo(doc)
+  n <- length(rows)
+  tibble::as_tibble(list(
+    gid = rep(g$gid, n), geo = rep(g$label, n),
+    values = label,
+    values_id = seq_len(n),
+    values_code = code,
+    value = value
+  ))
 }
 
 # Slug a set of dimension names and disambiguate any collisions.

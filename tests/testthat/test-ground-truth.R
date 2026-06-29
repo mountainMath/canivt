@@ -52,3 +52,22 @@ test_that("the viewer table parses into a tidy ground-truth tibble", {
   supp <- gt[gt$single_id == 2 & gt$region_id == 2, ]
   expect_true(is.na(supp$value))
 })
+
+test_that("the profile viewer layout parses into a tidy ground-truth tibble", {
+  skip_if_not_installed("rvest")
+  skip_if_not_installed("xml2")
+  doc <- xml2::read_html(test_path("fixtures", "viewer-profile.html"))
+
+  gt <- ivt_gt_parse_table(doc)   # dispatches to the profile parser
+  expect_equal(names(gt),
+               c("gid", "geo", "values", "values_id", "values_code", "value"))
+  expect_equal(nrow(gt), 3L)
+  expect_true(all(gt$gid == "183084"))
+  expect_true(all(gt$geo == "St. John's"))
+  # StatCan line code parsed off the label; position is the join key
+  expect_equal(gt$values_code, c(101L, 102L, NA))
+  expect_equal(gt$values_id, 1:3)
+  expect_equal(gt$values[1], "Total population (100% data)")
+  expect_equal(gt$value[1], 171859)
+  expect_true(is.na(gt$value[3]))   # ".." suppression
+})
