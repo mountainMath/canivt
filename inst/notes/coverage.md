@@ -112,13 +112,17 @@ Regression-guarded in `tests/testthat/test-formats.R`.
 
 Files in the test corpus that are currently unsupported:
 
-- [~] **Profile tables** (`98F0172X`, `95F0170X`): **layout cracked, not yet
-  wired.** 2-D Geography × Values profiles; value stream is **characteristic-major,
-  geography-minor** (int32/int16 `84`/`82`). For 98F0172X the 4,063 geographies
-  decode exactly today (`ivt_f2_geo_inline()`) and the values are confirmed exact
-  vs the HTML profile-viewer ground truth (St. John's char 101 = 171,859).
-  Remaining: a characteristic-major page reader + directory-scan rework + Values-count from
-  the type-`0x01` descriptor. See `unsupported-formats.md` §2.
+- [~] **Profile tables** (`98F0172X`, `95F0170X`): **structure largely cracked, not
+  yet wired.** 2-D Geography × Values; value order **characteristic-major,
+  geography-minor**. For 98F0172X: 4,063 geographies decode exactly today
+  (`ivt_f2_geo_inline()`); values confirmed exact vs the HTML profile-viewer ground
+  truth (St. John's char 101 = 171,859); the **full page directory** is located
+  (header `u16@558`=1936, 1,046 contiguous records tiling 100 % of the value
+  region). Pages are a **hybrid**: dense `0x0_` (`[b0][01][count]`+values) and
+  sparse `0x8_` (presence-bitmap + values + trailer, the container we already
+  decode). Open: the grid is **non-rectangular** (Σcount=2,222,304 not a multiple of
+  4063/529) — likely geography-level-dependent characteristic sets — plus the
+  Values count/order from the type-`0x01` descriptor. See `unsupported-formats.md` §2.
 - [ ] **Other "F"-series** (`97F0015XCB2001041`, `97F0020XCB2001070`): 2001-era
   crosstabs. `inline_geo` header flag varies; descriptor layout differs;
   `97F0020X` has no locatable page directory. Served by StatCan's legacy `www12`

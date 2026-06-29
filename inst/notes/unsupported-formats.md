@@ -53,20 +53,42 @@ HTML ground truth (the new profile scraper, `/profiles/Rp-eng.cfm`).
     doubled-name record `…01 01 "ValuesValues" 11 02 0a 01 "Profile of…"`. Values
     is **type `0x01`** (not in `IVT_F2_DESC_TYPES`; `01 01` also frames blocks, so
     the modern marker scan can't be trusted here). `n_dim@+16` reads garbage (770).
-  - **Value container**: int dialect — page markers `84` (int32) / `82` (int16).
-    **Within a page the values are a single characteristic across consecutive
-    geographies in inline-codebook member order** (verified: file offset 315512 →
+  - **Value order**: **characteristic-major, geography-minor** — within a value run
+    the values are a single characteristic across consecutive geographies in
+    inline-codebook member order (verified: file offset 315512 →
     `171859, 5850, 4391, 3288, 1971, …` = char 101 for members 3808, 3809, 3810…
     = St. John's CMA then its CTs; cross-checked exact vs the scraped char-101
-    values). St. John's char 102 (169810) sits in a separate, adjacent ~16.4 KB
-    block (≈ 4063 × 4 + page overhead), so characteristic blocks are contiguous
-    runs of the geography array.
-  - **Blockers remaining for a full decode**: (a) `ivt_f2_find_directory()`
-    under-detects — it finds 68 small early pages (103624–250324) and misses the
-    rest (St. John's data is at 315512+, past them); the directory anchor/scan
-    needs reworking for this layout. (b) the decoder is geography-major; it needs a
-    **characteristic-major page model** (and a per-page geo-range / value-count).
-    (c) read the Values count/order from the descriptor (type-`0x01` dialect).
+    values).
+  - **Full page directory located** (2026-06): it is at the header pointer
+    `u16@558 = 1936` and has **1,046 contiguous 8-byte records**
+    `[u32 off][u16 size][u16 size]` whose offsets+sizes tile the value region
+    **100 %** (103624 → 7,306,856; Σsizes = span, zero gaps). The current
+    `ivt_f2_find_directory()` finds only 68 because (a) the hard-coded `off < 1e5`
+    floor rejects the next valid record and (b) `ivt_f2_is_marker()` only accepts
+    page byte0 ∈ {82,84,88,a2,a4,a8} and so rejects this file's `0x0_` pages.
+  - **Two page families**, by the byte0 high nibble (low nibble = value width:
+    2→int16, 4→int32, 8→float64):
+    - **Dense `0x02/04/08`** (196+10+16 pages): header `[b0][01][count_u16]` then
+      `count` values, no presence/trailer (payload = count × width exactly, e.g.
+      `04 01 00 08` = int32 × 2048 = 8192-byte payload). St. John's page is `0x04`.
+    - **Sparse `0x82/84/88`** (441+325+58 pages): the **same presence-bitmap +
+      values + trailer framing as the geography-major container we already decode**
+      (e.g. `84 01 40 08  bf ef f7 ff …` — the `bf ef f7…` is the presence bitmap).
+  - **Blockers remaining for a full decode**: (a) generalise the directory reader
+    to the full 1,046-record table (drop the `1e5` floor; accept `0x0_` page
+    byte0) **without regressing** the geography-major tables that the shared finder
+    serves. (b) Decode the **hybrid** page set: dense `0x0_` pages give `count`
+    values directly; sparse `0x8_` pages need the presence-bitmap path. (c) Recover
+    the **page → (characteristic, geo-range) mapping**: page headers carry no
+    coordinate, so the assignment is implicit in page (offset) order. **The grid is
+    not a clean rectangle**: Σ(count over all 1,046 pages) = **2,222,304**, which is
+    **not** divisible by 4063 (=546.96) nor by 529 — so it is not a simple
+    characteristic-major × 4063-geography array. The likely cause is a
+    geography-level-dependent characteristic set (e.g. CMA-level vs CT-level
+    geographies carry different profiles), or per-group sub-blocks; this
+    non-rectangular grouping is the main unknown left. (The flat all-dense
+    reconstruction also conflates the sparse `0x8_` pages, whose `count` is the
+    cell total, not the stored-value count.)
 - **`95F0170X`** (1991 profile, "Census Divisions and Subdivisions - Part B"):
   legacy out-of-line titles (`@40`/`@48` set, like 1003011); marker `84` int32;
   `find_directory` returns only 1 page (under-detected — same directory-scan
@@ -103,17 +125,20 @@ for the sub-header, then walk records by the doubled-name delimiter.
    descriptor (3 dims) and a **per-page** geo count are read, the existing
    n-dimensional `ivt_f2_decode()` should apply. Validate cell totals against the
    header's `[228,304 cells]` and spot-check against CensusMapper (BC CSDs).
-2. **`98F0172X`** (profile, int container): **model cracked** (Geography × Values,
-   characteristic-major; geography codebook already decodes; values confirmed
-   exact vs HTML ground truth). Remaining build: a characteristic-major page
-   reader + directory-scan rework + Values count from the type-`0x01` descriptor.
-   `95F0170X` follows for free once this is done.
+2. **`98F0172X`** (profile): geography + values + full directory + page formats all
+   decoded; geographies and spot values confirmed exact vs HTML ground truth.
+   Remaining: the **non-rectangular page → grid mapping** (Σcount not a clean
+   multiple of the geography count) and the hybrid dense/sparse page assembly.
+   `95F0170X` is the same family.
 3. The rest need their container located first.
 
 ## Status
 
-`98F0172X`/`95F0170X` (profile family) are **characterised** — layout cracked and
-spot-validated against HTML ground truth, but no decoder wired yet. The others are
-reconnaissance only. All are correctly rejected by `ivt_is_supported()` (no
-crash). `ord-08035` remains the cleanest crosstab target (reuses the 98-10-0023
-value container); `98F0172X` is the cleanest profile target.
+`98F0172X`/`95F0170X` (profile family) are **largely characterised** — geography,
+values, the full 1,046-record directory, and both page formats (dense `0x0_` /
+sparse `0x8_`) are decoded, and geographies + spot values validate exact against
+HTML ground truth. **Not wired**: the page→grid mapping is non-rectangular and
+still unsolved, and generalising the shared directory finder must not regress the
+working tables. The others are reconnaissance only. All are correctly rejected by
+`ivt_is_supported()` (no crash). `ord-08035` remains the cleanest crosstab target
+(reuses the 98-10-0023 value container); `98F0172X` is the cleanest profile target.
