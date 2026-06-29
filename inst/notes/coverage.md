@@ -112,10 +112,17 @@ Regression-guarded in `tests/testthat/test-formats.R`.
 
 Files in the test corpus that are currently unsupported:
 
-- [ ] **"F"-series** (`95F0170X`, `97F0015XCB2001041`, `97F0020XCB2001070`,
-  `98F0172X`): 1995/2001-era products. `inline_geo` header flag varies; descriptor
-  layout differs. Served by StatCan's legacy `www12` dynamic system, not the modern
-  b2020 endpoint.
+- [~] **Profile tables** (`98F0172X`, `95F0170X`): **layout cracked, not yet
+  wired.** 2-D Geography × Values profiles; value stream is **characteristic-major,
+  geography-minor** (int32/int16 `84`/`82`). For 98F0172X the 4,063 geographies
+  decode exactly today (`ivt_f2_geo_inline()`) and the values are confirmed exact
+  vs the HTML profile-viewer ground truth (St. John's char 101 = 171,859).
+  Remaining: a characteristic-major page reader + directory-scan rework + Values-count from
+  the type-`0x01` descriptor. See `unsupported-formats.md` §2.
+- [ ] **Other "F"-series** (`97F0015XCB2001041`, `97F0020XCB2001070`): 2001-era
+  crosstabs. `inline_geo` header flag varies; descriptor layout differs;
+  `97F0020X` has no locatable page directory. Served by StatCan's legacy `www12`
+  dynamic system, not the modern b2020 endpoint.
 - [ ] **1981 census** (`97-570-X1981002`): older still; descriptor undecoded.
 - [ ] **Custom CT / "cro"/"ord" extracts** (`cro0172986_ct.*-2006-*`,
   `ord-08035-…_ct.1-2021-population`): Beyond 20/20 desktop exports (not StatCan

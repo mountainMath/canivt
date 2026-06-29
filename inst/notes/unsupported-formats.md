@@ -38,14 +38,39 @@ value container** as 98-10-0023 (page markers `88`/`a8` float64, `a2` int16).
 
 ### 2. Profile tables (`"Values"` dimension) — family-2 int container
 
-- **`98F0172X`** (2001): value container present — 68 pages, markers `82` int16 /
-  `84` int32 (the 1991/1003011 int dialect). First dim is **`Values`** (a profile
-  of 32 characteristics). `n_dim@+16` reads garbage (770), so the descriptor's
-  dimension count lives at a different offset for this layout.
+Layout **cracked** (2026-06): these are 2-D **Geography × Values** profiles whose
+value stream is **characteristic-major, geography-minor** — the transpose of the
+geography-major model the current decoder assumes. Confirmed cell-exact against
+HTML ground truth (the new profile scraper, `/profiles/Rp-eng.cfm`).
+
+- **`98F0172X`** (1991 "Profile of Census Tracts - Part B"):
+  - **Geography**: 4,063, decoded **exactly** today by `ivt_f2_geo_inline()`
+    (legacy inline `"name (GEOUID) flag"` codebook; member 3808 = "St. John's",
+    3809 = "St. John's - 002", …). Header `@40`/`@48` titles set ⇒ inline route.
+  - **Values dimension**: ~529 characteristics, each tagged by a StatCan line code
+    (101, 102, 201, …, 3813) — read straight from the profile viewer rows.
+  - **Descriptor** `@32 = 1511`: sub-header `81 01 20 00  f0 28 00 80`, then a
+    doubled-name record `…01 01 "ValuesValues" 11 02 0a 01 "Profile of…"`. Values
+    is **type `0x01`** (not in `IVT_F2_DESC_TYPES`; `01 01` also frames blocks, so
+    the modern marker scan can't be trusted here). `n_dim@+16` reads garbage (770).
+  - **Value container**: int dialect — page markers `84` (int32) / `82` (int16).
+    **Within a page the values are a single characteristic across consecutive
+    geographies in inline-codebook member order** (verified: file offset 315512 →
+    `171859, 5850, 4391, 3288, 1971, …` = char 101 for members 3808, 3809, 3810…
+    = St. John's CMA then its CTs; cross-checked exact vs the scraped char-101
+    values). St. John's char 102 (169810) sits in a separate, adjacent ~16.4 KB
+    block (≈ 4063 × 4 + page overhead), so characteristic blocks are contiguous
+    runs of the geography array.
+  - **Blockers remaining for a full decode**: (a) `ivt_f2_find_directory()`
+    under-detects — it finds 68 small early pages (103624–250324) and misses the
+    rest (St. John's data is at 315512+, past them); the directory anchor/scan
+    needs reworking for this layout. (b) the decoder is geography-major; it needs a
+    **characteristic-major page model** (and a per-page geo-range / value-count).
+    (c) read the Values count/order from the descriptor (type-`0x01` dialect).
 - **`95F0170X`** (1991 profile, "Census Divisions and Subdivisions - Part B"):
   legacy out-of-line titles (`@40`/`@48` set, like 1003011); marker `84` int32;
-  `find_directory` returns only 1 page (likely under-detected — the directory
-  anchor/scan needs adjusting for this layout).
+  `find_directory` returns only 1 page (under-detected — same directory-scan
+  blocker as 98F0172X). Same profile family; decode once 98F0172X is solved.
 
 ### 3. Older / other — container not located
 
@@ -78,12 +103,17 @@ for the sub-header, then walk records by the doubled-name delimiter.
    descriptor (3 dims) and a **per-page** geo count are read, the existing
    n-dimensional `ivt_f2_decode()` should apply. Validate cell totals against the
    header's `[228,304 cells]` and spot-check against CensusMapper (BC CSDs).
-2. **`98F0172X`** (profile, int container): need the profile descriptor offset and
-   the `Values`-dimension member list; value container is the `82`/`84` dialect we
-   already decode.
+2. **`98F0172X`** (profile, int container): **model cracked** (Geography × Values,
+   characteristic-major; geography codebook already decodes; values confirmed
+   exact vs HTML ground truth). Remaining build: a characteristic-major page
+   reader + directory-scan rework + Values count from the type-`0x01` descriptor.
+   `95F0170X` follows for free once this is done.
 3. The rest need their container located first.
 
 ## Status
 
-Reconnaissance only — none decoded yet. They are correctly rejected (no crash).
-Cracking them is future work; `ord-08035` is the recommended starting point.
+`98F0172X`/`95F0170X` (profile family) are **characterised** — layout cracked and
+spot-validated against HTML ground truth, but no decoder wired yet. The others are
+reconnaissance only. All are correctly rejected by `ivt_is_supported()` (no
+crash). `ord-08035` remains the cleanest crosstab target (reuses the 98-10-0023
+value container); `98F0172X` is the cleanest profile target.
