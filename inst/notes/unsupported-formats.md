@@ -29,6 +29,21 @@ value container** as 98-10-0023 (page markers `88`/`a8` float64, `a2` int16).
   - **Blocker C:** 751 geographies / 44 pages is **not** uniform (≈17.07), so
     geos-per-page is non-uniform — the decoder's `geo_count / n_pages` assumption
     needs a per-page presence-section length instead.
+  - **Blocker D (NEW, 2026-06 hands-on):** the "reuses the 98-10-0023 container
+    exactly" assumption does **not** hold on inspection. The descriptor parses
+    cleanly (`81 01 20 00 f0 20 00 80`, `n_dim@+8 = n_dim@+16 = 3`, dims in order
+    **Geography(0x0a) · Characteristics · Tenure**) and the full directory reads
+    (44 records). But the value **pages do not contain a recognisable float64
+    value run**: page 1 (`a8 01 81 08`, 8214 B) is `ee ee …`-style presence bytes
+    at the head and a long uniform `11 11 11 …` run at the tail, with **no**
+    plausible population float64 anywhere, and the page-size equation
+    `4 + 64·G + trailer + width·Σpopcount == size` has **no integer solution** for
+    any G on any page (0/44). So the per-geography record size (assumed 64 B from
+    `nextpow2(76·4)=512`) and/or the value encoding differ from 98-10-0023; the
+    container is **not** a drop-in. Decoding needs the page body re-RE'd from
+    scratch (the `ee`/`11` byte patterns suggest the whole page may be bit-packed
+    rather than presence-then-values). Geography type here is `0x0a`, not the `0x04`
+    the earlier note guessed.
 - **`97F0020XCB2001070` (2001 F-series crosstab)** — `@32 = 17836` *does* point at
   the descriptor (`n_dim = 5`); records are
   `[lead][count u8/u16][type][01][doubled name]`, e.g. Geography type `0x04`
@@ -121,24 +136,30 @@ for the sub-header, then walk records by the doubled-name delimiter.
 
 ## Decode path, by tractability
 
-1. **`ord-08035`** (2021 CT): same value container as 98-10-0023, so once the
-   descriptor (3 dims) and a **per-page** geo count are read, the existing
-   n-dimensional `ivt_f2_decode()` should apply. Validate cell totals against the
-   header's `[228,304 cells]` and spot-check against CensusMapper (BC CSDs).
-2. **`98F0172X`** (profile): geography + values + full directory + page formats all
-   decoded; geographies and spot values confirmed exact vs HTML ground truth.
-   Remaining: the **non-rectangular page → grid mapping** (Σcount not a clean
-   multiple of the geography count) and the hybrid dense/sparse page assembly.
-   `95F0170X` is the same family.
+1. **`98F0172X`** (profile): geography + values + full 1,046-record directory +
+   both page formats decoded; geographies and spot values confirmed exact vs HTML
+   ground truth. Remaining: the **non-rectangular page → grid mapping** (Σcount not
+   a clean multiple of the geography count) and the hybrid dense/sparse assembly.
+   `95F0170X` is the same family. (Closest to a decode, but the grouping is unsolved.)
+2. **`ord-08035`** (2021 CT): descriptor + directory decode, **but the value pages
+   are not the 98-10-0023 container** after all (no float64 value run; page-size
+   equation unsolved on every page — see Blocker D). Needs the page body RE'd from
+   scratch.
 3. The rest need their container located first.
 
 ## Status
 
-`98F0172X`/`95F0170X` (profile family) are **largely characterised** — geography,
-values, the full 1,046-record directory, and both page formats (dense `0x0_` /
-sparse `0x8_`) are decoded, and geographies + spot values validate exact against
-HTML ground truth. **Not wired**: the page→grid mapping is non-rectangular and
-still unsolved, and generalising the shared directory finder must not regress the
-working tables. The others are reconnaissance only. All are correctly rejected by
-`ivt_is_supported()` (no crash). `ord-08035` remains the cleanest crosstab target
-(reuses the 98-10-0023 value container); `98F0172X` is the cleanest profile target.
+**Hands-on hex analysis (2026-06) revised the earlier optimistic recon downward**:
+both "tractable" targets are harder than the strings-level survey implied.
+
+- `98F0172X`/`95F0170X` (profile): geography, values, the full 1,046-record
+  directory, and both page formats (dense `0x0_` / sparse `0x8_`) are decoded, and
+  geographies + spot values validate exact vs HTML ground truth — but the
+  **page→grid mapping is non-rectangular and unsolved**, so no cell decode yet.
+- `ord-08035` (CT): descriptor + directory decode, but the **value-page body is a
+  different (un-RE'd) encoding** — not a drop-in for the existing decoder.
+
+No new decoder is wired; doing so would be either incorrect or risk regressing the
+shared directory finder. All files remain correctly rejected by
+`ivt_is_supported()` (no crash). These each need further dedicated reverse-
+engineering; the profile family (`98F0172X`) is the closest to done.
