@@ -371,8 +371,8 @@ ivt_f2_check_geo_count <- function(raw, got) {
 #'
 #' Single metadata-driven entry point that consolidates the two codebook layouts:
 #' it reads the layout flag and the declared geography count from the file header,
-#' dispatches to the modern DGUID attribute parser ([ivt_f2_geo_attributes()]) or
-#' the pre-DGUID inline parser ([ivt_f2_geo_inline()]), validates the row count
+#' dispatches to the modern DGUID attribute parser (`ivt_f2_geo_attributes()`) or
+#' the pre-DGUID inline parser (`ivt_f2_geo_inline()`), validates the row count
 #' against the header, and returns a tibble whose leading columns are always
 #' `member_id`, `geo_name` and `geo_uid` (the DGUID for 2016+ tables, the bare
 #' GEOUID for older ones), followed by any layout-specific attribute columns.
