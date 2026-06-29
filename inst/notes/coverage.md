@@ -56,7 +56,74 @@ copy of each attribute and parse past the rest.
   gender-type — inferred, not proven).
 - [?] Page-marker bytes `b2` (`0x20`/`0x41`/`0x03`) and `b3` (`08`/`09`); only the
   value-width low nibble of `b0` is understood.
-- [?] The marker-specific `0xFF` **trailer length** (264/270/294) — positional.
+- [x] The marker-specific pad/`0xFF` **trailer length** is now tabulated per
+  marker (`IVT_F2_PAGE_TRAILER`: 4/10/34/18/8/16) and the value-run start derived
+  as `4 + presence_len + trailer`. Still *positional* (we do not know why each
+  marker has its particular trailer), but no longer a decode gap.
+
+## [x] Decoder generality — arbitrary-dimension family-2 (DONE)
+
+The family-2 cell decoder is now **n-dimensional**, driven entirely by the header
+descriptor, and validated cell-exact on the 4-dimension table **98-10-0129**
+(Geography × Gender × Marital status × Age): the full 15,685,859 non-zero cells
+decode in ~3 s, with **120/120** sampled geographies and **all 28 `0xa4`-marker
+geographies** an exact match vs the StatCan CSV; the 3-dim tables (98-10-0023,
+1003011) still decode exact (regression-green).
+
+- [x] **Geographies per page is computed** = geography member count / page count
+  (4 for the 3-dim tables, **2** for 98-10-0129). `ivt_f2_geos_per_page()`.
+- [x] **Presence is a power-of-two-nested positional bitmap** over the data
+  dimensions (descriptor order, outermost first; each level padded to the next
+  power of two of count × inner-block; innermost in the low bits). Byte-pair-
+  swapped, read **MSB-first**. The old "128 Age nibbles × 3 Gender bits" is the
+  special case (Gender→4 bits, Age→512 → 64-byte record). 98-10-0129 →
+  strides 256/16/1, 128-byte record. `ivt_f2_bit_layout()` / `ivt_f2_cell_grid()`.
+- [x] **Marker `0xa4`** (int32) added: trailer **18** → values inline at off+278.
+  (It is *not* a "separator" layout — the value run is contiguous; the trailing
+  `0xAAAAAAAA` slots are pad after the run.)
+- [x] **Value-run start generalised** to `4 + presence_len + trailer[marker]`
+  (`presence_len = rec_bytes × geos_per_page`), reproducing the validated absolute
+  starts and adapting to any record size. `IVT_F2_PAGE_TRAILER`.
+- [x] **Geography count** comes from the descriptor's geography record
+  (`ivt_f2_geo_count()`); the fixed-offset `ivt_f2_header_geo_count()` u16 reads a
+  wrong 16320 for 4-dim descriptors and is no longer used for sizing.
+
+### Note: the `0xa` marker variant and empty geographies
+
+`0xa` vs `0x8` in the marker's high nibble is purely a **storage variant** (a
+longer pad/`0xFF` trailer before the still-inline value run), **not** a data-
+suppression flag: `0xa2`/`0xa4`/`0xa8` pages carry real data that decodes
+cell-exact. **All-zero geographies** (an empty presence record) do occur — listed
+for completeness with no data in this table — but that is a per-geography property
+(the CSV publishes them as all-zero) and appears on both `0x8` and `0xa` pages,
+sometimes right beside a data-rich geography on the same page.
+
+## [ ] Other Beyond 20/20 products that share the signature but are undecoded
+
+Several other `.ivt` products share the `04 00 20 00` signature and even expose a
+page-directory-like structure, but their **header descriptor is a different,
+undecoded layout**: `ivt_f2_descriptor()` reads a garbage dimension count
+(hundreds/thousands) and recovers zero data dimensions. They are now **detected as
+unsupported** (`ivt_family()` returns `NA`, `ivt_is_supported()` is `FALSE`) and
+`read_ivt()`/`ivt_metadata()` abort with a clear message — previously they passed
+the loose family-2 gate and crashed the decoder with `argument of length 0`. The
+fix is the `ivt_f2_decodable()` check (plausible `n_dim`, ≥1 sized data dimension).
+Regression-guarded in `tests/testthat/test-formats.R`.
+
+Files in the test corpus that are currently unsupported:
+
+- [ ] **"F"-series** (`95F0170X`, `97F0015XCB2001041`, `97F0020XCB2001070`,
+  `98F0172X`): 1995/2001-era products. `inline_geo` header flag varies; descriptor
+  layout differs. Served by StatCan's legacy `www12` dynamic system, not the modern
+  b2020 endpoint.
+- [ ] **1981 census** (`97-570-X1981002`): older still; descriptor undecoded.
+- [ ] **Custom CT / "cro"/"ord" extracts** (`cro0172986_ct.*-2006-*`,
+  `ord-08035-…_ct.1-2021-population`): Beyond 20/20 desktop exports (not StatCan
+  table downloads); single-page-ish directories, descriptor undecoded.
+
+Decoding any of these is future work — each likely needs its descriptor/codebook
+layout reverse-engineered. The container detection and value-page machinery may
+carry over once the descriptor is understood.
 
 ## [ ] Not parsed at all
 
@@ -77,11 +144,16 @@ copy of each attribute and parse past the rest.
 
 ## Summary
 
-~100 % of information-bearing bytes are identified, and the data plus all
-geography/dimension/footnote metadata decode exactly across all three layouts.
-Remaining gaps, by size: (1) the **French label copies** (~half the codebook,
-fully recoverable, just not surfaced); (2) the **section-pointer table grammar**
-(routed around); (3) a handful of small header/marker bytes with inferred/unknown
-semantics. The only information *missing vs the StatCan metadata* is the
-footnote↔member linkage and the structured member hierarchy — both possibly absent
-from the binary and present only in the companion metadata CSV.
+For the **reference tables** (family 1: 98-10-0241; 3-dim family 2: 98-10-0023;
+legacy: 1003011), ~100 % of information-bearing bytes are identified and the data
+plus all geography/dimension/footnote metadata decode exactly. The bit-level gaps
+there, by size: (1) the **French label copies** (~half the codebook, recoverable,
+just not surfaced); (2) the **section-pointer table grammar** (routed around); (3)
+a few small header/marker bytes with inferred/unknown semantics; plus the
+footnote↔member linkage and structured member hierarchy that may be absent from the
+binary.
+
+The family-2 decoder now handles **arbitrary-dimension** tables (validated on the
+4-dim 98-10-0129, cell-exact) in addition to the 3-dim and legacy tables. The
+remaining open item is the **2001/2006 "F"-series** products (97F0015X, 98F0172X),
+not yet decoded — possibly an older B2020 variant; see the section above.

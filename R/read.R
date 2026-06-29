@@ -10,7 +10,9 @@ ivt_family <- function(raw) {
   if (length(raw) < 8L) return(NA_integer_)
   if (!identical(as.integer(raw[1:4]), c(4L, 0L, 32L, 0L))) return(NA_integer_)
   if (length(raw) >= IVT_IDX0 + 16L && ivt_geography_count(raw) > 0L) return(1L)
-  if (!is.null(ivt_f2_find_directory(raw))) return(2L)
+  # family 2 requires both a page directory and a descriptor the decoder can use;
+  # other `04 00 20 00` products expose a directory but an undecoded descriptor.
+  if (!is.null(ivt_f2_find_directory(raw)) && ivt_f2_decodable(raw)) return(2L)
   NA_integer_
 }
 

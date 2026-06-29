@@ -11,7 +11,8 @@ ivt_read_table(pid, dest_dir = NULL, lang = c("en", "fr"), ...)
 trailing version digits are dropped to the 8-digit table id.}
 
 \item{dest_dir}{Directory to download into (created if needed). Defaults to a
-per-table folder in \code{\link[=tempdir]{tempdir()}}.}
+per-table folder under the IVT cache (\link[=ivt_cache_dir]{ivt_cache_dir("ivt")},
+i.e. option \code{canivt.ivt_cache} or \code{\link[=tempdir]{tempdir()}} when unset).}
 
 \item{lang}{\code{"en"} (default) or \code{"fr"} endpoint.}
 

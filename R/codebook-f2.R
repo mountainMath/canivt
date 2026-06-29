@@ -357,7 +357,7 @@ ivt_f2_geo_inline <- function(raw, tail_bytes = 8000000L) {
 # (`ivt_f2_header_geo_count()`), so we never have to trust the parser's own tally:
 # a mismatch means the codebook stitch dropped or duplicated a chunk.
 ivt_f2_check_geo_count <- function(raw, got) {
-  want <- ivt_f2_header_geo_count(raw)
+  want <- ivt_f2_geo_count(raw)
   if (!is.na(want) && !is.na(got) && got != want) {
     cli::cli_warn(c(
       "Decoded {got} geographies but the header declares {want}.",
@@ -456,4 +456,59 @@ ivt_f2_descriptor <- function(raw) {
   title <- regmatches(txt, regexpr("FACET04[^.]*", txt))
   title <- if (length(title)) trimws(sub("FACET04", "", title)) else NA_character_
   list(n_dim = ndim, dims = dims, title = title)
+}
+
+# Geography member count, from the descriptor's geography record (type 0x10).
+# This is reliable for any dimensionality; the fixed-offset u16
+# `ivt_f2_header_geo_count()` is only correct for 3-dimension tables (it reads
+# 16320 instead of 63404 for the 4-dimension 98-10-0129). Falls back to the
+# fixed-offset reader when the descriptor cannot be parsed.
+ivt_f2_geo_count <- function(raw) {
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || !length(d$dims)) return(ivt_f2_header_geo_count(raw))
+  geo <- Filter(function(x) x$type == 0x10L, d$dims)
+  if (!length(geo)) return(ivt_f2_header_geo_count(raw))
+  as.integer(geo[[1]]$count)
+}
+
+# The non-geography data dimensions, in descriptor (outer -> inner) order: their
+# member `counts` (which drive the presence-bitmap nesting and the dense value
+# order) and a short column `slug` for each. The two universal census dimensions
+# get a canonical slug from their descriptor type byte -- 0x02 -> "gender" (the
+# gender/sex-type dimension, whether the table labels it "Gender" or "Sex") and
+# 0x07 -> "age" (the age-type dimension, whose descriptor name is sometimes
+# truncated, e.g. "Single Years of") -- so the column name is stable across
+# tables. Any other dimension takes the lower-cased leading word of its name
+# (e.g. "Marital status" -> "marital"), falling back to "dim<i>"; slugs are made
+# unique. Returns empty vectors when no descriptor.
+ivt_f2_data_dims <- function(raw) {
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || !length(d$dims)) return(list(counts = integer(0), slugs = character(0)))
+  data <- Filter(function(x) x$type != 0x10L, d$dims)
+  if (!length(data)) return(list(counts = integer(0), slugs = character(0)))
+  counts <- vapply(data, `[[`, 1L, "count")
+  slug <- function(dim, i) {
+    if (identical(dim$type, 0x02L)) return("gender")
+    if (identical(dim$type, 0x07L)) return("age")
+    w <- tolower(sub("^[^A-Za-z]*([A-Za-z]+).*$", "\\1", dim$name))
+    if (!nzchar(w) || !grepl("^[a-z]+$", w)) paste0("dim", i) else w
+  }
+  slugs <- vapply(seq_along(data), function(i) slug(data[[i]], i), "")
+  if (anyDuplicated(slugs)) slugs <- make.unique(slugs, sep = "")
+  list(counts = as.integer(counts), slugs = slugs)
+}
+
+# Is this a family-2 file the decoder can actually handle? Several other Beyond
+# 20/20 products (the "F"-series, 1981 census, custom CT extracts) share the
+# `04 00 20 00` signature and even expose a page-directory-like structure, but
+# their header descriptor is a different, undecoded layout: `ivt_f2_descriptor()`
+# then reads a garbage dimension count (hundreds/thousands) and recovers zero data
+# dimensions. Require a plausible descriptor with at least one positively-sized
+# data dimension, so such files are rejected cleanly rather than crashing the
+# decoder on an empty dimension list.
+ivt_f2_decodable <- function(raw) {
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || is.na(d$n_dim) || d$n_dim < 2L || d$n_dim > 32L) return(FALSE)
+  dd <- ivt_f2_data_dims(raw)
+  length(dd$counts) >= 1L && all(!is.na(dd$counts) & dd$counts >= 1L)
 }

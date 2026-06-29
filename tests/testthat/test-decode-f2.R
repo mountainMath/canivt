@@ -2,12 +2,19 @@
 # directory), e.g. StatCan table 98-10-0023 (Age x Gender, down to dissemination
 # areas). Point CANIVT_SAMPLE_IVT_F2 at a copy of 98100023.ivt to run these; they
 # skip otherwise.
+# locate_sample_ivt() lives in helper-samples.R (shared across test files).
 sample_ivt_f2 <- function() {
-  p <- Sys.getenv("CANIVT_SAMPLE_IVT_F2", "")
-  if (nzchar(p) && file.exists(p)) return(p)
-  guess <- path.expand("/tmp/t23/98100023.ivt")
-  if (file.exists(guess)) return(guess)
-  ""
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_F2", "98100023",
+                    legacy = "/tmp/t23/98100023.ivt")
+}
+
+# A 4-dimension family-2 table (98-10-0129: Geography x Gender x Marital status x
+# Age), used to test the n-dimensional decoder (2 geos/page, marker 0xa4, a
+# power-of-two-nested presence bitmap deeper than Age x Gender). Point
+# CANIVT_SAMPLE_IVT_F2_4D at a copy of 98100129.ivt to run; skips otherwise.
+sample_ivt_f2_4d <- function() {
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_F2_4D", "98100129",
+                    legacy = "/tmp/t129/98100129.ivt")
 }
 
 test_that("family-2 files are detected as family 2", {
@@ -164,14 +171,48 @@ test_that("family-2 decodes Canada and a sparse geography cell-exact", {
   expect_equal(head(g44463$value, 8), c(75, 45, 30, 15, 10, 5, 5, 5))
 })
 
+test_that("family-2 decodes a 4-dimension table (98-10-0129) cell-exact", {
+  p <- sample_ivt_f2_4d()
+  skip_if(p == "", "no 4-dim family-2 sample (set CANIVT_SAMPLE_IVT_F2_4D)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+
+  # descriptor-driven layout: 4 dims, 63404 geographies, 2 geos per page
+  expect_equal(ivt_f2_geo_count(raw), 63404L)
+  expect_equal(ivt_f2_geos_per_page(raw), 2L)
+  dd <- ivt_f2_data_dims(raw)
+  expect_equal(dd$counts, c(3L, 13L, 16L))      # Gender x Marital x Age
+  expect_equal(dd$slugs, c("gender", "marital", "age"))
+
+  # power-of-two-nested presence record: Age 16, Marital 13->16 (256 bits),
+  # Gender 3->4 (1024 bits) = 128 bytes
+  lay <- ivt_f2_bit_layout(dd$counts)
+  expect_equal(lay$stride, c(256L, 16L, 1L))
+  expect_equal(lay$rec_bytes, 128L)
+
+  cells <- ivt_f2_decode(raw)
+  expect_equal(names(cells), c("geo", "gender", "marital", "age", "value"))
+  # every non-zero cell across all 63,404 geographies (the last two are genuinely
+  # empty geographies, so the max present geo id is 63402)
+  expect_equal(nrow(cells), 15685859L)
+  expect_true(all(cells$geo >= 1L & cells$geo <= 63404L))
+
+  # Canada (geo 1) is fully present: 3 x 13 x 16 = 624 cells minus 12 zero cells
+  canada <- cells[cells$geo == 1L, ]
+  expect_equal(nrow(canada), 612L)
+  v <- function(g, m, a) {
+    canada$value[canada$gender == g & canada$marital == m & canada$age == a]
+  }
+  expect_equal(v(1, 1, 1), 30979185)   # Total gender, Total marital, Total age
+  expect_equal(v(1, 1, 2),  2012975)   # ... age member 2
+  expect_equal(v(2, 1, 1), 15139730)   # Men+
+  expect_equal(v(1, 2, 1), 17626005)   # Married or living common law
+})
+
 # Inline-codebook geography for the pre-DGUID 1991 layout (table 1003011 / E9101).
 # Point CANIVT_SAMPLE_IVT_1991 at a copy of 1003011.IVT to run; skips otherwise.
 sample_ivt_1991 <- function() {
-  p <- Sys.getenv("CANIVT_SAMPLE_IVT_1991", "")
-  if (nzchar(p) && file.exists(p)) return(p)
-  guess <- path.expand("~/projects/censusmapper-import/data/raw/1003011.IVT")
-  if (file.exists(guess)) return(guess)
-  ""
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_1991", "1003011", file = "1003011.IVT",
+                    legacy = path.expand("~/projects/censusmapper-import/data/raw/1003011.IVT"))
 }
 
 test_that("1991 inline geography codebook decodes GEOUIDs and bilingual names", {

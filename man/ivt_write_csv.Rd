@@ -4,12 +4,13 @@
 \alias{ivt_write_csv}
 \title{Write an IVT table to CSV}
 \usage{
-ivt_write_csv(x, path, labels = TRUE, ...)
+ivt_write_csv(x, path = NULL, labels = TRUE, ...)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
 
-\item{path}{Output \code{.csv} path.}
+\item{path}{Output \code{.csv} path. Defaults to \verb{<product_id>.csv} in the data
+cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}).}
 
 \item{labels}{Passed to \code{\link[=ivt_tidy]{ivt_tidy()}}: write labelled columns (\code{TRUE},
 default) or the compact integer-id table (\code{FALSE}).}

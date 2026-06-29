@@ -4,12 +4,14 @@
 \alias{ivt_write_metadata}
 \title{Write the table metadata (codebook + footnotes) to disk}
 \usage{
-ivt_write_metadata(x, dir)
+ivt_write_metadata(x, dir = NULL)
 }
 \arguments{
 \item{x}{An \code{ivt} object or a metadata list from \code{\link[=ivt_metadata]{ivt_metadata()}}.}
 
-\item{dir}{Output directory (created if needed).}
+\item{dir}{Output directory (created if needed). Defaults to
+\verb{<product_id>_metadata} in the data cache
+(\link[=ivt_cache_dir]{ivt_cache_dir("data")}).}
 }
 \value{
 The output directory, invisibly.

@@ -104,7 +104,7 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   inline <- ivt_f2_geo_is_inline(raw)
   info <- if (inline) ivt_f2_legacy_identity(raw) else ivt_table_info(raw)
   dims <- ivt_f2_dimensions(raw)
-  n_geo <- ivt_f2_header_geo_count(raw)
+  n_geo <- ivt_f2_geo_count(raw)
   if (inline) {
     # legacy: no fast geography uid (no DGUID pattern); key by member id only.
     # read_ivt(geo_attributes = TRUE) attaches names/GEOUIDs via ivt_f2_geographies().

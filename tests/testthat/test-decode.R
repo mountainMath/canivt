@@ -2,13 +2,8 @@
 # shipped with the package; point CANIVT_SAMPLE_IVT at a copy of 98100241.ivt
 # (StatCan table 98-10-0241) to run these. They skip otherwise.
 sample_ivt <- function() {
-  p <- Sys.getenv("CANIVT_SAMPLE_IVT", "")
-  if (nzchar(p) && file.exists(p)) return(p)
-  # fall back to the sibling reverse-engineering repo, if present
-  guess <- "~/projects/censusmapper-import/data/raw/98100241/98100241.ivt"
-  guess <- path.expand(guess)
-  if (file.exists(guess)) return(guess)
-  ""
+  locate_sample_ivt("CANIVT_SAMPLE_IVT", "98100241",
+                    legacy = path.expand("~/projects/censusmapper-import/data/raw/98100241/98100241.ivt"))
 }
 
 test_that("codebook parses identity, members and geo DGUIDs", {

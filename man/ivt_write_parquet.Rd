@@ -4,12 +4,14 @@
 \alias{ivt_write_parquet}
 \title{Write an IVT table to Parquet}
 \usage{
-ivt_write_parquet(x, path, labels = TRUE, ...)
+ivt_write_parquet(x, path = NULL, labels = TRUE, ...)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
 
-\item{path}{Output \code{.parquet} path.}
+\item{path}{Output \code{.parquet} path. Defaults to \verb{<product_id>.parquet} in the
+data cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}, i.e. option
+\code{canivt.data_cache} or \code{\link[=tempdir]{tempdir()}} when unset).}
 
 \item{labels}{Passed to \code{\link[=ivt_tidy]{ivt_tidy()}}: write labelled columns (\code{TRUE},
 default) or the compact integer-id table (\code{FALSE}).}

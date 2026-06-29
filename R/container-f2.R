@@ -20,6 +20,11 @@
 #' @noRd
 NULL
 
+# Default geos-per-page / presence-record size for the original 3-dimension
+# reference tables (98-10-0023, 1003011: 4 geos/page, 64-byte records). Both are
+# now *computed* per file from the header descriptor (`ivt_f2_geos_per_page()`,
+# `ivt_f2_rec_bytes()`) so arbitrary-dimension tables decode; these remain only as
+# fallbacks when the descriptor is unavailable.
 IVT_F2_GEOS_PER_PAGE <- 4L
 IVT_F2_REC_BYTES     <- 64L                  # one presence record per geography
 IVT_F2_PRESENCE_LEN  <- IVT_F2_GEOS_PER_PAGE * IVT_F2_REC_BYTES  # 256
@@ -39,34 +44,48 @@ ivt_f2_is_marker <- function(raw, off) {
     as.integer(raw[off + 4L]) %in% ivt_f2_marker_b3
 }
 
-# Per-page parameters keyed by the marker's first byte: where the dense value run
-# starts (offset from the page) and how each value is stored. The marker low
-# nibble is the value-width code (0x8 -> 8-byte float64, 0x4 -> int32, 0x2 ->
-# int16); the value run follows the 256-byte presence section and a
-# marker-specific 0xFF trailer. The `vstart` values were established empirically
-# and validated cell-exact against the StatCan CSV for every page type present.
-#   0x88 -> float64 @ off+264 (4-byte trailer)
-#   0xa8 -> float64 @ off+270 (10-byte trailer)
-#   0xa2 -> int16   @ off+294 (34-byte trailer)
-IVT_F2_PAGE_PARAMS <- list(
-  # 2021-era float64 / int16 pages (98-10-0023)
-  `136` = list(vstart = 264L, width = 8L, float = TRUE),    # 0x88
-  `168` = list(vstart = 270L, width = 8L, float = TRUE),    # 0xa8
-  `162` = list(vstart = 294L, width = 2L, float = FALSE),   # 0xa2
-  # 1991-era int32 / int16 pages (1003011)
-  `132` = list(vstart = 268L, width = 4L, float = FALSE),   # 0x84
-  `130` = list(vstart = 276L, width = 2L, float = FALSE)    # 0x82
+# Per-page value parameters. The dense value run starts at
+#   vstart = 4 (marker) + presence_len + trailer
+# where `presence_len = rec_bytes * geos_per_page` and `trailer` is a short pad/
+# 0xFF run whose length depends only on the marker's first byte. Storing the
+# trailer (rather than an absolute vstart) makes the offset independent of the
+# table's dimensionality: it reproduces the validated absolute starts for the
+# 256-byte presence section of the 3-dimension tables, and generalises to the
+# n-dimension tables (e.g. 98-10-0129, presence_len = 128*2 = 256) automatically.
+# The marker low nibble is the value-width code (0x8 -> 8-byte float64, 0x4 ->
+# int32, 0x2 -> int16); the high nibble (0x8 vs 0xa) only changes the trailer
+# length. Validated cell-exact against the StatCan CSV for every page type:
+#   0x88 -> float64, trailer 4  (-> off+264 at presence_len 256)
+#   0xa8 -> float64, trailer 10 (-> off+270)
+#   0xa2 -> int16,   trailer 34 (-> off+294)   (98-10-0129)
+#   0xa4 -> int32,   trailer 18 (-> off+278)   (98-10-0129)
+#   0x84 -> int32,   trailer 8  (-> off+268)
+#   0x82 -> int16,   trailer 16 (-> off+276)
+IVT_F2_PAGE_TRAILER <- c(
+  `136` = 4L,   # 0x88 float64
+  `168` = 10L,  # 0xa8 float64
+  `162` = 34L,  # 0xa2 int16
+  `164` = 18L,  # 0xa4 int32
+  `132` = 8L,   # 0x84 int32
+  `130` = 16L   # 0x82 int16
 )
 
-# Resolve a page's value parameters from its marker's first byte. Unknown markers
-# fall back to a plain float64 page (off+264) with the width implied by the low
-# nibble, and a warning, so a new variant degrades loudly rather than silently.
-ivt_f2_page_params <- function(marker0) {
-  p <- IVT_F2_PAGE_PARAMS[[as.character(marker0)]]
-  if (!is.null(p)) return(p)
-  w <- bitwAnd(marker0, 0x0FL)
-  cli::cli_warn("Unrecognised family-2 page marker byte {.val {sprintf('0x%02x', marker0)}}; assuming plain layout.")
-  list(vstart = 264L, width = if (w %in% c(2L, 4L, 8L)) w else 8L, float = w == 8L)
+# Resolve a page's value parameters from its marker's first byte and the page's
+# presence-section length. Unknown markers fall back to a minimal (4-byte) trailer
+# with the width implied by the low nibble, and a warning, so a new variant
+# degrades loudly rather than silently.
+ivt_f2_page_params <- function(marker0, presence_len = IVT_F2_PRESENCE_LEN) {
+  w  <- bitwAnd(marker0, 0x0FL)
+  tr <- IVT_F2_PAGE_TRAILER[[as.character(marker0)]]
+  if (is.null(tr)) {
+    cli::cli_warn("Unrecognised family-2 page marker byte {.val {sprintf('0x%02x', marker0)}}; assuming plain layout.")
+    tr <- 4L
+    if (!w %in% c(2L, 4L, 8L)) w <- 8L
+  }
+  list(vstart = 4L + presence_len + tr,
+       width  = if (w %in% c(2L, 4L, 8L)) w else 8L,
+       float  = w == 8L,
+       trailer = tr)
 }
 
 # A directory record is valid when both size fields agree, the size is positive,
@@ -133,9 +152,25 @@ ivt_f2_find_directory <- function(raw) {
   list(lo = lo, hi = hi, offsets = offsets, n_pages = length(offsets))
 }
 
-# Number of geographies in a family-2 file (page count * geos-per-page).
+# Geographies per page = geography member count / page count. Each contiguous
+# page holds a fixed block of geographies; the block size is 4 for the 3-dimension
+# reference tables and 2 for the 4-dimension 98-10-0129, so it must be computed,
+# not assumed. Falls back to the historical default if the descriptor is absent.
+ivt_f2_geos_per_page <- function(raw, dir = NULL) {
+  if (is.null(dir)) dir <- ivt_f2_find_directory(raw)
+  if (is.null(dir) || dir$n_pages == 0L) return(IVT_F2_GEOS_PER_PAGE)
+  gc <- ivt_f2_geo_count(raw)
+  if (is.na(gc)) return(IVT_F2_GEOS_PER_PAGE)
+  as.integer(round(gc / dir$n_pages))
+}
+
+# Number of geographies in a family-2 file. Prefer the header descriptor's
+# geography member count (reliable for any dimensionality); fall back to
+# page count * geos-per-page.
 ivt_f2_geography_count <- function(raw, dir = NULL) {
+  gc <- ivt_f2_geo_count(raw)
+  if (!is.na(gc)) return(gc)
   if (is.null(dir)) dir <- ivt_f2_find_directory(raw)
   if (is.null(dir)) return(0L)
-  dir$n_pages * IVT_F2_GEOS_PER_PAGE
+  dir$n_pages * ivt_f2_geos_per_page(raw, dir)
 }

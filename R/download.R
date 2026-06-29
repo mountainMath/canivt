@@ -7,7 +7,8 @@
 #' @param pid StatCan product id, e.g. `"98100241"` or `9810024101`. Any
 #'   trailing version digits are dropped to the 8-digit table id.
 #' @param dest_dir Directory to download into (created if needed). Defaults to a
-#'   per-table folder in [tempdir()].
+#'   per-table folder under the IVT cache ([ivt_cache_dir("ivt")][ivt_cache_dir],
+#'   i.e. option `canivt.ivt_cache` or [tempdir()] when unset).
 #' @param lang `"en"` (default) or `"fr"` endpoint.
 #' @param overwrite Re-download even if the `.ivt` already exists. Default
 #'   `FALSE`.
@@ -18,7 +19,7 @@ ivt_download <- function(pid, dest_dir = NULL, lang = c("en", "fr"),
                          overwrite = FALSE, quiet = FALSE) {
   lang <- match.arg(lang)
   pid8 <- ivt_pid8(pid)
-  if (is.null(dest_dir)) dest_dir <- file.path(tempdir(), paste0("canivt_", pid8))
+  if (is.null(dest_dir)) dest_dir <- file.path(ivt_cache_dir("ivt"), pid8)
   dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
 
   existing <- list.files(dest_dir, pattern = "\\.ivt$", full.names = TRUE,
