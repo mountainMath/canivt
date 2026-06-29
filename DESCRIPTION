@@ -17,6 +17,7 @@ Imports:
     utils
 Suggests:
     arrow,
+    ggplot2,
     httr2,
     knitr,
     readr,
