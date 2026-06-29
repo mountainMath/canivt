@@ -7,6 +7,9 @@ their metadata (dimension members, geographic identifiers/DGUIDs, footnotes).
 This folder is self-contained. The authoritative file-format reference is
 [`inst/notes/ivt-format.md`](inst/notes/ivt-format.md) — **read it before changing
 the parser.** A user-facing version is the vignette `vignettes/ivt-format.Rmd`.
+[`inst/notes/coverage.md`](inst/notes/coverage.md) is the **living completeness
+tracker** (what we decode vs what's left, with measured byte coverage) — **update
+it whenever a gap is closed or a new one is found.**
 
 ## What works today
 
