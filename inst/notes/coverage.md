@@ -122,8 +122,14 @@ Files in the test corpus that are currently unsupported:
   table downloads); single-page-ish directories, descriptor undecoded.
 
 Decoding any of these is future work — each likely needs its descriptor/codebook
-layout reverse-engineered. The container detection and value-page machinery may
-carry over once the descriptor is understood.
+layout reverse-engineered. Reconnaissance (sub-format taxonomy, descriptor
+locations, which share the family-2 value container) is captured in
+[`unsupported-formats.md`](unsupported-formats.md). Summary: they fall into ≥3
+sub-formats — a near-family-2 crosstab (`ord-08035`, `97F0020X`; `ord-08035`
+reuses the 98-10-0023 value container exactly and is the recommended first
+target), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`; int
+container we already decode), and older layouts whose container is not yet located
+(`97F0015X`, 1981 `97-570-X`).
 
 ## [ ] Not parsed at all
 
