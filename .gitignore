@@ -17,3 +17,12 @@ doc/
 Meta/
 
 .DS_Store
+
+# Table exports written during development (large; regenerate with ivt_write_*)
+*.parquet
+/98100241.csv
+/98100241_metadata/
+
+# Knitted vignette output (source is vignettes/*.Rmd)
+/vignettes/*.html
+/vignettes/ivt-format.R

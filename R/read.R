@@ -2,14 +2,20 @@
 IVT_DIM_COLS <- c("geography", "age", "household_type", "period_of_construction",
                   "statistic", "housing_indicator", "tenure")
 
-# The 2021 Beyond 20/20 layout this package decodes begins with this signature
-# and exposes a valid geography index. Other variants (e.g. the 1991 census
-# format) are not yet supported.
-ivt_is_supported <- function(raw) {
-  if (length(raw) < IVT_IDX0 + 16L) return(FALSE)
-  sig <- as.integer(raw[1:4]) # 04 00 20 00
-  identical(sig, c(4L, 0L, 32L, 0L)) && ivt_geography_count(raw) > 0L
+# Identify the Beyond 20/20 container family from the raw bytes. Both families
+# share the `04 00 20 00` signature; they differ in how page directories are
+# stored. Returns 1 (per-geography directories at a fixed stride, e.g. 98-10-0241),
+# 2 (single contiguous directory, e.g. 98-10-0023), or NA when unrecognised.
+ivt_family <- function(raw) {
+  if (length(raw) < 8L) return(NA_integer_)
+  if (!identical(as.integer(raw[1:4]), c(4L, 0L, 32L, 0L))) return(NA_integer_)
+  if (length(raw) >= IVT_IDX0 + 16L && ivt_geography_count(raw) > 0L) return(1L)
+  if (!is.null(ivt_f2_find_directory(raw))) return(2L)
+  NA_integer_
 }
+
+# A file is supported when it belongs to a recognised container family.
+ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 
 #' Read a Beyond 20/20 IVT file
 #'
@@ -18,24 +24,32 @@ ivt_is_supported <- function(raw) {
 #' identifiers, footnotes). No companion CSV or metadata download is required.
 #'
 #' @param path Path to an `.ivt` file.
+#' @param geo_attributes For family-2 tables only: if `TRUE`, decode the full
+#'   geography attribute table (names, level/type, geocodes, data-quality flag,
+#'   non-response rate) from the codebook so [ivt_tidy()] can label geographies by
+#'   name. This adds a codebook block-scan (tens of seconds); the default `FALSE`
+#'   keeps geographies keyed by DGUID. Ignored for family-1 tables.
 #' @return An object of class `ivt`: a list with `cells` (a tibble of one value
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
 #'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`
 #'   with names and DGUIDs, and `footnotes`).
 #' @export
-read_ivt <- function(path) {
+read_ivt <- function(path, geo_attributes = FALSE) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
-  if (!ivt_is_supported(raw)) {
+  family <- ivt_family(raw)
+  if (is.na(family)) {
     cli::cli_abort(c(
       "Unsupported or unrecognised IVT format in {.path {path}}.",
-      i = "This package currently decodes the 2021-era Beyond 20/20 layout."
+      i = "This package decodes the two 2021-era Beyond 20/20 container families."
     ))
   }
+  if (family == 2L) return(ivt_f2_read(raw, path, geo_attributes = geo_attributes))
   meta <- ivt_read_codebook(raw)
   ng <- ivt_geography_count(raw)
   parts <- lapply(0:(ng - 1L), function(g) ivt_decode_geography(raw, g))
   cells <- do.call(rbind, parts)
-  structure(list(cells = cells, metadata = meta, path = path), class = "ivt")
+  structure(list(cells = cells, metadata = meta, path = path, family = 1L),
+            class = "ivt")
 }
 
 #' Read only the metadata of an IVT file (no value decoding)
@@ -49,9 +63,11 @@ read_ivt <- function(path) {
 #' @export
 ivt_metadata <- function(path) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
-  if (!ivt_is_supported(raw)) {
+  family <- ivt_family(raw)
+  if (is.na(family)) {
     cli::cli_abort("Unsupported or unrecognised IVT format in {.path {path}}.")
   }
+  if (family == 2L) return(ivt_f2_metadata(raw))
   ivt_read_codebook(raw)
 }
 
@@ -72,6 +88,7 @@ ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE) {
   stopifnot(inherits(x, "ivt"))
   cells <- x$cells
   if (!labels) return(cells)
+  if (isTRUE(x$family == 2L)) return(ivt_f2_tidy(x, trim_labels))
 
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
@@ -96,6 +113,17 @@ print.ivt <- function(x, ...) {
   m <- x$metadata
   cli::cli_h1("IVT table {m$product_id}")
   cli::cli_text(m$title_en)
-  cli::cli_text("{nrow(x$cells)} cells | {length(m$geographies$name)} geographies | {length(m$dimensions)} dimensions | {length(m$footnotes)} footnotes")
+  if (isTRUE(x$family == 2L)) {
+    cli::cli_text("{nrow(x$cells)} cells | {m$n_geographies} geographies | {length(m$dimension_names)} dimensions | {length(m$footnotes)} footnotes")
+    geo_msg <- if (!is.null(m$geographies[["geo_name"]]))
+      "family 2 (geography labelled by name + uid)"
+    else if (!is.null(m$geographies[["geo_uid"]]))
+      "family 2 (geography labelled by DGUID; read_ivt(geo_attributes=TRUE) for names)"
+    else
+      "family 2 (geography keyed by member id; read_ivt(geo_attributes=TRUE) for names)"
+    cli::cli_text(cli::col_grey(geo_msg))
+  } else {
+    cli::cli_text("{nrow(x$cells)} cells | {length(m$geographies$name)} geographies | {length(m$dimensions)} dimensions | {length(m$footnotes)} footnotes")
+  }
   invisible(x)
 }

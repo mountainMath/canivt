@@ -42,11 +42,15 @@ rd_pascal <- function(raw, off, max_len = 250L) {
   list(text = raw_to_latin1(bytes), len = len, end = off + 1L + len)
 }
 
-# Bytes allowed inside a member label: printable ASCII, common whitespace, and
-# latin-1 accented characters (French place names).
+# Bytes allowed inside a member label: printable ASCII, common whitespace, and the
+# high range used for accented/punctuation text. StatCan encodes labels as
+# Windows-1252, whose 0x80-0x9F block holds printable punctuation (e.g. 0x92 = the
+# curly apostrophe in "Tla'amin Lands", 0x93/0x94 quotes, 0x96/0x97 dashes); those
+# must count as text or the record splits mid-array. Only the genuine control
+# bytes (< 0x20, except tab/LF/CR, and 0x7F) are rejected.
 is_label_byte <- function(bytes) {
   v <- as.integer(bytes)
-  (v >= 32L & v < 127L) | v %in% c(9L, 10L, 13L) | (v >= 160L & v <= 255L)
+  (v >= 32L & v != 127L) | v %in% c(9L, 10L, 13L)
 }
 
 raw_to_latin1 <- function(bytes) {

@@ -4,10 +4,16 @@
 \alias{read_ivt}
 \title{Read a Beyond 20/20 IVT file}
 \usage{
-read_ivt(path)
+read_ivt(path, geo_attributes = FALSE)
 }
 \arguments{
 \item{path}{Path to an \code{.ivt} file.}
+
+\item{geo_attributes}{For family-2 tables only: if \code{TRUE}, decode the full
+geography attribute table (names, level/type, geocodes, data-quality flag,
+non-response rate) from the codebook so \code{\link[=ivt_tidy]{ivt_tidy()}} can label geographies by
+name. This adds a codebook block-scan (tens of seconds); the default \code{FALSE}
+keeps geographies keyed by DGUID. Ignored for family-1 tables.}
 }
 \value{
 An object of class \code{ivt}: a list with \code{cells} (a tibble of one value

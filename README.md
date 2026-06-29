@@ -3,8 +3,8 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-**canivt** downloads and parses Statistics Canada *Beyond 20/20* `.ivt` data
-tables straight from their bytes — into tidy data frames, Parquet, or CSV — and
+**canivt** downloads and parses [Statistics Canada *Beyond 20/20* `.ivt` data
+tables](https://www.statcan.gc.ca/en/public/beyond20-20) straight from their bytes — into tidy data frames, Parquet, or CSV — and
 extracts the table metadata that is *not* part of the data itself: dimension
 members, geographic identifiers (names + DGUIDs), and footnotes.
 
