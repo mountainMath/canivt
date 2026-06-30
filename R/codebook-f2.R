@@ -398,19 +398,28 @@ ivt_f2_geographies <- function(raw) {
 # so it is the reliable source of dimension metadata (the legacy format has no
 # inline "Variable List" text). Layout of the descriptor:
 #   +16 u16  number of dimensions
-#   +52      first dimension record, then one record per dimension:
-#            [count][marker = <type> 01][doubled name]
-#            • <type> byte: 0x10 = geography, 0x07 = the age-type dimension,
-#              0x02 = the gender/sex-type dimension (others occur in other tables)
-#            • count: u16 for geography (always > 255), u8 for the rest
-#            • name is stored twice back-to-back ("GeographyGeography"); the
-#              0x01 marker byte never occurs inside a name, so markers delimit
-#              records unambiguously
+#   +52      first dimension record, then one record per dimension. Each record
+#            stores its display name TWICE back-to-back ("GeographyGeography"),
+#            preceded by a 0x01 separator; this **doubled name** is the reliable
+#            anchor. The count/type framing bytes immediately before the separator
+#            vary by dimension, so we read them relative to the doubled name rather
+#            than scanning for a fixed "<type> 01" marker:
+#            • normal record  `[count][type][01]<name><name>`  (type @ sep-1,
+#              count @ sep-2; geography type 0x10 carries a u16 count at sep-3..-2,
+#              member counts > 255)
+#            • period / facet record  `[type][count][01][01]<name><name>` — the
+#              reference-period dimension (type 0x0e, e.g. "Year (2)" in tables
+#              spanning two censuses) is type-first with a doubled 0x01, which is
+#              exactly why a rigid "<known type> 01 <upper>" scan silently dropped
+#              it (and the table's 7th dimension with it).
+#            • <type> is a storage/classification tag, NOT a fixed dimension
+#              identity: 0x10/0x08 geography, 0x07 age-type, 0x02 gender/sex-type
+#              or a small categorical, 0x03/0x04/0x05 generic ordinal/categorical,
+#              0x0e reference period. (In 98-10-0241 type 0x02 is "Statistics".)
 #   later    "FACET04" + the English title (the legacy file appends "1991 Census…")
-# Validated on 98-10-0023 (63404 / 128 / 3) and 1003011 (41859 / 110 / 3).
-
-# Dimension type bytes seen in the descriptor marker "<type> 01".
-IVT_F2_DESC_TYPES <- c(0x10L, 0x07L, 0x02L, 0x03L, 0x04L, 0x05L, 0x06L, 0x08L, 0x09L)
+# Validated: dims recovered exact on 98-10-0023 (63404/128/3), 1003011
+# (41859/110/3), 98-10-0241 (166 + 6 data dims) and 98-10-0077 (174 + 6 data dims
+# incl. the "Year (2)" reference period).
 
 #' Parse the header dimension descriptor.
 #' @return list(n_dim, dims = list(name, count, type), title) or NULL.
@@ -420,82 +429,100 @@ ivt_f2_descriptor <- function(raw) {
   n <- length(raw)
   D <- rd_u32(raw, IVT_HDR_DESCRIPTOR_PTR)
   if (is.na(D) || D < 1 || D + 18 > n) return(NULL)
-  ndim <- rd_u16(raw, as.integer(D) + 16L)
-  win <- min(as.integer(D) + 4000L, n)
-  v <- as.integer(raw[(as.integer(D) + 1L):win])   # v[k] is byte D+k-1
+  D <- as.integer(D)
+  ndim <- rd_u16(raw, D + 16L)
+  win <- min(D + 4000L, n)
+  v <- as.integer(raw[(D + 1L):win])               # v[k] is byte D+k-1
   # the dimension records sit between the fixed header and the "FACET04" title;
-  # bound the marker search there so stray 0x01 bytes in later binary do not match.
-  txt_all <- intToUtf8(ifelse(v >= 32L & v <= 126L, v, 46L))
-  facet <- regexpr("FACET04", txt_all)
-  Lend <- if (facet > 0) facet - 1L else length(v)
-  L <- min(Lend, length(v) - 2L)
-  # marker positions: v[k] a known type, v[k+1] == 0x01, v[k+2] an upper-case letter
-  mk <- which(v[seq_len(L)] %in% IVT_F2_DESC_TYPES &
-              v[seq_len(L) + 1L] == 0x01L &
-              v[seq_len(L) + 2L] >= 65L & v[seq_len(L) + 2L] <= 90L)
-  if (!length(mk)) return(list(n_dim = ndim, dims = list(), title = NA_character_))
-  mk <- head(mk, ndim)                       # the first n_dim are the real records
-  dims <- vector("list", length(mk))
-  for (i in seq_along(mk)) {
-    k <- mk[i]; type <- v[k]
-    count <- if (type == 0x10L) v[k - 2L] + v[k - 1L] * 256L else v[k - 1L]
-    # the name is stored twice back-to-back; read the printable run and recover the
-    # single name as the longest period p with run[1:p] == run[(p+1):2p] (this
-    # ignores any per-dimension metadata bytes that trail the doubled name).
-    name_start <- k + 2L
-    e <- name_start
-    while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
-    run <- v[name_start:(e - 1L)]
-    rl <- length(run); name <- intToUtf8(run)
-    for (p in seq.int(rl %/% 2L, 1L)) {
-      if (identical(run[1:p], run[(p + 1L):(2L * p)])) { name <- intToUtf8(run[1:p]); break }
-    }
-    dims[[i]] <- list(name = trimws(name), count = count, type = type)
-  }
+  # bound the search there so stray 0x01 bytes in later binary do not match.
   txt <- intToUtf8(ifelse(v >= 32L & v <= 126L, v, 46L))
+  facet <- regexpr("FACET04", txt)
+  Lend <- if (facet > 0) facet - 1L else length(v)
+
+  # Walk the bounded region; a dimension record is a 0x01 whose following printable
+  # run is a doubled string. Read count/type from the bytes just before the 0x01.
+  dims <- list()
+  k <- 4L
+  while (k <= Lend - 1L && length(dims) < ndim) {
+    if (v[k] == 0x01L && v[k + 1L] >= 65L && v[k + 1L] <= 90L) {
+      e <- k + 1L
+      while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
+      run <- v[(k + 1L):(e - 1L)]; rl <- length(run); half <- NA_integer_
+      for (p in seq.int(rl %/% 2L, 1L)) {
+        if (identical(run[1:p], run[(p + 1L):(2L * p)])) { half <- p; break }
+      }
+      if (!is.na(half) && half >= 2L) {
+        if (v[k - 1L] == 0x01L) {                  # period/facet double-01 framing
+          type <- v[k - 3L]; count <- v[k - 2L]
+        } else {
+          type <- v[k - 1L]
+          count <- if (type == 0x10L) v[k - 3L] + v[k - 2L] * 256L else v[k - 2L]
+        }
+        dims[[length(dims) + 1L]] <- list(name = trimws(intToUtf8(run[1:half])),
+                                          count = count, type = type)
+        k <- e; next
+      }
+    }
+    k <- k + 1L
+  }
+
   title <- regmatches(txt, regexpr("FACET04[^.]*", txt))
   title <- if (length(title)) trimws(sub("FACET04", "", title)) else NA_character_
   list(n_dim = ndim, dims = dims, title = title)
 }
 
-# Geography member count, from the descriptor's geography record (type 0x10).
-# This is reliable for any dimensionality; the fixed-offset u16
-# `ivt_f2_header_geo_count()` is only correct for 3-dimension tables (it reads
-# 16320 instead of 63404 for the 4-dimension 98-10-0129). Falls back to the
-# fixed-offset reader when the descriptor cannot be parsed.
+# Geography is the first descriptor dimension (the page/row dimension) in every
+# observed layout. Identify it positionally, NOT by a magic type byte: the
+# geography descriptor *type* varies by format — 0x10 in the modern 2021 family-2
+# files (count stored as u16) but 0x08 in the family-1 reference table (count u8) —
+# so a `type == 0x10` filter silently fails on other layouts (it falls through to
+# the wrong fixed-offset count, e.g. 16383 for 98-10-0241). The count's byte width
+# is still handled by `ivt_f2_descriptor()`.
+ivt_f2_geo_dim <- function(dims) if (length(dims)) dims[[1L]] else NULL
+
+# Geography member count, from the descriptor's geography record. Reliable for any
+# dimensionality; the fixed-offset u16 `ivt_f2_header_geo_count()` is only correct
+# for 3-dimension tables (it reads 16320 instead of 63404 for the 4-dimension
+# 98-10-0129). Falls back to the fixed-offset reader when the descriptor cannot be
+# parsed.
 ivt_f2_geo_count <- function(raw) {
   d <- ivt_f2_descriptor(raw)
-  if (is.null(d) || !length(d$dims)) return(ivt_f2_header_geo_count(raw))
-  geo <- Filter(function(x) x$type == 0x10L, d$dims)
-  if (!length(geo)) return(ivt_f2_header_geo_count(raw))
-  as.integer(geo[[1]]$count)
+  geo <- ivt_f2_geo_dim(if (is.null(d)) NULL else d$dims)
+  if (is.null(geo)) return(ivt_f2_header_geo_count(raw))
+  as.integer(geo$count)
 }
 
 # The non-geography data dimensions, in descriptor (outer -> inner) order: their
 # member `counts` (which drive the presence-bitmap nesting and the dense value
-# order) and a short column `slug` for each. The two universal census dimensions
-# get a canonical slug from their descriptor type byte -- 0x02 -> "gender" (the
-# gender/sex-type dimension, whether the table labels it "Gender" or "Sex") and
-# 0x07 -> "age" (the age-type dimension, whose descriptor name is sometimes
-# truncated, e.g. "Single Years of") -- so the column name is stable across
-# tables. Any other dimension takes the lower-cased leading word of its name
-# (e.g. "Marital status" -> "marital"), falling back to "dim<i>"; slugs are made
-# unique. Returns empty vectors when no descriptor.
+# order) and a short column `slug` for each. Geography is the first dimension
+# (`ivt_f2_geo_dim()`, identified positionally), so the data dimensions are simply
+# the rest. Slugs are a purely structural convenience: each is the lower-cased
+# leading word of the dimension's metadata name (e.g. "Marital status" ->
+# "marital"), falling back to "dim<i>", made unique. No code branches on a
+# dimension's name or descriptor type byte -- dimensions are interchangeable and
+# everything the decoder needs (geography position, member counts, value layout)
+# is derived structurally. The human-readable labels come from the codebook at
+# `tidy` time. Returns empty vectors when no descriptor / no data dimensions.
 ivt_f2_data_dims <- function(raw) {
   d <- ivt_f2_descriptor(raw)
-  if (is.null(d) || !length(d$dims)) return(list(counts = integer(0), slugs = character(0)))
-  data <- Filter(function(x) x$type != 0x10L, d$dims)
+  if (is.null(d) || length(d$dims) < 2L) return(list(counts = integer(0), slugs = character(0)))
+  data <- d$dims[-1L]
   if (!length(data)) return(list(counts = integer(0), slugs = character(0)))
   counts <- vapply(data, `[[`, 1L, "count")
-  slug <- function(dim, i) {
-    if (identical(dim$type, 0x02L)) return("gender")
-    if (identical(dim$type, 0x07L)) return("age")
-    w <- tolower(sub("^[^A-Za-z]*([A-Za-z]+).*$", "\\1", dim$name))
-    if (!nzchar(w) || !grepl("^[a-z]+$", w)) paste0("dim", i) else w
-  }
-  slugs <- vapply(seq_along(data), function(i) slug(data[[i]], i), "")
+  slugs <- vapply(seq_along(data), function(i) ivt_dim_slug(data[[i]]$name, i + 1L), "")
   if (anyDuplicated(slugs)) slugs <- make.unique(slugs, sep = "")
   list(counts = as.integer(counts), slugs = slugs)
+}
+
+# Generic, name-agnostic column slug for a dimension at 1-based descriptor position
+# `i`: dimension 1 is geography (the structural outermost dimension) -> "geo"; any
+# other dimension takes the lower-cased leading alphabetic word of its metadata
+# name, or "dim<i>" when that is not a clean word. This is presentation only -- no
+# decoder logic depends on the result.
+ivt_dim_slug <- function(name, i) {
+  if (i == 1L) return("geo")
+  w <- tolower(sub("^[^A-Za-z]*([A-Za-z]+).*$", "\\1", name))
+  if (!nzchar(w) || !grepl("^[a-z]+$", w)) paste0("dim", i) else w
 }
 
 # Is this a family-2 file the decoder can actually handle? Several other Beyond

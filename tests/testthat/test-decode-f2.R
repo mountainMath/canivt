@@ -189,7 +189,7 @@ test_that("family-2 decodes a 4-dimension table (98-10-0129) cell-exact", {
   expect_equal(lay$stride, c(256L, 16L, 1L))
   expect_equal(lay$rec_bytes, 128L)
 
-  cells <- ivt_f2_decode(raw)
+  cells <- ivt_decode(raw)
   expect_equal(names(cells), c("geo", "gender", "marital", "age", "value"))
   # every non-zero cell across all 63,404 geographies (the last two are genuinely
   # empty geographies, so the max present geo id is 63402)
@@ -260,13 +260,15 @@ test_that("1991 cell decode is exact (int32 dense and int16 sparse pages)", {
   p <- sample_ivt_1991()
   skip_if(p == "", "no 1991 sample (set CANIVT_SAMPLE_IVT_1991)")
   raw <- readBin(p, "raw", n = file.info(p)$size)
-  cells <- ivt_f2_decode(raw)
+  cells <- ivt_decode(raw)
   expect_equal(max(cells$geo), 41859L)
 
   # Canada (geo 1) is on a 0x84 int32 page, all 110 ages present (330 cells)
   ca <- cells[cells$geo == 1L, ]
   expect_equal(nrow(ca), 330L)
-  v <- function(a, g) ca$value[ca$age == a & ca$gender == g]
+  # data-dim columns are named by their metadata-derived slugs: "Single Years of
+  # Age" -> "single", "Sex" -> "sex" (no name/type special-casing in the decoder).
+  v <- function(a, g) ca$value[ca$single == a & ca$sex == g]
   expect_equal(v(1, 1), 27296860)   # Total - Age, Total - Sex
   expect_equal(v(1, 2), 13454580)   # Male
   expect_equal(v(1, 3), 13842280)   # Female
@@ -294,10 +296,10 @@ test_that("read_ivt() handles the legacy 1991 table end-to-end", {
 
   # default tidy keys geography by member id (no fast uid in the legacy format)
   td <- ivt_tidy(x)
-  expect_equal(names(td), c("geo", "age", "gender", "value"))
+  expect_equal(names(td), c("geo", "single", "sex", "value"))
   ca <- td[td$geo == 1L, ]
-  expect_equal(ca$value[ca$age == "Total - Age Groups" & ca$gender == "Total - Sex"], 27296860)
-  expect_equal(ca$value[ca$age == "Total - Age Groups" & ca$gender == "Male"], 13454580)
+  expect_equal(ca$value[ca$single == "Total - Age Groups" & ca$sex == "Total - Sex"], 27296860)
+  expect_equal(ca$value[ca$single == "Total - Age Groups" & ca$sex == "Male"], 13454580)
 
   # geo_attributes = TRUE labels geography by name + GEOUID
   x2 <- read_ivt(p, geo_attributes = TRUE)

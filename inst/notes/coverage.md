@@ -87,6 +87,82 @@ geographies** an exact match vs the StatCan CSV; the 3-dim tables (98-10-0023,
 - [x] **Geography count** comes from the descriptor's geography record
   (`ivt_f2_geo_count()`); the fixed-offset `ivt_f2_header_geo_count()` u16 reads a
   wrong 16320 for 4-dim descriptors and is no longer used for sizing.
+- [x] **Geography is identified positionally** (the first descriptor dimension),
+  not by a magic type byte: the geography type differs by format — `0x10` in the
+  modern family-2 files (count u16) but `0x08` in the family-1 reference tables
+  (count u8). The old `type == 0x10` filter silently misread 98-10-0241's geography
+  count as 16383.
+
+## [x] Descriptor markers generalised across family-1 tables (DONE)
+
+A **second family-1 table, 98-10-0077** ("Economic family income by family
+structure"), confirmed the descriptor model and forced two generalisations. It has
+7 dimensions (174 geographies + 6 data dims) and, because it spans the **2021 and
+2016 censuses**, carries a **reference-period dimension "Year (2)"** (type `0x0e`,
+count 2).
+
+- [x] **Dimension records are anchored on the doubled name**, not on a rigid
+  `<known type> 01 <upper>` scan. Each record stores its display name twice
+  back-to-back preceded by `0x01`; the count/type framing bytes before that
+  separator vary by dimension. `ivt_f2_descriptor()` now walks the bounded region,
+  detects each `0x01` whose following printable run is a doubled string, and reads
+  count/type relative to it. This dropped the hard-coded `IVT_F2_DESC_TYPES` type
+  list entirely.
+- [x] **Reference-period / facet records** use a different framing —
+  `[type][count][01][01]<name><name>` (type-first, **doubled** `0x01`) vs the
+  normal `[count][type][01]<name><name>`. The old scan landed on the second `0x01`
+  and so **dropped the 7th dimension** of 98-10-0077. New type bytes seen:
+  `0x0e` (reference period), `0x05` (generic ordinal, e.g. age-range / income).
+- [x] **The reference-period dimension is the innermost *in-page* dimension, NOT a
+  geography facet** (this revises an earlier guess). In 98-10-0077 *Year (2)* sits
+  at the bottom of the presence-bitmap nesting: the dense value run carries the
+  2020 then 2015 value for each cell consecutively. The descriptor count
+  `ivt_f2_geo_count()` = **174** is the true geography count the decoder keys on.
+  The legacy `ivt_geography_count()` (stride at `0x1000`) returns **348** here only
+  as an artefact — 98-10-0077's real per-geography directory stride is `0x2000`,
+  and striding it at `0x1000` lands on every other geography's mid-block, doubling
+  the count. It is no longer used for decoding (only the family-1 detection gate).
+
+## [x] One unified cell decoder — "family 1 / family 2" are one pattern (DONE)
+
+`decode.R` (`ivt_layout()` + `ivt_decode()`) is the single, name/type-agnostic
+decoder for every table; `decode-f1.R` and the family-2 `ivt_f2_decode()` are gone.
+The realisation: **both former families are the same power-of-two-nested positional
+layout** (`ivt_f2_bit_layout()`); they differ only in *which dimension straddles*
+the page boundary. Nest every dimension — data dimensions innermost (descriptor
+order), **geography outermost** — fill a fixed **2048-bit (256-byte)** page
+presence record innermost-first; the same nesting describes the in-page bits (bit
+units) and the directory entries (8-byte entry units).
+
+- [x] Exactly one dimension **straddles** the 2048-bit boundary: its in-page part
+  (`ipc = floor(2048 / inner_block)`) stays in the bitmap, the rest becomes
+  `window_count = ceil(count / ipc)` directory windows; dimensions outside it are
+  positional in the directory (power-of-two-nested entry strides, window innermost).
+- [x] **A data dimension straddles → geography is fully paged** (per-geography
+  directory blocks): **98-10-0241** (Period; geo stride 512 entries = `0x1000`),
+  **98-10-0077** (Ages; geo stride 1024 = `0x2000`), **98-10-0662** (Health; geo
+  stride 16 = `0x80`, small file with mixed int16/int32 pages). All cell-exact vs
+  the StatCan CSV; 0241 byte-identical to the original hand-cracked decoder.
+- [x] **Geography itself straddles → `gpp = 2048 / data_bits` geographies per page**,
+  flat contiguous directory: **98-10-0023** (4 geos/page, 63,404 geos), **98-10-0129**
+  (2/page, 15.6M cells), **1991 `1003011`** (4/page). The unified decoder reproduces
+  the former family-2 decoder byte-identical. `ivt_layout()$geo_in_page` discriminates.
+- [x] **Fully name/type-agnostic.** Column slugs are a generic function of the
+  metadata name (`ivt_dim_slug()`); no code branches on a dimension's name or
+  descriptor type byte. Removing the old `0x02→gender` / `0x07→age` slug special-
+  casing changed only 1991's data-column names (now `single`/`sex`, the real
+  metadata names) — every other table was unaffected, confirming the wart.
+- [x] **Value-start (trailer)** is marker-driven: trailer 0 when the marker's third
+  byte is `0x00`, else the per-marker family-2 constant (`0x82`→16, `0x84`→8,
+  `0xa2`→34, `0xa4`→18, …). Some tables realise the high-A trailers as a `0xFF` run,
+  others as fixed padding — all land identically.
+- [ ] **Family-1 metadata labels remain name-tied.** `ivt_read_codebook()` /
+  `IVT_DIMS` is still hard-coded to 98-10-0241's dimensions, so 98-10-0077 /
+  98-10-0662 dimension-member *labels* aren't populated (cells are exact). Routing
+  family-1 metadata through the descriptor-driven `ivt_f2_metadata()` (while keeping
+  family-1 geography names) is the remaining cleanup.
+- [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
+  float64 table or a no-straddle table would confirm / refine it.
 
 ### Note: the `0xa` marker variant and empty geographies
 

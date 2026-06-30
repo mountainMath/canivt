@@ -18,44 +18,45 @@ Fully decodes and validates the **2021-era Beyond 20/20 layout** (reference tabl
 plus all dimension labels, geography DGUIDs, and footnotes. Whole-file pure-R
 decode runs in ~4–5 s.
 
-There are **two container families** under the shared `04 00 20 00` signature,
-both decoded:
-- **Family 1** — per-geography page directories at a fixed stride (98-10-0241).
-- **Family 2** — one contiguous page directory. The cell decoder is
-  **n-dimensional** (descriptor-driven): it handles any number of dimensions,
-  computing geographies-per-page, the power-of-two-nested presence bitmap, and the
-  per-marker value layout from the header. Validated cell-exact on
-  **98-10-0023** (3-dim Age×Gender, 4 geos/page, all 63,404 geographies) **and
-  98-10-0129** (4-dim Gender×Marital×Age, 2 geos/page, all 15,685,859 cells incl.
-  the `0xa4` int32 marker). Codebook fully decoded for 98-10-0023: **Age/Gender
-  member labels** and the **full
-  geography attribute table** — name, DGUID, level, type abbreviation, province
-  abbreviation, two geocodes, the **data-quality flag** and **non-response rate**
-  — all validated exact vs the metadata for 63,404 geographies (GEO_TYPE_DESC and
-  DQF_NOTE ~99.8%, a few cells in the largest group where long text splits across
-  blocks). `read_ivt(geo_attributes = TRUE)` decodes the attribute table (adds a
-  ~30 s codebook block-scan) and `ivt_tidy()` then labels by `geo_name` +
-  `geo_level`; the default keeps geographies keyed by DGUID. `read_ivt()`
-  auto-detects the family via `ivt_family()`.
+**One unified, descriptor-driven cell decoder** handles every table
+(`decode.R`: `ivt_layout()` + `ivt_decode()`). The historical "family 1 / family
+2" split is **not two formats** — it is one power-of-two-nested positional layout
+where the only difference is *which dimension straddles the 2048-bit page boundary*
+(see "Key invariants"). No code branches on dimension names or type bytes;
+geography is dimension 1 *structurally*, the straddle/paging is derived from member
+counts and the 2048-bit cap, and human-readable labels come from the codebook at
+`tidy` time. Validated **cell-exact (byte-identical to the two former decoders)**
+on all six reference tables:
 
-The **1991 census** layout (e.g. `1003011`, E9101) is also wired into `read_ivt()`
-now: same family-2 container with int16/int32 pages (markers `0x84`/`0x82`) and a
-pre-DGUID inline codebook. Cells validated **330/330 exact** for all 8 scraped
-ground-truth geographies; geography (bilingual names + GEOUIDs), Age(110)/Sex(3)
-labels, dimension metadata and identity all decode. Geography metadata comes from
-the header (`ivt_f2_geo_is_inline()`, `ivt_f2_header_geo_count()`); the page
-directory is read from the header pointer (`u16@558`), not a marker scan. Other
-unrecognised files are still rejected via `ivt_is_supported()`.
+- **98-10-0241** (7-dim, Period straddles): 166 geos, 7,489,464 cells, exact vs CSV.
+- **98-10-0077** (7-dim incl. a reference-period Year, Ages straddles): all 174
+  geographies, ~37M cells, exact vs CSV.
+- **98-10-0662** (5-dim, Health straddles; small file, mixed int16/int32 pages,
+  0x80 per-geo stride): all 91 geographies, exact vs CSV. (Was silently misdecoded
+  before the unification — it had been misrouted to the family-2 decoder.)
+- **98-10-0023** (3-dim Age×Gender, **geography straddles** → 4 geos/page): all
+  63,404 geographies. **98-10-0129** (4-dim, geography straddles → 2 geos/page):
+  all 15,685,859 cells incl. the `0xa4` int32 marker. **1991** `1003011` (3-dim,
+  geography straddles → 4 geos/page; int16/int32 pages): 330/330 exact.
+
+`read_ivt()` auto-detects via `ivt_family()`, which now only selects the
+**metadata** path (the cell decode is shared). Metadata: 98-10-0023's full
+geography attribute table (name, DGUID, level, type/prov abbreviation, two
+geocodes, data-quality flag, non-response rate) decodes exact for all 63,404
+geographies (`read_ivt(geo_attributes = TRUE)`, ~30 s block-scan; GEO_TYPE_DESC /
+DQF_NOTE ~99.8%); 1991 geography (bilingual names + GEOUIDs) via the pre-DGUID
+inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
+98-400-X variant) are rejected via `ivt_is_supported()`.
 
 ## Code map (`R/`)
 
 | file | role |
 |------|------|
 | `utils-bytes.R` | low-level readers: `rd_u16/rd_u32/rd_int_run/rd_pascal`; latin-1 decode. **All offsets are 0-based** (binary layout); helpers convert to R's 1-based indexing. |
-| `container.R`   | family-1 geography index + page directory; constants `IVT_IDX0=37167`, `IVT_IDX_STRIDE=0x1000`, `IVT_PAGES_PER_GEO=288`; page header/value-start logic. |
-| `decode.R`      | family-1 presence-bitmap + dense value decode → cell tibble (vectorised per page; `IVT_GRID` precomputed group order). |
-| `container-f2.R`| family-2 page directory finder + per-page value params (`IVT_F2_PAGE_TRAILER` per marker → `vstart = 4 + presence_len + trailer`; width/float from the low nibble); **computed** `ivt_f2_geos_per_page()` and `ivt_f2_geography_count()` (descriptor geo count / page count). |
-| `decode-f2.R`   | **n-dimensional** family-2 decode: `ivt_f2_bit_layout()` (power-of-two-nested strides from the data-dim counts) + `ivt_f2_cell_grid()` (cells in dense value order) + `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read) → cell tibble with one column per data dimension. |
+| `container.R`   | page-directory anchor `ivt_idx0()` (reads `u16@558`, validates by checking the first entry points at a page marker — works for any file size) + the legacy 0x1000-stride `ivt_geography_count()` (kept only for the family detector / regression). `IVT_IDX0_DEFAULT=37167` is a fallback. |
+| `decode.R`      | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides. `ivt_decode()` walks the paged-coordinate cartesian, decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`) → cell tibble (`geo` + one slug column per data dimension). Handles geography-paged (former family 1) and geography-in-page/multiple-geos-per-page (former family 2) identically. |
+| `container-f2.R`| family-2 page-directory finder (used by the metadata path) + per-page value params (`IVT_F2_PAGE_TRAILER` per marker); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
+| `decode-f2.R`   | shared presence-bitmap primitives used by `ivt_layout()`/`ivt_decode()` for **every** table (the `ivt_f2_` prefix is historical): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()` (power-of-two-nested strides), `ivt_f2_cell_grid()` (cells in dense value order), `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read). |
 | `codebook-f2.R` | family-2 codebook: member-ordered geography DGUIDs (fast vectorised `2021…` Pascal-string scan, first-appearance dedup); data-dimension member labels (tail scan; EN block precedes the `1..n` ordinal block); and the full **geography attribute table** `ivt_f2_geo_attributes()` (segments the attribute-major growing groups via the DGUID anchor; `group_lo = d0 − 10·G`; per-attribute EN-then-FR slots). Also `ivt_f2_geo_inline()` for the **pre-DGUID 1991 layout** (`"name (GEOUID) flag"` blocks; bilingual names). One metadata-driven entry point `ivt_f2_geographies()` reads the layout + geography count from the **header** (`ivt_f2_geo_is_inline()`, `ivt_f2_header_geo_count()`, `ivt_f2_descriptor()`), dispatches to the right parser, returns a unified `member_id/geo_name/geo_uid/…` table, and validates the row count against the header (`ivt_f2_check_geo_count()`). |
 | `read-f2.R`     | family-2 reader `ivt_f2_read()`, metadata (`ivt_f2_metadata()` incl. DGUIDs + dimension member labels), and `ivt_f2_tidy()` (label by DGUID + member names). |
 | `codebook.R`    | header identity, dimension member blocks, geography names + DGUIDs, footnotes (family-1 codebook). |
@@ -94,12 +95,59 @@ unrecognised files are still rejected via `ivt_is_supported()`.
   `0x88/0xa8/0xa2/0xa4/0x84/0x82`. The store keeps only **non-zero** cells (the
   CSV publishes the zeros), so a missing cell = 0; entirely empty geographies
   (zero presence record) are normal.
-- Member id columns in `cells` are **1-based**; data columns are named by a
-  per-dimension slug (`0x02`→`gender`, `0x07`→`age`, else the name's leading
-  word, e.g. `marital`).
+- Member id columns in `cells` are **1-based**. Data columns are named by a
+  **purely generic, name-agnostic slug** (`ivt_dim_slug()`): dimension 1 is
+  geography → `geo` (structural), every other dimension takes the lower-cased
+  leading word of its metadata name (`marital`, `tenure`, `single`, …), made
+  unique. **No code branches on dimension names or type bytes** — dimensions are
+  interchangeable; everything the decoder needs is structural (positions, counts,
+  the 2048-bit cap). Human-readable labels come from the codebook at `tidy` time.
 - Use `ivt_f2_geo_count()` (descriptor geography record), **not**
   `ivt_f2_header_geo_count()` (the fixed-offset u16 reads a wrong 16320 for 4-dim
   descriptors), for any geography sizing.
+- **Geography is the first descriptor dimension** (`ivt_f2_geo_dim()`), identified
+  **positionally, not by a type byte**: the geography descriptor *type* differs by
+  format (`0x10` in modern 2021 family-2 files, count u16; `0x08` in the family-1
+  reference table, count u8). The old `type == 0x10` filter silently misread
+  98-10-0241's geography count as 16383. `ivt_f2_data_dims()` likewise takes "all
+  dims after the first" rather than filtering by type.
+- **`ivt_f2_descriptor()` anchors dimension records on the doubled name**, not on a
+  fixed `<type> 01 <upper>` marker (the type list is gone). Each record stores its
+  name twice back-to-back after a `0x01`; count/type framing bytes before it vary.
+  The **reference-period / facet** dimension (type `0x0e`, e.g. "Year (2)" in
+  tables spanning two censuses) is framed `[type][count][01][01]<name>` — type-
+  first with a doubled `0x01` — which the old scan dropped. The type byte is a
+  storage/classification tag, **not** a fixed dimension identity (e.g. `0x02` is
+  "Statistics" in 98-10-0241 but gender/sex in the family-2 census tables).
+- **There is ONE decode pattern — "family 1 / family 2" are two cases of it**
+  (`decode.R`, `ivt_layout()` + `ivt_decode()`). Nest **every** dimension
+  power-of-two-positionally (`ivt_f2_bit_layout()`), data dimensions innermost
+  (descriptor order, last fastest) and **geography outermost**. Each page carries a
+  fixed **2048-bit (256-byte) presence record**, filled innermost-first; the same
+  nesting describes the in-page bits (bit units) **and** the directory entries
+  (8-byte entry units). **Exactly one dimension straddles** the 2048-bit boundary:
+  its in-page part (`ipc = floor(2048/inner_block)`) stays in the bitmap, the rest
+  becomes `window_count = ceil(count/ipc)` directory-paged windows; every dimension
+  *outside* the straddle is positional in the directory (power-of-two-nested entry
+  strides, window innermost). The "family" is just **which dimension straddles**:
+  - a **data** dimension straddles → geography is pushed fully into the directory,
+    one page per (geography, outer-data-coord), a per-geography directory block
+    (former "family 1": 98-10-0241 Period straddles, geo stride 512 entries=0x1000;
+    98-10-0077 Ages; 98-10-0662 Health, geo stride 16 entries=0x80).
+  - the data dims fit ≤2048 bits → **geography itself straddles**: `gpp = 2048 /
+    data_bits` geographies share each page's presence record and the directory is a
+    flat list of geography-window pages (former "family 2": 98-10-0023 4 geos/page,
+    98-10-0129 2/page, 1991 4/page). `ivt_layout()$geo_in_page` is the discriminator.
+- Per-page value width/type and value-start come from the marker (`ivt_value_trailer()`):
+  trailer 0 when the marker's third byte is `0x00`, else the per-marker family-2
+  constant (`0x82`→16, `0x84`→8, `0xa2`→34, `0xa4`→18, …). Some tables realise the
+  high-A trailers as a `0xFF` run, others as fixed padding — all land identically.
+- A **reference-period / facet** dimension (type `0x0e`, e.g. "Year (2)") is **not**
+  geography-folded: in 98-10-0077 *Year* is the **innermost in-page dimension** (the
+  value run carries the 2020 then 2015 value consecutively). `ivt_f2_geo_count()`
+  (descriptor) gives the true 174 geographies. The legacy `ivt_geography_count()`
+  (0x1000 stride) returns 348 here only as an artefact of striding a directory whose
+  real per-geography stride is 0x2000; it is used only by the family detector.
 
 ## Dev workflow
 
@@ -130,15 +178,26 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
 
 ## Likely next tasks
 
-- **N-dimensional family-2 decode — DONE.** `decode-f2.R` is descriptor-driven and
-  validated cell-exact on the 4-dim 98-10-0129 (incl. the `0xa4` marker) plus the
-  3-dim/legacy tables (158 tests green). Remaining nicety: the geography
-  **DGUID member-ordering** has a few tail artifacts (`ivt_f2_geo_dguids()`
-  first-appearance dedup) — the *cell* decode by member id is complete and exact,
-  but a handful of DGUID *labels* near the end can be misordered (the same
-  ~99.8% class as the geo-attribute note); empty geographies decode as zero cells.
-- The **2001/2006 "F"-series** products (`97F0015XCB2001041`, `98F0172X`) are not
-  yet decoded — possibly an older B2020 variant; need a confirmed local copy.
+- **Unified cell decode — DONE.** One `ivt_layout()` + `ivt_decode()` (`decode.R`)
+  decodes every table, reproducing the two former decoders **byte-identical** on all
+  six reference tables (0241/0077/0662 data-dim straddle, 0023/0129/1991 geography
+  straddle). The decoder is fully name/type-agnostic. **Remaining name-tied code:
+  the family-1 *metadata* path** — `ivt_read_codebook()` / `IVT_DIMS` is still
+  hard-coded to 98-10-0241's dimensions, so 98-10-0077 / 98-10-0662 dimension-member
+  *labels* are not populated (their *cells* are exact). The clean fix is to route
+  family-1 metadata through the descriptor-driven `ivt_f2_metadata()` (generic
+  member labels) while preserving family-1 geography *names*; that would also let
+  `ivt_family()` collapse further. The 2048-bit presence cap is assumed constant
+  (all six tables use it); a float64 table or a no-straddle table would harden it.
+- **Family-2 geography DGUID member-ordering** has a few tail artifacts
+  (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
+  complete and exact, but a handful of DGUID *labels* near the end can be misordered.
+- The older **2016-census `98-400-X` / 2001-2006 "F"-series** products are a
+  **different container variant** (e.g. `98-400-X2016019`: descriptor framing the
+  current `ivt_f2_descriptor()` misreads as `n_dim=524`, page marker `82 01 _ 00`
+  with `b3=0x00` not `0x08`, header dir-pointer not at `@558`). Same lineage
+  (`04 00 20 00`, doubled-name descriptors, presence+value pages) but needs a
+  variant descriptor parser + marker/header detection; rejected cleanly today.
 - **Family-2 geography attributes — DONE.** `ivt_f2_geo_attributes()` decodes all
   11 codebook attributes (name, DGUID, level, type abbr, prov abbr, two geocodes,
   data-quality flag, non-response rate; `GEO_TYPE_DESC`/`DQF_NOTE` decodable but
@@ -147,13 +206,10 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   (`Sambaa K’e`), (b) `GEO_TYPE_DESC`/`DQF_NOTE` to 100% (needs block-finder
   fidelity for long text in the largest group), (c) speed up the ~30 s codebook
   block-scan if it becomes a bottleneck.
-- Wire the **1991** `1003011` container into `read_ivt()`. **Geography is done**:
-  `ivt_f2_geo_inline()` decodes all 41,859 geographies (bilingual name + GEOUID +
-  quality flag) exact — container detection and the block scanner carry over from
-  2021, but the codebook is the pre-DGUID inline `"name (GEOUID) flag"` layout
-  (`ivt_f2_geo_is_inline()` routes to it). Still to wire: Age(110)/Sex(3) labels
-  (bilingual), the int16/int32 cell decode (dense validated, sparse byte-pair-swap
-  cracked), and a family-detector that admits 1991 into `read_ivt()`.
+- **1991 `1003011` — DONE.** Fully wired into `read_ivt()` via the unified decoder
+  (geography straddles, 4 geos/page, int16/int32 pages) + the pre-DGUID inline
+  geography codebook (`ivt_f2_geo_inline()`, all 41,859 geographies exact) and
+  bilingual Age(110)/Sex(3) labels.
 - Footnote *text* extraction is robust (maximal text-byte runs; all 10 EN + 10
   FR recovered, exact vs the metadata). Remaining nicety: attribute each footnote
   to the dimension/member it annotates (by codebook proximity or note ids).

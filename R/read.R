@@ -1,7 +1,3 @@
-# Short, tidy column names for each IVT dimension (in declaration order).
-IVT_DIM_COLS <- c("geography", "age", "household_type", "period_of_construction",
-                  "statistic", "housing_indicator", "tenure")
-
 # Identify the Beyond 20/20 container family from the raw bytes. Both families
 # share the `04 00 20 00` signature; they differ in how page directories are
 # stored. Returns 1 (per-geography directories at a fixed stride, e.g. 98-10-0241),
@@ -9,7 +5,21 @@ IVT_DIM_COLS <- c("geography", "age", "household_type", "period_of_construction"
 ivt_family <- function(raw) {
   if (length(raw) < 8L) return(NA_integer_)
   if (!identical(as.integer(raw[1:4]), c(4L, 0L, 32L, 0L))) return(NA_integer_)
-  if (length(raw) >= IVT_IDX0 + 16L && ivt_geography_count(raw) > 0L) return(1L)
+  # The cell decode is unified (see decode.R); `family` now only selects the
+  # metadata path. The two differ in *which dimension straddles* the 2048-bit page
+  # boundary: when the data dimensions alone overflow it a data dimension
+  # straddles and geography is paged per-geography (the "family 1" metadata:
+  # geography names via the inline codebook); when they fit, geography itself
+  # straddles and packs several geographies per page (the "family 2" metadata:
+  # DGUIDs + descriptor-driven members). `geo_in_page` (straddle == geography)
+  # discriminates cleanly and, unlike the legacy 0x1000-stride probe, also handles
+  # small tables (e.g. 98-10-0662) whose per-geography directory stride is not 0x1000.
+  if (ivt_f2_decodable(raw)) {
+    lay <- tryCatch(ivt_layout(raw), error = function(e) NULL)
+    if (!is.null(lay) && !lay$geo_in_page && ivt_idx0(raw) != IVT_IDX0_DEFAULT)
+      return(1L)
+  }
+  if (length(raw) >= IVT_IDX0_DEFAULT + 16L && ivt_geography_count(raw) > 0L) return(1L)
   # family 2 requires both a page directory and a descriptor the decoder can use;
   # other `04 00 20 00` products expose a directory but an undecoded descriptor.
   if (!is.null(ivt_f2_find_directory(raw)) && ivt_f2_decodable(raw)) return(2L)
@@ -47,9 +57,7 @@ read_ivt <- function(path, geo_attributes = FALSE) {
   }
   if (family == 2L) return(ivt_f2_read(raw, path, geo_attributes = geo_attributes))
   meta <- ivt_read_codebook(raw)
-  ng <- ivt_geography_count(raw)
-  parts <- lapply(0:(ng - 1L), function(g) ivt_decode_geography(raw, g))
-  cells <- do.call(rbind, parts)
+  cells <- ivt_decode(raw)
   structure(list(cells = cells, metadata = meta, path = path, family = 1L),
             class = "ivt")
 }
@@ -92,19 +100,23 @@ ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE) {
   if (!labels) return(cells)
   if (isTRUE(x$family == 2L)) return(ivt_f2_tidy(x, trim_labels))
 
+  # Generic, n-dimensional labelling (mirrors ivt_f2_tidy): geography by name +
+  # DGUID, each data-dimension column (named by its slug, in the decoder's
+  # descriptor order) by its codebook member labels. The cells' non-geography
+  # columns line up with the non-geography dimensions in declaration order.
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
-  geo_name <- fix(meta$geographies$name)
   dguid <- meta$geographies$dguid
   out <- tibble::tibble(
-    geography = geo_name[cells$geo],
+    geography = fix(meta$geographies$name)[cells$geo],
     dguid = if (length(dguid)) dguid[cells$geo] else NA_character_
   )
-  # dimension id columns in cells, in declaration order after geography
-  idcols <- c("age", "hh", "period", "stat", "hi", "tenure")
-  for (i in seq_along(idcols)) {
-    dim_members <- fix(meta$dimensions[[i + 1L]]$members)
-    out[[IVT_DIM_COLS[i + 1L]]] <- dim_members[cells[[idcols[i]]]]
+  datacols <- setdiff(names(cells), c("geo", "value"))
+  data_dims <- meta$dimensions[-1L]
+  for (j in seq_along(datacols)) {
+    labs <- if (j <= length(data_dims)) fix(data_dims[[j]]$members) else NULL
+    out[[datacols[j]]] <- if (!is.null(labs) && length(labs)) labs[cells[[datacols[j]]]]
+                          else cells[[datacols[j]]]
   }
   out$value <- cells$value
   out

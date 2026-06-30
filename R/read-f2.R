@@ -30,7 +30,8 @@ ivt_f2_variable_list_names <- function(raw) {
 
 # Uniform dimension model, driven by the header descriptor (present in BOTH
 # formats). Every dimension is described the same way: `name`, `count`, `type`
-# (0x10 geography, 0x07 age-type, 0x02 gender/sex-type), `is_geography`, and, for
+# (0x07 age-type, 0x02 gender/sex-type; geography is the first dimension,
+# identified positionally rather than by type byte), `is_geography`, and, for
 # the non-geography data dimensions, the decoded member `members` (labels). The
 # member labels are attached by matching the descriptor's member count to the
 # label blocks (`ivt_f2_dim_member_labels()`), so Age/Gender (2021) and Age/Sex
@@ -43,7 +44,7 @@ ivt_f2_dimensions <- function(raw) {
   vl <- ivt_f2_variable_list_names(raw)
   lapply(seq_along(d$dims), function(i) {
     dim <- d$dims[[i]]
-    is_geo <- dim$type == 0x10L
+    is_geo <- i == 1L                       # geography is the first dimension
     name <- if (!is.null(vl) && i <= length(vl)) vl[i] else dim$name
     list(name = name, count = dim$count, type = dim$type, is_geography = is_geo,
          members = if (is_geo) NULL else labels[[as.character(dim$count)]])
@@ -162,7 +163,7 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE) {
 ivt_f2_read <- function(raw, path = NULL, geo_attributes = FALSE) {
   dir <- ivt_f2_find_directory(raw)
   if (is.null(dir)) cli::cli_abort("No family-2 page directory found in IVT file.")
-  cells <- ivt_f2_decode(raw, dir)
+  cells <- ivt_decode(raw)
   meta <- ivt_f2_metadata(raw, dir)
   if (isTRUE(geo_attributes)) meta$geographies <- ivt_f2_geographies(raw)
   structure(list(cells = cells, metadata = meta, path = path, family = 2L),
