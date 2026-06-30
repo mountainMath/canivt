@@ -13,19 +13,40 @@
 #' @noRd
 NULL
 
-# Full dimension names from the header "Variable List" (modern format only; the
-# legacy format has none). Dimension names can themselves contain commas (e.g.
-# "Age (in single years), average age and median age (128)"), but each ends in a
-# "(<count>)" hint, so split only after those hints. Returns the full names
-# (incl. a leading "Geography") or NULL when there is no inline Variable List.
-ivt_f2_variable_list_names <- function(raw) {
+# Parse the header "Variable List" into (name, count) pairs (modern format only;
+# the legacy format has none). The Variable List is in DISPLAY order, which need
+# not match the descriptor's storage order (in 98-10-0241 they differ), so it is
+# matched to descriptor dimensions by count, not position. Names can themselves
+# contain commas (e.g. "Age (in single years), average age and median age (128)"),
+# but each entry ends in a "(<count>[<flags>])" hint (e.g. "(13)", "(3C)"), so we
+# split only after those hints and read the count from each. Returns a data frame
+# (name, count) or NULL when there is no inline Variable List.
+ivt_f2_vl_pairs <- function(raw) {
   head <- ivt_header_text(raw)
-  m <- regmatches(head, regexec("Variable List:?\\s*([^\r\n]+)", head))[[1]]
+  m <- regmatches(head, regexec("Variable List:?[ \t]*([^\r\n]+)", head))[[1]]
   if (length(m) < 2L) return(NULL)
-  marked <- gsub("(\\([0-9]+\\))\\s*,\\s*", "\\1@@DIM@@", m[2])
+  marked <- gsub("(\\([0-9]+[A-Za-z]*\\))[ \t]*,[ \t]*", "\\1@@DIM@@", m[2])
   parts <- trimws(strsplit(marked, "@@DIM@@", fixed = TRUE)[[1]])
   parts <- parts[nzchar(parts)]
-  c("Geography", sub("\\s*\\([0-9]+\\)\\s*$", "", parts))
+  if (!length(parts)) return(NULL)
+  count <- suppressWarnings(as.integer(
+    sub(".*\\(([0-9]+)[A-Za-z]*\\)[ \t]*$", "\\1", parts)))
+  name <- trimws(sub("[ \t]*\\([0-9]+[A-Za-z]*\\)[ \t]*$", "", parts))
+  data.frame(name = name, count = count, stringsAsFactors = FALSE)
+}
+
+# Full display name for a descriptor dimension. Geography is always "Geography";
+# every other dimension takes the Variable-List entry whose count uniquely matches
+# (the VL is the only source of the untruncated name), falling back to the
+# descriptor's own (possibly truncated) display name when there is no inline VL or
+# the count match is ambiguous.
+ivt_f2_dim_name <- function(dim, is_geo, vl) {
+  if (is_geo) return("Geography")
+  if (!is.null(vl)) {
+    hit <- which(vl$count == dim$count)
+    if (length(hit) == 1L) return(vl$name[hit])
+  }
+  dim$name
 }
 
 # Uniform dimension model, driven by the header descriptor (present in BOTH
@@ -34,20 +55,31 @@ ivt_f2_variable_list_names <- function(raw) {
 # identified positionally rather than by type byte), `is_geography`, and, for
 # the non-geography data dimensions, the decoded member `members` (labels). The
 # member labels are attached by matching the descriptor's member count to the
-# label blocks (`ivt_f2_dim_member_labels()`), so Age/Gender (2021) and Age/Sex
-# (1991) are handled identically. Full dimension names come from the Variable List
-# when present, otherwise the descriptor's (truncated) display name.
+# label blocks (`ivt_f2_dim_member_labels()`), so 98-10-0241's six data dimensions,
+# Age/Gender (2021) and Age/Sex (1991) are handled identically. Full dimension
+# names come from the Variable List (by count) when present, otherwise the
+# descriptor's (truncated) display name.
 ivt_f2_dimensions <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(list())
-  labels <- ivt_f2_dim_member_labels(raw)
-  vl <- ivt_f2_variable_list_names(raw)
+  want <- vapply(d$dims[-1L], `[[`, 1L, "count")
+  labels <- ivt_f2_dim_member_labels(raw, want = want)        # count-keyed fallback
+  # prefer the name-anchored marker labels so two dimensions of the same member
+  # count (e.g. 98-10-0662's 6-member "French used at work" / "English used at
+  # work") get their own labels rather than collapsing onto one count key.
+  by_name <- ivt_f2_marker_labels(raw)
+  name_lut <- stats::setNames(lapply(by_name, `[[`, "labels"),
+                              vapply(by_name, `[[`, "", "name"))
+  vl <- ivt_f2_vl_pairs(raw)
   lapply(seq_along(d$dims), function(i) {
     dim <- d$dims[[i]]
     is_geo <- i == 1L                       # geography is the first dimension
-    name <- if (!is.null(vl) && i <= length(vl)) vl[i] else dim$name
-    list(name = name, count = dim$count, type = dim$type, is_geography = is_geo,
-         members = if (is_geo) NULL else labels[[as.character(dim$count)]])
+    members <- if (is_geo) NULL else {
+      m <- name_lut[[dim$name]]
+      if (is.null(m)) labels[[as.character(dim$count)]] else m
+    }
+    list(name = ivt_f2_dim_name(dim, is_geo, vl), count = dim$count,
+         type = dim$type, is_geography = is_geo, members = members)
   })
 }
 
@@ -100,20 +132,32 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
   out
 }
 
+# Read the full codebook metadata for ANY supported family. The descriptor-driven
+# dimension model and the codebook member/footnote scans are format-agnostic; only
+# the geography layout differs, and that is keyed off the header (`inline` for the
+# pre-DGUID legacy layout) and the geography codebook's shape:
+#   - inline (legacy, e.g. 1991): no DGUID array; key by member id only. Names and
+#     GEOUIDs come from read_ivt(geo_attributes = TRUE) via ivt_f2_geographies().
+#   - single clean codebook (the small family-1 reference tables, e.g. 166
+#     geographies in 98-10-0241): names + DGUIDs are one block each (`geo_simple`).
+#   - chunked codebook (the large family-2 tables): DGUIDs via the fast scan, names
+#     only via read_ivt(geo_attributes = TRUE).
+# `geographies` is a uniform list with `member_id`, an optional `geo_name`, and an
+# optional `geo_uid` (the DGUID, or the bare GEOUID for pre-DGUID tables).
 ivt_f2_metadata <- function(raw, dir = NULL) {
-  if (is.null(dir)) dir <- ivt_f2_find_directory(raw)
   inline <- ivt_f2_geo_is_inline(raw)
   info <- if (inline) ivt_f2_legacy_identity(raw) else ivt_table_info(raw)
   dims <- ivt_f2_dimensions(raw)
   n_geo <- ivt_f2_geo_count(raw)
   if (inline) {
-    # legacy: no fast geography uid (no DGUID pattern); key by member id only.
-    # read_ivt(geo_attributes = TRUE) attaches names/GEOUIDs via ivt_f2_geographies().
     geographies <- list(member_id = seq_len(if (is.na(n_geo)) 0L else n_geo))
   } else {
-    dguids <- ivt_f2_geo_dguids(raw)
-    ivt_f2_check_geo_count(raw, length(dguids))
-    geographies <- list(geo_uid = dguids, member_id = seq_along(dguids))
+    simple <- ivt_f2_geo_simple(raw, n_geo)
+    geo_uid <- if (!is.null(simple) && length(simple$dguid) == n_geo) simple$dguid
+               else ivt_f2_geo_dguids(raw)
+    ivt_f2_check_geo_count(raw, length(geo_uid))
+    geographies <- list(geo_name = if (!is.null(simple)) simple$name else NULL,
+                        geo_uid = geo_uid, member_id = seq_along(geo_uid))
   }
   list(
     product_id        = info$product_id,
@@ -124,15 +168,18 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
     dimension_names   = vapply(dims, `[[`, "", "name"),
     dimension_counts  = vapply(dims, `[[`, NA_integer_, "count"),
     geographies       = geographies,
-    n_geographies     = if (!is.na(n_geo)) n_geo else ivt_f2_geography_count(raw, dir),
+    n_geographies     = if (!is.na(n_geo)) n_geo else {
+                          if (is.null(dir)) dir <- ivt_f2_find_directory(raw)
+                          ivt_f2_geography_count(raw, dir)
+                        },
     footnotes         = if (inline) ivt_f2_legacy_footnotes(raw)
                         else ivt_footnotes(raw, max(0L, length(raw) - 200000L))
   )
 }
 
-# Label a family-2 cell table: geography by DGUID, each data dimension by its
-# member name. Cells are keyed by 1-based member ids (`geo`, plus one column per
-# data dimension), so labels join by direct indexing.
+# Label a decoded cell table (any family): geography by name and/or uid, each data
+# dimension by its member name. Cells are keyed by 1-based member ids (`geo`, plus
+# one column per data dimension), so labels join by direct indexing.
 ivt_f2_tidy <- function(x, trim_labels = TRUE) {
   cells <- x$cells
   meta <- x$metadata
@@ -158,14 +205,4 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE) {
   }
   out$value <- cells$value
   out
-}
-
-ivt_f2_read <- function(raw, path = NULL, geo_attributes = FALSE) {
-  dir <- ivt_f2_find_directory(raw)
-  if (is.null(dir)) cli::cli_abort("No family-2 page directory found in IVT file.")
-  cells <- ivt_decode(raw)
-  meta <- ivt_f2_metadata(raw, dir)
-  if (isTRUE(geo_attributes)) meta$geographies <- ivt_f2_geographies(raw)
-  structure(list(cells = cells, metadata = meta, path = path, family = 2L),
-            class = "ivt")
 }

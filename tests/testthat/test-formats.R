@@ -52,7 +52,7 @@ for (case in ivt_corpus) {
           expect_equal(unname(m$dimension_counts), cc$dims)
         }
         if (!is.null(cc$n_geo)) {
-          expect_equal(length(m$geographies$name), cc$n_geo)
+          expect_equal(length(m$geographies$geo_name), cc$n_geo)
         }
       }
     })

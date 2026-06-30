@@ -58,29 +58,226 @@ ivt_f2_geo_dguids <- function(raw) {
   out[seq_len(k)]
 }
 
-# Member labels for the (non-geography) data dimensions. Each such dimension ends
-# the file as an EN label block immediately followed by its "1..n" ordinal block;
-# the EN block sits right after its FR twin, so the block directly preceding the
-# ordinal block is the English member list. We scan only the tail (cheap) and
-# return a list keyed by member count, e.g. `[["128"]]` = Age, `[["3"]]` = Gender.
-ivt_f2_dim_member_labels <- function(raw, tail_bytes = 400000L) {
+# Each dimension's member labels are anchored in the codebook by a doubled-name
+# header marker -- the same `81 02 02 00` framing for every table -- that carries
+# the dimension's display name (exactly as the header descriptor stores it) and
+# sits immediately after that dimension's English member block (and before its
+# "1..n" ordinal block). `ivt_f2_codebook_dim_markers()` returns those markers as
+# (offset, name) so the labels can be located by NAME rather than by guessing from
+# block adjacency. Validated on 98-10-0241 (7), 98-10-0077 (7), 98-10-0023 (2
+# data-dim markers; geography sits earlier in the 18 MB codebook), 98-10-0662,
+# 98-10-0129 and 1003011.
+ivt_f2_codebook_dim_markers <- function(raw, search_start) {
+  v <- as.integer(raw); n <- length(v)
+  if (search_start >= n - 4L) return(data.frame(offset = integer(0), name = character(0)))
+  reg <- search_start:(n - 4L)
+  off <- reg[v[reg] == 0x81L & v[reg + 1L] == 0x02L &
+             v[reg + 2L] == 0x02L & v[reg + 3L] == 0x00L]
+  if (!length(off)) return(data.frame(offset = integer(0), name = character(0)))
+  # the name is the first printable run (length >= 3) after the marker + framing;
+  # it stops at the 0x01 separator before the doubled copy, so it is a single name.
+  nm <- vapply(off, function(m) {
+    seg <- v[(m + 4L):min(n, m + 120L)]
+    pr <- seg >= 32L & seg <= 126L
+    r <- rle(pr); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
+    for (k in which(r$values))
+      if (r$lengths[k] >= 3L) return(trimws(intToUtf8(seg[starts[k]:ends[k]])))
+    NA_character_
+  }, "")
+  data.frame(offset = off, name = nm, stringsAsFactors = FALSE)
+}
+
+# Match a codebook marker name to one of `dims` (descriptor records). The marker
+# and the descriptor draw the name from the same doubled-name field, but one may be
+# truncated harder than the other, so match when the shorter is a prefix of the
+# longer (>= 4 shared characters). Returns the matched descriptor dimension or NULL.
+ivt_f2_match_dim <- function(name, dims) {
+  if (is.na(name) || !nzchar(name)) return(NULL)
+  for (d in dims) {
+    a <- d$name
+    if (is.null(a) || is.na(a) || !nzchar(a)) next
+    k <- min(nchar(a), nchar(name))
+    if (k >= 4L && substr(a, 1L, k) == substr(name, 1L, k)) return(d)
+  }
+  NULL
+}
+
+# Member labels per data dimension, located by the codebook doubled-name markers
+# (`ivt_f2_codebook_dim_markers()`). For each marker matched to a data dimension we
+# take that dimension's English block -- the Pascal member block ending immediately
+# before the marker -- and keep its trailing `count` records (the block can carry a
+# few leading framing bytes the Pascal scan misreads as records, e.g. 98-10-0077's
+# Ages). This is robust where the old ordinal/adjacency heuristics broke: it labels
+# the 18-member Ages dimension whose English block has 2 leading garbage records,
+# the 2-member reference-period "Year" dimension that has no trailing ordinal block,
+# and -- because it keys on NAME -- two distinct same-count dimensions (98-10-0662's
+# "French used at work" and "English used at work", both 6 members). Returns a list
+# of list(name, count, labels), one per matched dimension, in codebook order.
+ivt_f2_marker_labels <- function(raw, tail_bytes = 600000L) {
+  d <- ivt_f2_descriptor(raw)
+  data_dims <- if (!is.null(d) && length(d$dims) > 1L) d$dims[-1L] else list()
+  if (!length(data_dims)) return(list())
   start <- max(0L, length(raw) - tail_bytes)
-  blocks <- ivt_find_member_blocks(raw, start, min_records = 3L)
+  markers <- ivt_f2_codebook_dim_markers(raw, start)
+  if (!nrow(markers)) return(list())
+  # min_records = 2 so a 2-member reference period (e.g. "Year": 2020 / 2015) is
+  # captured; we only ever read the block immediately before a matched marker.
+  blocks <- ivt_find_member_blocks(raw, start, min_records = 2L)
   if (!length(blocks)) return(list())
-  ord <- order(vapply(blocks, function(b) b$start, 1))
-  B <- blocks[ord]
+  blocks <- blocks[order(vapply(blocks, function(b) b$start, 1))]
+  bstart <- vapply(blocks, function(b) b$start, 1)
   out <- list()
-  for (i in seq_along(B)) {
-    t <- B[[i]]$texts
-    nt <- length(t)
-    if (nt < 3L || i == 1L) next
-    if (!identical(t, as.character(seq_len(nt)))) next   # an "1..n" ordinal block
-    cand <- B[[i - 1L]]$texts
-    if (length(cand) != nt) next
-    key <- as.character(nt)
-    if (is.null(out[[key]])) out[[key]] <- cand          # keep first (member order)
+  for (mi in seq_len(nrow(markers))) {
+    dd <- ivt_f2_match_dim(markers$name[mi], data_dims)
+    if (is.null(dd)) next
+    cnt <- as.integer(dd$count)
+    bi <- which(bstart < markers$offset[mi])
+    if (!length(bi)) next
+    t <- blocks[[bi[length(bi)]]]$texts
+    if (length(t) < cnt) next
+    cand <- t[(length(t) - cnt + 1L):length(t)]
+    if (identical(cand, as.character(seq_len(cnt)))) next   # an ordinal block
+    if (all(grepl("^2021[A-Z][0-9]", cand))) next           # a DGUID block
+    out[[length(out) + 1L]] <- list(name = dd$name, count = cnt, labels = cand)
   }
   out
+}
+
+# Member labels for the (non-geography) data dimensions, keyed by member count.
+# The codebook lays down, per dimension, a French label block, its English twin, a
+# doubled-name header marker, and the member "1..n" ordinal block (plus a
+# "Code"/"English Desc" sub-header). We recover the ENGLISH label block three ways,
+# in order of robustness:
+#   - primary: the doubled-name header marker names its dimension, so the English
+#     block is the one ending right before it (`ivt_f2_marker_labels()`). This is
+#     name-anchored and count-exact, so it handles leading-garbage English blocks
+#     and ordinal-less short dimensions the heuristics below miss.
+#   - fallback 1: the block immediately preceding a "1..n" ordinal block of the same
+#     length is that dimension's English member list.
+#   - fallback 2: the LAST dimension is truncated at EOF and so has no trailing
+#     ordinal block (e.g. 98-10-0241's Age); recover it as the English (second) half
+#     of an adjacent same-length pair of clean, whitespace-bearing label blocks.
+# We only look for the member counts the descriptor declares (`want`), so unrelated
+# blocks of other lengths -- geography names/types, data-quality note text -- are
+# never considered. (Counts can collide; the count-keyed result keeps the first
+# match. `ivt_f2_dimensions()` resolves collisions per dimension by NAME via
+# `ivt_f2_marker_labels()`.) Validated exact for Age/Gender (98-10-0023), Age/Sex
+# (1991), the six 98-10-0241 data dimensions and all six 98-10-0077 dimensions
+# (incl. the formerly-empty Ages-18 and Year-2).
+ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
+  if (is.null(want)) want <- ivt_f2_data_dims(raw)$counts
+  want <- unique(as.integer(want[!is.na(want)]))
+  if (!length(want)) return(list())
+  out <- list()
+  put <- function(L, t) {
+    k <- as.character(L)
+    if (L %in% want && is.null(out[[k]])) out[[k]] <<- t  # keep first (member order)
+  }
+  for (ml in ivt_f2_marker_labels(raw, tail_bytes)) put(ml$count, ml$labels)  # primary
+  if (all(as.character(want) %in% names(out))) return(out)
+  # heuristic fallbacks for any count the markers did not resolve (and for tables
+  # without the doubled-name markers).
+  start <- max(0L, length(raw) - tail_bytes)
+  blocks <- ivt_find_member_blocks(raw, start, min_records = 3L)
+  if (!length(blocks)) return(out)
+  B <- blocks[order(vapply(blocks, function(b) b$start, 1))]
+  texts <- lapply(B, `[[`, "texts")
+  len <- lengths(texts)
+  ords <- vapply(texts, function(t) identical(t, as.character(seq_len(length(t)))),
+                 logical(1))
+  # a "clean label" block: real member labels are indented single-line strings, so
+  # they carry whitespace and never embed control characters or repeat a single byte
+  # (the latter two are how value-page noise shows up in the Pascal block scan).
+  spaced <- vapply(texts, function(t)
+    !any(grepl("[\r\n\t]", t)) && !any(grepl("^(.)\\1*$", t)) &&
+      mean(grepl("[[:space:]]", t)) > 0.5, logical(1))
+  for (i in seq_along(B))                       # fallback 1: precedes its 1..n block
+    if (i > 1L && ords[i] && len[i - 1L] == len[i]) put(len[i], texts[[i - 1L]])
+  for (i in seq_along(B))                       # fallback 2: English half of a pair
+    if (i > 1L && spaced[i] && spaced[i - 1L] && len[i] == len[i - 1L])
+      put(len[i], texts[[i]])
+  out
+}
+
+# The geography dimension carries its own **attribute schema** in the codebook: a
+# named, ordered field list (`GEO_NAME`, `GEO_TYPE_DESC`, ..., `DGUID`, ...), one
+# entry per attribute, each later laid down EN then FR -- the geography equivalent
+# of the data dimensions' Variable List. Parsing it lets us address geography
+# attribute arrays **by name** (GEO_NAME, DGUID) instead of sniffing their content
+# (a "Canada" first entry, a "2021..." DGUID prefix), so nothing here depends on a
+# census year or a country name. We read the ordered EN field stems; the same list
+# names the attribute arrays in storage order. Returns a character vector of
+# attribute names, or NULL when no schema is present (older / inline layouts).
+# Note: this works in TEXT space (field names + order only) -- never byte offsets,
+# which the latin-1 -> UTF-8 round-trip does not preserve 1:1.
+ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
+  start <- max(1L, length(raw) - tail_bytes + 1L)
+  s <- raw_to_latin1(raw[start:length(raw)])
+  m <- regexpr("GEO_NAME_EN", s, fixed = TRUE)
+  if (m < 1L) return(NULL)
+  win <- substr(s, m, m + 600L)
+  en <- regmatches(win, gregexpr("[A-Z][A-Z0-9_]*_EN", win))[[1]]
+  if (!length(en)) return(NULL)
+  unique(sub("_EN$", "", en))
+}
+
+# Schema-driven, content-free geography for single-block tables: geography is just
+# dimension 1, anchored by its codebook doubled-name marker exactly like the data
+# dimensions (`ivt_f2_marker_labels()`); the attribute arrays that follow it are
+# named by `ivt_f2_geo_schema()` and mapped to fields by **slot**, so no array is
+# picked by its content. The arrays after the marker are an optional leading
+# display-name pair plus every schema attribute laid down EN then FR; `lead` (0 or
+# the 2-block display pair) is derived from the array/attribute counts rather than
+# assumed. Returns list(name = GEO_NAME, dguid = DGUID) or NULL when the schema,
+# the marker, or a consistent array layout is absent (then the caller falls back to
+# the content-based detector). Validated: DGUIDs byte-identical to the legacy
+# "2021..." scan on 98-10-0241 (166) and 98-10-0077 (174), with GEO_NAME the
+# canonical short name field.
+ivt_f2_geo_simple_schema <- function(raw, n_geo, blocks, search_start) {
+  attrs <- ivt_f2_geo_schema(raw)
+  if (is.null(attrs)) return(NULL)
+  ni <- match("GEO_NAME", attrs); di <- match("DGUID", attrs)
+  if (is.na(ni) || is.na(di)) return(NULL)
+  d <- ivt_f2_descriptor(raw)
+  geo <- ivt_f2_geo_dim(if (is.null(d)) NULL else d$dims)   # geography is dim 1
+  if (is.null(geo)) return(NULL)
+  markers <- ivt_f2_codebook_dim_markers(raw, search_start)
+  hit <- which(vapply(markers$name, function(nm) {
+    if (is.na(nm)) return(FALSE)
+    k <- min(nchar(nm), nchar(geo$name))
+    k >= 4L && substr(nm, 1L, k) == substr(geo$name, 1L, k)
+  }, logical(1)))
+  if (!length(hit)) return(NULL)
+  geomk <- markers$offset[hit[1]]
+  after <- Filter(function(b) b$start > geomk && length(b$texts) == n_geo, blocks)
+  after <- after[order(vapply(after, function(b) b$start, 1))]
+  lead <- length(after) - 2L * length(attrs)             # optional display-name pair
+  if (!(lead %in% c(0L, 2L)) || length(after) < 2L * length(attrs) + lead)
+    return(NULL)
+  en <- function(k) after[[lead + 2L * (k - 1L) + 1L]]$texts  # the k-th attr, EN copy
+  list(name = en(ni), dguid = en(di))
+}
+
+# Cheap geography names + DGUIDs for tables whose geography codebook is a single
+# clean block per attribute (the small family-1 reference tables, e.g. 166
+# geographies in 98-10-0241). Prefers the schema-driven, content-free path
+# (`ivt_f2_geo_simple_schema()`); falls back to the content-based array detector
+# (`ivt_geo_arrays()`) for layouts without the marker/schema. Returns NULL when no
+# single length-`n_geo` name block exists -- the large family-2 tables (tens of
+# thousands of geographies) store the attributes attribute-major in 256-member
+# chunks, so their names need the slower `ivt_f2_geo_attributes()` path (via
+# read_ivt(geo_attributes = TRUE)) instead.
+ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  start <- max(0L, length(raw) - tail_bytes)
+  blocks <- ivt_find_member_blocks(raw, start, min_records = 3L)
+  if (!length(blocks)) return(NULL)
+  sd <- ivt_f2_geo_simple_schema(raw, n_geo, blocks, start)
+  if (!is.null(sd)) return(sd)
+  ga <- ivt_geo_arrays(blocks, n_geo)
+  if (is.null(ga$names)) return(NULL)
+  list(name = ga$names$texts,
+       dguid = if (!is.null(ga$dguids)) ga$dguids$texts else NULL)
 }
 
 # --- Full geography attribute table ------------------------------------------

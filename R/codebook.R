@@ -12,24 +12,6 @@
 #' @noRd
 NULL
 
-# Dimensions in IVT declaration order, with the distinctive English substring
-# that identifies that dimension's English member-name block and the expected
-# member count. Geography (handled separately) has no "Total -" member.
-IVT_DIMS <- list(
-  list(name = "Geography", keyword = NA_character_, count = NA_integer_),
-  list(name = "Age of primary household maintainer",
-       keyword = "Age of primary household", count = 9L),
-  list(name = "Household type including census family structure",
-       keyword = "Household type including", count = 16L),
-  list(name = "Period of construction",
-       keyword = "Period of construction", count = 13L),
-  list(name = "Statistics", keyword = "Number of private households", count = 3L),
-  list(name = "Housing indicators", keyword = "Housing indicators", count = 6L),
-  list(name = paste0("Tenure including presence of mortgage payments ",
-                     "and subsidized housing"),
-       keyword = "Tenure including presence", count = 7L)
-)
-
 # Scan a region for maximal runs of consecutive Pascal records (member lists),
 # tolerating a single 0x00 separator between records. Returns a list of blocks
 # with $start (0-based) and $texts.
@@ -100,14 +82,6 @@ ivt_geo_arrays <- function(blocks, n) {
   list(names = name_block, dguids = dguid_block)
 }
 
-ivt_pick_english_block <- function(blocks, count, keyword) {
-  for (b in blocks) {
-    if (length(b$texts) == count && any(grepl(keyword, b$texts, fixed = TRUE)))
-      return(b)
-  }
-  NULL
-}
-
 # A "text byte": printable ASCII, tab/newline/carriage-return, or latin-1
 # accented range. Footnote prose is built only from these; the record framing
 # (`00 01 01 <u16 length>`) always contains a NUL or sub-0x09 control byte, so
@@ -151,38 +125,3 @@ ivt_footnotes <- function(raw, search_start) {
   out
 }
 
-#' Read the full IVT codebook from a raw vector.
-#' @return a list: table info, `dimensions` (each with `members`), `geographies`
-#'   (name + dguid + member_id), and `footnotes`.
-#' @keywords internal
-#' @noRd
-ivt_read_codebook <- function(raw, tail_bytes = 200000L) {
-  info <- ivt_table_info(raw)
-  search_start <- max(0L, length(raw) - tail_bytes)
-  blocks <- ivt_find_member_blocks(raw, search_start, min_records = 3L)
-
-  big <- Filter(function(b) length(b$texts) > 100L, blocks)
-  ngeo <- if (length(big)) min(vapply(big, function(b) length(b$texts), 1L)) else 0L
-  geo <- ivt_geo_arrays(blocks, ngeo)
-  names_v <- if (!is.null(geo$names)) geo$names$texts else character(0)
-  dguid_v <- if (!is.null(geo$dguids)) geo$dguids$texts else character(0)
-
-  dims <- lapply(IVT_DIMS, function(d) {
-    if (is.na(d$keyword)) {
-      list(name = d$name, count = length(names_v), members = names_v)
-    } else {
-      b <- ivt_pick_english_block(blocks, d$count, d$keyword)
-      list(name = d$name, count = d$count,
-           members = if (!is.null(b)) b$texts else character(0))
-    }
-  })
-
-  list(
-    product_id = info$product_id, title_en = info$title_en,
-    title_fr = info$title_fr, universe = info$universe,
-    dimensions = dims,
-    geographies = list(name = names_v, dguid = dguid_v,
-                       member_id = seq_along(names_v)),
-    footnotes = ivt_footnotes(raw, search_start)
-  )
-}

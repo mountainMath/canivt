@@ -55,10 +55,15 @@ read_ivt <- function(path, geo_attributes = FALSE) {
       i = "This package decodes the two 2021-era Beyond 20/20 container families."
     ))
   }
-  if (family == 2L) return(ivt_f2_read(raw, path, geo_attributes = geo_attributes))
-  meta <- ivt_read_codebook(raw)
+  # One decode path and one metadata path for every family (the "family" now only
+  # tags provenance / the geography attribute option). The full geography attribute
+  # table is only available for the large family-2 tables whose names are not in the
+  # cheap single-block codebook; the family-1 tables already carry names by default.
   cells <- ivt_decode(raw)
-  structure(list(cells = cells, metadata = meta, path = path, family = 1L),
+  meta <- ivt_f2_metadata(raw)
+  if (isTRUE(geo_attributes) && family == 2L)
+    meta$geographies <- ivt_f2_geographies(raw)
+  structure(list(cells = cells, metadata = meta, path = path, family = family),
             class = "ivt")
 }
 
@@ -77,8 +82,7 @@ ivt_metadata <- function(path) {
   if (is.na(family)) {
     cli::cli_abort("Unsupported or unrecognised IVT format in {.path {path}}.")
   }
-  if (family == 2L) return(ivt_f2_metadata(raw))
-  ivt_read_codebook(raw)
+  ivt_f2_metadata(raw)
 }
 
 #' Tidy an `ivt` object into a labelled data frame
@@ -96,30 +100,8 @@ ivt_metadata <- function(path) {
 #' @export
 ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE) {
   stopifnot(inherits(x, "ivt"))
-  cells <- x$cells
-  if (!labels) return(cells)
-  if (isTRUE(x$family == 2L)) return(ivt_f2_tidy(x, trim_labels))
-
-  # Generic, n-dimensional labelling (mirrors ivt_f2_tidy): geography by name +
-  # DGUID, each data-dimension column (named by its slug, in the decoder's
-  # descriptor order) by its codebook member labels. The cells' non-geography
-  # columns line up with the non-geography dimensions in declaration order.
-  meta <- x$metadata
-  fix <- if (trim_labels) trimws else identity
-  dguid <- meta$geographies$dguid
-  out <- tibble::tibble(
-    geography = fix(meta$geographies$name)[cells$geo],
-    dguid = if (length(dguid)) dguid[cells$geo] else NA_character_
-  )
-  datacols <- setdiff(names(cells), c("geo", "value"))
-  data_dims <- meta$dimensions[-1L]
-  for (j in seq_along(datacols)) {
-    labs <- if (j <= length(data_dims)) fix(data_dims[[j]]$members) else NULL
-    out[[datacols[j]]] <- if (!is.null(labs) && length(labs)) labs[cells[[datacols[j]]]]
-                          else cells[[datacols[j]]]
-  }
-  out$value <- cells$value
-  out
+  if (!labels) return(x$cells)
+  ivt_f2_tidy(x, trim_labels)
 }
 
 #' @export
@@ -127,17 +109,13 @@ print.ivt <- function(x, ...) {
   m <- x$metadata
   cli::cli_h1("IVT table {m$product_id}")
   cli::cli_text(m$title_en)
-  if (isTRUE(x$family == 2L)) {
-    cli::cli_text("{nrow(x$cells)} cells | {m$n_geographies} geographies | {length(m$dimension_names)} dimensions | {length(m$footnotes)} footnotes")
-    geo_msg <- if (!is.null(m$geographies[["geo_name"]]))
-      "family 2 (geography labelled by name + uid)"
+  cli::cli_text("{nrow(x$cells)} cells | {m$n_geographies} geographies | {length(m$dimensions)} dimensions | {length(m$footnotes)} footnotes")
+  geo_msg <- if (!is.null(m$geographies[["geo_name"]]))
+      "geography labelled by name + uid"
     else if (!is.null(m$geographies[["geo_uid"]]))
-      "family 2 (geography labelled by DGUID; read_ivt(geo_attributes=TRUE) for names)"
+      "geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)"
     else
-      "family 2 (geography keyed by member id; read_ivt(geo_attributes=TRUE) for names)"
-    cli::cli_text(cli::col_grey(geo_msg))
-  } else {
-    cli::cli_text("{nrow(x$cells)} cells | {length(m$geographies$name)} geographies | {length(m$dimensions)} dimensions | {length(m$footnotes)} footnotes")
-  }
+      "geography keyed by member id (read_ivt(geo_attributes=TRUE) for names)"
+  cli::cli_text(cli::col_grey(geo_msg))
   invisible(x)
 }

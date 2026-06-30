@@ -156,11 +156,46 @@ units) and the directory entries (8-byte entry units).
   byte is `0x00`, else the per-marker family-2 constant (`0x82`→16, `0x84`→8,
   `0xa2`→34, `0xa4`→18, …). Some tables realise the high-A trailers as a `0xFF` run,
   others as fixed padding — all land identically.
-- [ ] **Family-1 metadata labels remain name-tied.** `ivt_read_codebook()` /
-  `IVT_DIMS` is still hard-coded to 98-10-0241's dimensions, so 98-10-0077 /
-  98-10-0662 dimension-member *labels* aren't populated (cells are exact). Routing
-  family-1 metadata through the descriptor-driven `ivt_f2_metadata()` (while keeping
-  family-1 geography names) is the remaining cleanup.
+- [x] **Family-1 metadata is now descriptor-driven (no name-tied code).** The
+  hard-coded `IVT_DIMS` / `ivt_read_codebook()` are gone; `read_ivt()` /
+  `ivt_metadata()` run the single `ivt_f2_metadata()` for every family. Dimension
+  member labels come from `ivt_f2_dim_member_labels(raw, want)` (codebook
+  doubled-name markers; ordinal-anchored + adjacent-FR/EN-pair heuristics as
+  fallback), full dimension names from the header Variable List matched **by count**
+  (`ivt_f2_vl_pairs()`), and geography names+DGUIDs from the cheap single-block
+  codebook (`ivt_f2_geo_simple()`). `geographies` is uniformly `geo_name`/`geo_uid`/
+  `member_id` and `ivt_tidy()` emits `geo_name`/`geo_uid` for all families.
+  98-10-0241 is exact (names, DGUIDs, all 6 data-dim labels, footnotes).
+- [x] **Member labels are anchored by the codebook doubled-name marker.** Each
+  dimension's codebook entry carries a `81 02 02 00` header marker bearing the
+  dimension's display name (same as the header descriptor) right after its English
+  member block; `ivt_f2_codebook_dim_markers()` + `ivt_f2_marker_labels()` match the
+  marker name to a descriptor dimension and take that block's trailing `count`
+  records. This is metadata-derived (name, not block-adjacency guessing) and closes
+  three gaps: **98-10-0077 `Ages`(18)** (English block has 2 leading framing records
+  → take the tail), **98-10-0077 `Year`(2)** (a 2-member reference period with no
+  trailing ordinal block, values `2020`/`2015`), and **98-10-0662's two 6-member
+  language dimensions** (`French used at work` / `English used at work` — same count,
+  so the count-keyed store collapsed them; `ivt_f2_dimensions()` now resolves them
+  per dimension by NAME). All six tables label every data dimension; byte-identical
+  to the old output on every dimension that previously labelled.
+- [~] **Geography parsed from the file's own attribute schema (content-free).**
+  Geography is dimension 1 with the same `81 02 02 00` doubled-name marker as every
+  data dim; the file also stores a **geography attribute schema** — the named field
+  list `GEO_NAME · GEO_TYPE_DESC · GEO_TYPE_ABBR · GEO_LEVEL_DES · PROV_ABBR · DGUID
+  · ALT_GEO_CODE · PR_CODE · DQF_CODE · DQF_NOTE · TNR_…` (each `_EN`/`_FR`), the
+  geography analogue of the data dims' Variable List (`ivt_f2_geo_schema()`).
+  **Stage 1 (single-block tables, 0241/0077): done.** `ivt_f2_geo_simple_schema()`
+  locates geography by its marker and reads attribute arrays **by schema slot/name**
+  — DGUID and GEO_NAME are no longer found by sniffing a `"2021…"` prefix or a
+  `"Canada"` first entry. DGUIDs are byte-identical to the legacy `"2021"` scan;
+  `GEO_NAME` is now the canonical short name (e.g. `Corner Brook`), not the long
+  display label the content path returned. Falls back to `ivt_geo_arrays()` for
+  tables whose attribute arrays aren't clean `n_geo`-blocks (0662). **Stages 2–3:**
+  the chunked large tables (`ivt_f2_geo_attributes()`, still hard-codes
+  `IVT_F2_ATTR_SLOTS` + a `"2021…"` group anchor) and the inline pre-DGUID 1991
+  layout should fold under the same schema view. Needs 2016 / pre-DGUID (2011/2006)
+  benchmark tables to confirm the schema names generalise (`GEO_UID` vs `DGUID`).
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

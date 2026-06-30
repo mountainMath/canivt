@@ -66,10 +66,11 @@ ivt_write_metadata <- function(x, dir = NULL) {
   }))
   wr(members, "dimension_members.csv")
 
-  wr(data.frame(member_id = meta$geographies$member_id,
-                name = meta$geographies$name,
-                dguid = meta$geographies$dguid),
-     "geographies.csv")
+  geos <- meta$geographies
+  geo_df <- data.frame(member_id = geos$member_id)
+  if (!is.null(geos$geo_name)) geo_df$name <- geos$geo_name
+  if (!is.null(geos$geo_uid))  geo_df$uid  <- geos$geo_uid
+  wr(geo_df, "geographies.csv")
 
   if (length(meta$footnotes)) {
     fn <- do.call(rbind, lapply(meta$footnotes, function(f)

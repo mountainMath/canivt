@@ -54,18 +54,63 @@ test_that("the descriptor recovers the reference-period (facet) dimension of 98-
   expect_equal(ivt_geography_count(raw), 348L)
 })
 
+test_that("all six 98-10-0077 data dimensions label, incl. Ages and Year", {
+  p <- sample_ivt_077()
+  skip_if(p == "", "no 98-10-0077 sample (set CANIVT_SAMPLE_IVT_F1_077)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  dims <- ivt_f2_dimensions(raw)
+  data_dims <- Filter(function(d) !d$is_geography, dims)
+  # every data dimension has a full member-label list (the codebook doubled-name
+  # markers anchor them by name). Ages-18 (English block carries 2 leading framing
+  # records) and Year-2 (reference period, no trailing ordinal block) were the two
+  # formerly-empty dimensions; they now label like the rest.
+  nlab <- vapply(data_dims, function(d) length(d$members), 1L)
+  expect_equal(nlab, vapply(data_dims, function(d) as.integer(d$count), 1L))
+  ages <- data_dims[[which(vapply(data_dims, function(d) d$count, 1L) == 18L)]]
+  expect_equal(length(ages$members), 18L)
+  expect_match(trimws(ages$members[1]), "^Total - Economic families by number")
+  year <- data_dims[[which(vapply(data_dims, function(d) d$count, 1L) == 2L)]]
+  expect_equal(trimws(year$members), c("2020", "2015"))
+})
+
 test_that("codebook parses identity, members and geo DGUIDs", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
   m <- ivt_metadata(p)
   expect_equal(m$product_id, "98100241")
-  expect_equal(length(m$geographies$name), 166L)
-  expect_equal(m$geographies$name[1], "Canada")
-  expect_equal(m$geographies$dguid[1], "2021A000011124")
-  expect_equal(m$geographies$dguid[166], "2021A000262")
-  expect_true(all(nzchar(m$geographies$dguid)))
-  counts <- vapply(m$dimensions, function(d) length(d$members), 1L)
-  expect_equal(counts, c(166L, 9L, 16L, 13L, 3L, 6L, 7L))
+  expect_equal(length(m$geographies$geo_name), 166L)
+  expect_equal(m$geographies$geo_name[1], "Canada")
+  # geography is parsed schema-driven (content-free): the name is the file's named
+  # GEO_NAME field -- the canonical short name "Corner Brook", not the long display
+  # label "Corner Brook (CA), N.L." the old content-sniffing path returned.
+  expect_equal(trimws(m$geographies$geo_name[3]), "Corner Brook")
+  expect_equal(m$geographies$geo_uid[1], "2021A000011124")
+  expect_equal(m$geographies$geo_uid[166], "2021A000262")
+  expect_true(all(nzchar(m$geographies$geo_uid)))
+  # member labels for the data dimensions come from the generic descriptor-driven
+  # codebook path (no hard-coded dimension table); geography has no member labels.
+  counts <- vapply(m$dimensions[-1L], function(d) length(d$members), 1L)
+  expect_equal(counts, c(9L, 16L, 13L, 3L, 6L, 7L))
+  expect_equal(unname(m$dimension_counts), c(166L, 9L, 16L, 13L, 3L, 6L, 7L))
+})
+
+test_that("geography is parsed from the file's attribute schema, content-free", {
+  p <- sample_ivt()
+  skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  # the geography attribute schema is read from the file (the named field list),
+  # not hard-coded -- it names each attribute array so DGUID/GEO_NAME are addressed
+  # by name rather than by sniffing a "2021..." prefix or a "Canada" first entry.
+  schema <- ivt_f2_geo_schema(raw)
+  expect_true(all(c("GEO_NAME", "DGUID") %in% schema))
+  expect_equal(schema[1], "GEO_NAME")
+  s <- ivt_f2_geo_simple(raw, ivt_f2_geo_count(raw))
+  expect_equal(length(s$name), 166L)
+  expect_equal(length(s$dguid), 166L)
+  # DGUIDs are byte-identical to the legacy "2021..."-content scan, but located
+  # purely by the schema's DGUID slot (no year literal).
+  expect_equal(s$dguid, ivt_f2_geo_dguids(raw))
+  expect_false(anyNA(s$name))
 })
 
 test_that("footnotes are extracted in both languages", {
@@ -91,9 +136,9 @@ test_that("Canada decodes to the published tenure totals", {
   td <- ivt_tidy(tab)
   # the uniform decoder names data columns by each dimension's slug (the
   # lower-cased leading word of its descriptor name), descriptor order.
-  expect_equal(setdiff(names(td), c("geography", "dguid", "value")),
+  expect_equal(setdiff(names(td), c("geo_name", "geo_uid", "value")),
                c("age", "household", "period", "statistics", "housing", "tenure"))
-  row <- td[td$dguid == "2021A000011124" &
+  row <- td[td$geo_uid == "2021A000011124" &
     td$age == "Total - Age of primary household maintainer" &
     td$household ==
       "Total - Household type including census family structure" &
@@ -126,6 +171,14 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   expect_equal(tab$family, 1L)
   expect_false(anyNA(tab$cells$value))        # the family-2 misroute produced NaNs
   expect_equal(sort(unique(tab$cells$geo)), 1:91)
+  # the two 6-member language dimensions ("French used at work" / "English used at
+  # work") share a member count, so a count-keyed label store collapses them onto
+  # one key; the name-anchored marker labels keep them distinct.
+  dims <- ivt_f2_dimensions(raw)
+  fr <- Filter(function(d) grepl("^French", d$name), dims)[[1]]
+  en <- Filter(function(d) grepl("^English", d$name), dims)[[1]]
+  expect_match(trimws(fr$members[1]), "French used at work")
+  expect_match(trimws(en$members[1]), "English used at work")
 })
 
 test_that("the uniform family-1 decoder derives the 98-10-0241 page geometry", {
