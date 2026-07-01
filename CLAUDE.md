@@ -289,6 +289,21 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     group's GEO_NAME (code) loses its trailing 153-member partial to the block scanner
     (special bytes after the short block) → those 153 `geo_name` codes are NA;
     `geo_label` (text, keeps its partial) and every other attribute are complete.
+  - **Trailing-partial drop + off-window schema (98-10-0013 ADA) — DONE.** Two
+    hard-coded heuristics failed this table. (a) `ivt_f2_codebook_blocks`'s
+    `length ≥ 150` floor dropped the last group's **71-member trailing partial**,
+    undercounting geography 5,376/5,447. The floor is now structural: a small clean
+    member-array block is kept **only when it immediately follows a full member
+    block** (a partial trails its own full chunks); garbage byte-runs cluster alone
+    and are still dropped. All 5,447 DGUIDs decode; 0023/0478 stay byte-identical.
+    (b) `ivt_f2_geo_schema` called ADA's schema "absent" — it isn't; the attribute
+    dictionary sits ~14 KB *before* the codebook pointer, outside the old
+    `[cb−8000, EOF]` half-window. Now a window **centred** on the pointer
+    (`cb ± 128 KB`), still located by the field name `GEO_NAME_EN` (metadata-anchored;
+    also faster — no ~18 MB tail scan). Still open: ADA's **root group** (members
+    1–256, the named aggregates) stores its attributes **transposed** (DGUID early,
+    names last), so those 256 `geo_label`/`geo_name` read NA; the ~5,000 unnamed data
+    ADAs label fine. No ADA metadata CSV exists to validate a transposed-root handler.
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.

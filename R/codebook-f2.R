@@ -241,13 +241,25 @@ ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
 # Note: this works in TEXT space (field names + order only) -- never byte offsets,
 # which the latin-1 -> UTF-8 round-trip does not preserve 1:1.
 ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
-  # Anchor the search on the codebook region: in the large chunked tables the
-  # schema field list sits ~18 MB before EOF -- far outside any fixed tail window --
-  # so start from the header codebook pointer when it is set, else the tail.
+  # The attribute dictionary (`GEO_NAME_EN`, `GEO_NAME_FR`, ...) sits in the codebook
+  # dictionary region near the header codebook pointer -- but not at a fixed offset
+  # from it, and no header field points at it exactly: across tables it lands from
+  # ~14 KB *before* to ~16 KB *after* the pointer (e.g. 98-10-0013 is cb-13780,
+  # 98-10-0478 is cb+16284). So anchor the search on the codebook pointer (metadata)
+  # and locate the dictionary by its own field name `GEO_NAME_EN` within a generous
+  # window *centred* on the pointer -- not the old `[cb-8000, EOF]` half-window,
+  # which missed any dictionary lying more than 8 KB before the pointer and (on the
+  # tail-codebook tables) scanned ~18 MB. When the pointer is unset, fall back to the
+  # tail. The window bound is only a search cap; the actual anchor is the field name.
   cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
-  start <- if (!is.na(cb) && cb >= 1) max(1L, as.integer(cb) - 8000L)
-           else max(1L, length(raw) - tail_bytes + 1L)
-  s <- raw_to_latin1(raw[start:length(raw)])
+  n <- length(raw)
+  if (!is.na(cb) && cb >= 1) {
+    lo <- max(1L, as.integer(cb) - 131072L)
+    hi <- min(n, as.integer(cb) + 131072L)
+  } else {
+    lo <- max(1L, n - tail_bytes + 1L); hi <- n
+  }
+  s <- raw_to_latin1(raw[lo:hi])
   m <- regexpr("GEO_NAME_EN", s, fixed = TRUE)
   if (m < 1L) return(NULL)
   win <- substr(s, m, m + 600L)
@@ -396,20 +408,46 @@ ivt_f2_geo_slot_map <- function(raw) {
 # Clean attribute blocks from the codebook tail: member arrays only — drop the
 # tiny garbage byte-runs the block scanner picks up and the consecutive-integer
 # member-ordinal delimiter blocks, both of which would shift positional indexing.
+#
+# The full 256-member chunks are always kept. A chunk group's LAST chunk is a
+# partial (`n_geo mod 256` members) and can fall below any fixed size floor — e.g.
+# 98-10-0013's last group ends in a 71-member partial, so the old blunt
+# `length(t) >= 150` floor silently dropped the trailing DGUID/name/code partials
+# and undercounted that group (5,376 of 5,447 geographies). Instead of a magic
+# size, a partial is recognised *structurally*: a small but clean member-array
+# block (no control bytes, no single repeated byte, low fraction / not an ordinal
+# delimiter) that **immediately follows a full member block** — i.e. it trails its
+# own attribute's full chunks. Garbage byte-runs cluster on their own and never
+# trail a real member array, so they are still dropped.
 ivt_f2_codebook_blocks <- function(raw, tail_bytes = 20000000L) {
   start <- max(0L, length(raw) - tail_bytes)
   blocks <- ivt_find_member_blocks(raw, start, min_records = 3L)
+  blocks <- blocks[order(vapply(blocks, function(b) b$start, 1))]
   is_ord <- function(t) {
     iv <- suppressWarnings(as.integer(t))
     !anyNA(iv) && length(iv) >= 3L && all(diff(iv) == 1L)
   }
-  keep <- vapply(blocks, function(b) {
-    t <- b$texts
-    length(t) >= 150L && mean(grepl("[½¾¼÷×Þþ{}]", t)) < 0.3 &&
-      !is_ord(t)
-  }, logical(1))
-  blocks <- blocks[keep]
-  blocks[order(vapply(blocks, function(b) b$start, 1))]
+  is_clean <- function(t) mean(grepl("[½¾¼÷×Þþ{}]", t)) < 0.3 && !is_ord(t)
+  # a clean member array too short for the full-chunk floor -- kept only as a
+  # trailing partial (see below): no control chars, not a repeated single byte,
+  # mostly multi-character values.
+  is_partial <- function(t)
+    length(t) >= 8L && length(t) < 150L && is_clean(t) &&
+    !any(grepl("[[:cntrl:]]", t)) && !any(grepl("^(.)\\1*$", t)) &&
+    mean(nchar(t) >= 2L) > 0.8
+  keep <- logical(length(blocks))
+  prev_full <- FALSE
+  for (i in seq_along(blocks)) {
+    t <- blocks[[i]]$texts
+    if (length(t) >= 150L && is_clean(t)) {
+      keep[i] <- TRUE; prev_full <- TRUE
+    } else if (prev_full && is_partial(t)) {
+      keep[i] <- TRUE; prev_full <- TRUE        # trailing partial chunk
+    } else {
+      prev_full <- FALSE
+    }
+  }
+  blocks[keep]
 }
 
 # Segment the codebook into member-ordered attribute groups -- WITHOUT a year

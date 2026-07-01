@@ -17,6 +17,15 @@ sample_ivt_f2_4d <- function() {
                     legacy = "/tmp/t129/98100129.ivt")
 }
 
+# A 2021 aggregate-dissemination-area table (98-10-0013). Its last chunk group
+# ends in a 71-member partial, and its attribute-schema dictionary sits ~14 KB
+# before the codebook pointer -- both edge cases the parser must handle. Point
+# CANIVT_SAMPLE_IVT_ADA at a copy of 98100013.ivt to run; skips otherwise.
+sample_ivt_ada <- function() {
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_ADA", "98100013",
+                    legacy = "/tmp/valtables/98100013/98100013.ivt")
+}
+
 # Pre-DGUID modern-export tables whose geography uses the inline "name (code) flag"
 # codebook with character GEOUIDs: a 2011 census-tract table (dotted CTUIDs, e.g.
 # "0010001.00") and a 2006 dissemination-area table. Point CANIVT_SAMPLE_IVT_2011 /
@@ -206,6 +215,33 @@ test_that("DGUID shape admits dotted census-tract codes but not bare numbers", {
   expect_true(grepl(IVT_F2_DGUID_RE, "2021A000210"))           # short DGUID
   expect_false(grepl(IVT_F2_DGUID_RE, "9320001.00"))           # bare CT code
   expect_false(grepl(IVT_F2_DGUID_RE, "1001105"))              # ALT_GEO_CODE
+})
+
+test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
+  p <- sample_ivt_ada()
+  skip_if(p == "", "no ADA sample (set CANIVT_SAMPLE_IVT_ADA)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  n_geo <- ivt_f2_geo_count(raw)
+  expect_equal(n_geo, 5447L)
+
+  # the schema dictionary sits ~14 KB *before* the codebook pointer -- outside the
+  # old cb-8000 half-window -- so it must still be found (metadata-derived, not the
+  # heuristic that reported it "absent").
+  schema <- ivt_f2_geo_schema(raw)
+  expect_false(is.null(schema))
+  expect_equal(schema[1], "GEO_NAME")
+  expect_true("DGUID" %in% schema)
+
+  # the last chunk group ends in a 71-member partial. It was silently dropped by the
+  # >=150-record block floor (decoding 5,376 of 5,447); the trailing-partial rescue
+  # must recover every geography, DGUID and all, in member order.
+  ga <- ivt_f2_geo_attributes(raw)
+  expect_equal(nrow(ga), 5447L)
+  expect_equal(sum(!is.na(ga$dguid)), 5447L)
+  expect_equal(length(unique(ga$dguid)), 5447L)
+  expect_equal(ga$dguid[1], "2021A000011124")           # Canada
+  expect_equal(ga$dguid[2], "2021A000210")              # Newfoundland and Labrador
+  expect_equal(ga$dguid[5447], "2021S051662080008")     # last member of the 71-partial
 })
 
 test_that("family-2 ivt_tidy labels geography by name when requested", {

@@ -259,6 +259,26 @@ units) and the directory entries (8-byte entry units).
   partial to the block scanner (special bytes after the short block) → those 153
   `geo_name` codes are NA; `geo_label` (text, keeps its partial) and every other
   attribute are complete. Same root as 0023's 2 special-char NA names.
+- [x] **Trailing-partial chunk drop + off-window schema (98-10-0013 ADA) — FIXED.**
+  Two hard-coded heuristics failed this aggregate-dissemination-area table:
+  (a) `ivt_f2_codebook_blocks`'s blunt `length >= 150` floor dropped the last chunk
+  group's **71-member trailing partial**, undercounting geography 5,376 / 5,447. The
+  floor is now structural: a small clean member-array block is kept **only when it
+  immediately follows a full member block** (a trailing partial trails its own full
+  chunks), so genuine partials survive while the garbage byte-runs the floor targets
+  — which cluster on their own — are still dropped. All 5,447 DGUIDs now decode, and
+  0023/0478 DGUIDs stay byte-identical. (b) `ivt_f2_geo_schema` reported the schema
+  "absent" — it wasn't: the attribute dictionary sits ~14 KB *before* the codebook
+  pointer, outside the old `[cb-8000, EOF]` half-window. The search is now a generous
+  window **centred** on the pointer (`cb ± 128 KB`) and still locates the dictionary
+  by its own field name `GEO_NAME_EN` (metadata-anchored, not a fixed offset; also
+  faster — it no longer scans ~18 MB on the tail-codebook tables). Still open on ADA:
+  its **root group** (members 1–256, the named aggregates Canada / provinces / census
+  divisions) stores its attributes in a **transposed order** (DGUID early, the name
+  attributes last) unlike the data groups, so backward name-anchoring underflows and
+  those 256 `geo_label`/`geo_name` read NA; the ~5,000 unnamed ADAs in the data groups
+  label fine (their name is the code). No ADA metadata CSV exists to validate a
+  transposed-root handler, so it was not added speculatively.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 
