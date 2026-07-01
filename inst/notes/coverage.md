@@ -280,26 +280,34 @@ units) and the directory entries (8-byte entry units).
   result). Only the big tail-codebook tables (0023/0174), whose dictionary is routed
   through a deeper pointer chain not yet decoded, still use the `cb ± 128 KB` centred
   window as a fallback.
-- [x] **Reverse-stored root chunk (98-10-0013 ADA root group) — FIXED.** The codebook's
-  first ("root") chunk is stored in **reverse byte order** (region A of the tail: the
-  block directory's offsets *decrease* through the root chunk, then jump up for the
-  bulk). The byte-ascending block scan reverses that chunk's logical order, and because
-  ADA's root chunk also carries extra framing blocks (a second GEO_TYPE_DESC pair +
-  binary attrs), the stride name-walk lands on the wrong blocks — leaving members
-  1–256 `geo_label`/`geo_name` NA (ADA read 5,191/5,447; the ~5,000 unnamed data ADAs
-  labelled fine). The metadata block directory lists every codebook block in **logical**
-  order, so the root chunk's four name runs (display Member Name + schema GEO_NAME, each
-  EN+FR) are now read straight from it (`ivt_f2_geo_block_dir()` →
-  `ivt_f2_geo_names_root_dir()`; language picked per pair by `ivt_f2_frscore()`) and
-  spliced into `ivt_f2_geo_names()` as a **fill** for members the stride walk leaves NA.
-  Validated vs the StatCan CSV: ADA `geo_label` == "Member Name" **5,447/5,447**; CT
-  (98-10-0478) byte-identical **6,297/6,297** (its root chunk already resolved, so the
-  fill is a no-op); 0023 unchanged **63,404/63,404** (no directory → no-op).
-- [ ] **Drive *all* geography attributes from the directory's block order**, not just
-  the two NAME attributes on the reverse-stored root chunk — this removes the remaining
-  `d0 ± k·2G` strides. Prerequisite for the big tables: decode the deeper pointer chain
-  that routes the geography block directory on 0023/0174 (today only the small tables
-  0013/0478/0241 expose it directly at `@824`).
+- [x] **Reverse-stored root chunk, read positionally from the block directory
+  (98-10-0013 ADA root group) — FIXED.** The codebook's first ("root") chunk is stored
+  in **reverse byte order** (region A of the tail: the block directory's offsets
+  *decrease* through the root chunk, then jump up for the bulk). The byte-ascending
+  block scan reverses that chunk's logical order, and because ADA's root chunk also
+  carries extra framing blocks the stride walk lands on the wrong blocks — leaving
+  `geo_label`/`geo_name`/`geo_type`/`geo_level`/`geo_type_abbr` **NA** for members
+  1–256 *and* **scrambling** `prov_abbr`/`alt_geo_code`/`pr_code` (they read codes /
+  French type text). ADA read 5,191/5,447. Fix: read the root chunk **positionally from
+  the header block directory** — the `@824` slot is a table of `[u32 off][u16 len][u16
+  len]` entries (block **offsets and lengths**, the same entry shape as the page
+  directory), and within a group the value blocks are laid down in a fixed sequence: the
+  display Member Name pair, then every schema field in **schema order**, each EN then FR.
+  `ivt_f2_geo_root_dir()` reads the value blocks (record count == chunk size `rootN`) in
+  directory order, pairs them, and maps pair 1 → display name, pair k+1 →
+  `ivt_f2_geo_schema()[k]` (language per pair by `ivt_f2_frscore()`); no marker, no
+  content sniffing, no `d0 ± k·2G` stride. `ivt_f2_geo_attributes()` overrides members
+  1..rootN with it. Validated: ADA every root attribute exact (`geo_label` == "Member
+  Name" **5,447/5,447**, `geo_type` Country/Province/ADA, `prov_abbr`/`pr_code`/
+  `alt_geo_code` correct); the positional read matches the stride output **256/256 on
+  every attribute** on CT (98-10-0478), so the override is byte-identical there; 0023
+  unchanged **63,404/63,404** (no directory → no-op).
+- [ ] **Drive *all* groups from the directory's block order**, not just the root chunk —
+  this removes the remaining `d0 ± k·2G` strides entirely. Prerequisite for the big
+  tables: decode the deeper pointer chain that routes the geography block directory on
+  0023/0174 (their `@824` points into a deeper structure — two back-pointers + a
+  member-id list — not a flat block directory; today only the small tables 0013/0478/0241
+  expose it directly at `@824`).
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

@@ -250,14 +250,25 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
   expect_equal(ga$dguid[5447], "2021S051662080008")     # last member of the 71-partial
 
   # the root chunk (members 1..256) is reverse-stored, so the byte-ascending stride
-  # walk cannot label it; it is filled from the metadata block directory (logical
-  # order). Every member now has a display name, matching the published Member Name.
+  # walk cannot label it: it leaves the NAME attributes NA and scrambles
+  # prov_abbr / alt_geo_code / pr_code. The whole chunk is overridden by the
+  # positional read from the header block directory (offsets/lengths + schema order),
+  # so every attribute is correct and matches the published Member Name.
   expect_equal(sum(!is.na(ga$geo_label)), 5447L)
   expect_equal(ga$geo_label[1], "Canada")
   expect_equal(ga$geo_label[2], "Newfoundland and Labrador")
   expect_equal(ga$geo_label[3], "10010001")             # first code-only root ADA
   expect_equal(ga$geo_label_fr[1], "Canada")
   expect_equal(ga$geo_name[1], "Canada")
+  # non-name root attributes, previously NA or scrambled, are now exact
+  expect_equal(sum(!is.na(ga$geo_type[1:256])), 256L)
+  expect_equal(ga$geo_type[1:3],
+               c("Country", "Province", "Aggregate Dissemination Area"))
+  expect_equal(ga$geo_type_abbr[1:3], c("Country", "PR", "ADA"))
+  expect_equal(ga$prov_abbr[2], "N.L.")                 # was a code before
+  expect_equal(ga$alt_geo_code[1:3], c("01", "10", "10010001"))
+  # a data-group member (outside the root chunk) is untouched by the override
+  expect_equal(ga$geo_type[300], "Aggregate Dissemination Area")
 })
 
 test_that("family-2 ivt_tidy labels geography by name when requested", {

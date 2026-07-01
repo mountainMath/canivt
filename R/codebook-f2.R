@@ -319,41 +319,62 @@ ivt_f2_dir_entry_records <- function(raw, off, len) {
   b[[which.max(vapply(b, function(x) length(x$texts), 1L))]]$texts
 }
 
-# Directory-driven bilingual names for the ROOT geography chunk (members 1..rootN).
+# Directory-driven attributes for the ROOT geography chunk (members 1..rootN),
+# read positionally from the metadata block directory's offsets/lengths.
 #
 # The codebook's first ("root") chunk is stored in reverse byte order (region A of
-# the tail), so the byte-ascending block scan that `ivt_f2_geo_names()` relies on
-# reverses that chunk's logical block order and, when the chunk also carries extra
-# framing blocks (e.g. 98-10-0013 ADA), lands its stride walk on the wrong blocks --
-# leaving members 1..256 unlabelled. The metadata block directory lists every
-# codebook block in LOGICAL order, and each geography group opens with its two NAME
-# attributes (display Member Name, then schema GEO_NAME), each stored EN and FR. So
-# the root chunk's four name runs are simply the first four `rootN`-record text runs
-# the directory lists. Language is picked per pair by `ivt_f2_frscore()` (the two
-# runs are laid down EN-first here, but we decide structurally, not by position).
-# Returns list(geo_label, geo_label_fr, geo_name, geo_name_fr) each rootN long, or
-# NULL when no directory is present.
-ivt_f2_geo_names_root_dir <- function(raw, n_geo) {
-  d <- ivt_f2_geo_block_dir(raw)
-  if (is.null(d)) return(NULL)
+# the tail: the directory's offsets *decrease* through it, then jump up for the
+# bulk), so the byte-ascending block scan that `ivt_f2_geo_attributes()` relies on
+# reverses that chunk's logical block order. On 98-10-0013 (ADA) the root chunk also
+# carries extra framing blocks, so the stride walk not only leaves `geo_type` /
+# `geo_level` / `geo_type_abbr` NA but actively **scrambles** `prov_abbr` /
+# `alt_geo_code` / `pr_code` (they read codes / French type text).
+#
+# The block directory lists every codebook block in LOGICAL order with its exact
+# offset and length, and within a group the value blocks are laid down as a fixed
+# positional sequence -- the display Member Name pair, then every schema field in
+# schema order -- each stored EN then FR. So we read the value blocks (those whose
+# record count is the chunk size `rootN`) in directory order, pair them, and map:
+# pair 1 -> the display name; pair k+1 -> `ivt_f2_geo_schema()[k]`. No marker, no
+# content sniffing, no `d0 ± k*2G` stride: the block starts come from the header
+# directory and the field identity from the schema position. Language within a pair
+# is decided by `ivt_f2_frscore()` (EN-first here, but structurally, not by order).
+# Returns a named list of `rootN`-long vectors keyed by OUTPUT attribute name
+# (`ivt_f2_geo_attributes()` columns), or NULL when no directory / schema is present.
+ivt_f2_geo_root_dir <- function(raw, n_geo) {
+  d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
+  schema <- ivt_f2_geo_schema(raw); if (is.null(schema) || !length(schema)) return(NULL)
   rootN <- min(256L, n_geo)
-  runs <- list()
+  npair_want <- length(schema) + 1L                 # display pair + one pair per field
+  vals <- list()
   for (r in seq_len(nrow(d))) {
     t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
-    if (length(t) == rootN) {
-      runs[[length(runs) + 1L]] <- trimws(t)
-      if (length(runs) == 4L) break
-    }
+    if (length(t) == rootN) vals[[length(vals) + 1L]] <- trimws(t)
+    if (length(vals) >= 2L * npair_want) break
   }
-  if (length(runs) < 4L) return(NULL)
-  pick <- function(a, b) {                       # return c(en, fr)
+  npair <- length(vals) %/% 2L
+  if (npair < 2L) return(NULL)                       # need at least display + GEO_NAME
+  pick <- function(a, b) {                           # return list(en, fr)
     diff <- which(a != b)
     if (ivt_f2_frscore(a[diff]) <= ivt_f2_frscore(b[diff])) list(en = a, fr = b)
     else list(en = b, fr = a)
   }
-  disp <- pick(runs[[1]], runs[[2]]); name <- pick(runs[[3]], runs[[4]])
-  list(geo_label = disp$en, geo_label_fr = disp$fr,
-       geo_name = name$en,  geo_name_fr = name$fr)
+  # schema field stem -> output column, by prefix in either direction (stems may be
+  # stored truncated, e.g. GEO_LEVEL_DES vs GEO_LEVEL); same rule as ivt_f2_geo_slot_map.
+  stem_col <- function(stem) {
+    hit <- which(startsWith(stem, IVT_F2_ATTR_FIELD) | startsWith(IVT_F2_ATTR_FIELD, stem))
+    if (length(hit)) names(IVT_F2_ATTR_FIELD)[hit[1L]] else NA_character_
+  }
+  pr <- lapply(seq_len(npair), function(k) pick(vals[[2L * k - 1L]], vals[[2L * k]]))
+  out <- list(geo_label = pr[[1L]]$en, geo_label_fr = pr[[1L]]$fr)
+  for (i in seq_along(schema)) {
+    if (i + 1L > npair) break
+    col <- stem_col(schema[i])                       # schema stem -> output column
+    if (is.na(col)) next
+    out[[col]] <- pr[[i + 1L]]$en
+    if (col == "geo_name") out[["geo_name_fr"]] <- pr[[i + 1L]]$fr
+  }
+  out
 }
 
 ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
@@ -717,7 +738,7 @@ ivt_f2_geo_name_runs <- function(blocks, g, dguid_slot, n_geo) {
 # (`geo_label`/`geo_label_fr`) and the schema GEO_NAME (`geo_name`/`geo_name_fr`).
 # Per group we pick which language run is English by `ivt_f2_frscore()` over the
 # members where the two runs differ. Returns a list of four member-ordered vectors.
-ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo, raw = NULL) {
+ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
   z <- rep(NA_character_, n_geo)
   out <- list(geo_label = z, geo_label_fr = z, geo_name = z, geo_name_fr = z)
   for (g in groups) {
@@ -730,19 +751,6 @@ ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo, raw = NULL) {
     out$geo_label_fr[idx] <- if (a_en) r$db else r$da
     out$geo_name[idx]     <- if (a_en) r$ga else r$gb
     out$geo_name_fr[idx]  <- if (a_en) r$gb else r$ga
-  }
-  # The root chunk (members 1..rootN) is reverse-stored, so the byte-ascending stride
-  # walk above can miss it (e.g. 98-10-0013 ADA leaves 1..256 NA). Fill those members
-  # from the metadata block directory, which lists the codebook in logical order. This
-  # only *fills* unresolved members, so tables whose stride walk already labels the
-  # root chunk (e.g. 98-10-0478 CT) are untouched.
-  if (!is.null(raw)) {
-    rd <- ivt_f2_geo_names_root_dir(raw, n_geo)
-    if (!is.null(rd)) {
-      rootN <- length(rd$geo_label)
-      miss <- which(is.na(out$geo_label[seq_len(rootN)]))
-      for (k in names(out)) out[[k]][miss] <- rd[[k]][miss]
-    }
   }
   out
 }
@@ -793,8 +801,8 @@ ivt_f2_geo_attributes <- function(raw) {
   # bilingually by the drop-tolerant, per-group-language name reader rather than by
   # a fixed slot offset (GEO_NAME's trailing partial can be lost on census-tract
   # tables, and the root group stores the name languages in the opposite order).
-  nm <- ivt_f2_geo_names(blocks, groups, slots[["dguid"]], n_geo, raw = raw)
-  tibble::tibble(
+  nm <- ivt_f2_geo_names(blocks, groups, slots[["dguid"]], n_geo)
+  tbl <- tibble::tibble(
     member_id      = seq_len(n_geo),
     geo_label      = nm$geo_label,
     geo_label_fr   = nm$geo_label_fr,
@@ -811,6 +819,19 @@ ivt_f2_geo_attributes <- function(raw) {
     dqf_note       = dqf_note,
     tnr_short_form = pull("tnr_short_form", tnr = TRUE)
   )
+  # The root chunk is reverse-stored, so the stride walk above leaves its NAME
+  # attributes NA and, when the chunk carries extra framing blocks (98-10-0013 ADA),
+  # scrambles prov_abbr / alt_geo_code / pr_code. Override members 1..rootN with the
+  # positional read from the header block directory (offsets/lengths + schema order).
+  # A no-op on tables whose stride walk already labels the root chunk (98-10-0478 CT:
+  # byte-identical) and on tables with no directory (98-10-0023/-0174: returns NULL).
+  rd <- ivt_f2_geo_root_dir(raw, n_geo)
+  if (!is.null(rd)) {
+    rootN <- length(rd$geo_label)
+    for (col in intersect(names(rd), names(tbl)))
+      tbl[[col]][seq_len(rootN)] <- rd[[col]]
+  }
+  tbl
 }
 
 # Recover a text attribute that is a 1:1 function of a reliable key, by per-key

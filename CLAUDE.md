@@ -308,27 +308,36 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     scan** on 98-10-0013/-0478/-0241; the big tail-codebook tables (0023/0174), whose
     dictionary routes through a deeper pointer chain not yet decoded, fall back to a
     `cb ± 128 KB` centred window.
-  - **Reverse-stored root chunk (98-10-0013 ADA root group) — DONE.** The codebook's
-    first ("root") chunk is stored in **reverse byte order** (region A of the tail:
-    directory offsets *decrease* through it, then jump up for the bulk). The
-    byte-ascending block scan `ivt_f2_codebook_blocks()` / `ivt_f2_geo_groups_chunked()`
-    therefore reverses that chunk's logical block order, and because ADA's root chunk
-    also carries extra framing blocks (a second GEO_TYPE_DESC pair + binary attrs) the
-    stride name-walk lands wrong — leaving members 1–256 `geo_label`/`geo_name` NA (so
-    ADA read 5,191/5,447). The metadata block directory lists every codebook block in
-    **logical** order, so the root chunk's four name runs (display Member Name +
-    schema GEO_NAME, each EN+FR) are read straight from it (`ivt_f2_geo_block_dir()` →
-    `ivt_f2_geo_names_root_dir()`: the first four `rootN`-record text runs the
-    directory lists, language picked per pair by `ivt_f2_frscore()`). Spliced into
-    `ivt_f2_geo_names()` as a **fill** for members the stride walk leaves NA, so tables
-    whose stride walk already labels the root chunk (98-10-0478 CT) are byte-identical
-    and the big tables with no directory (0023/0174) are a no-op. Validated vs the
-    StatCan CSV: ADA `geo_label` == "Member Name" **5,447/5,447** (was 5,191); CT
-    unchanged 6,297/6,297; 0023 unchanged 63,404/63,404. Still open: **driving *all*
-    geography attributes from the directory's block order** (not just the two NAME
-    attributes on the reverse-stored root chunk), and decoding the big tail-codebook
-    directory chain so the directory is available on 0023/0174 too (today only the
-    small tables 0013/0478/0241 expose it at `@824`).
+  - **Reverse-stored root chunk, read positionally from the block directory
+    (98-10-0013 ADA root group) — DONE.** The codebook's first ("root") chunk is stored
+    in **reverse byte order** (region A of the tail: directory offsets *decrease*
+    through it, then jump up for the bulk). The byte-ascending block scan
+    `ivt_f2_codebook_blocks()` / `ivt_f2_geo_groups_chunked()` therefore reverses that
+    chunk's logical block order, and because ADA's root chunk also carries extra framing
+    blocks the stride walk lands wrong — leaving `geo_label`/`geo_name`/`geo_type`/
+    `geo_level`/`geo_type_abbr` **NA** for members 1–256 *and* **scrambling**
+    `prov_abbr`/`alt_geo_code`/`pr_code` (they read codes / French type text). ADA read
+    5,191/5,447. Fix: read the root chunk **positionally from the header block
+    directory** — the `@824` slot is a table of `[u32 off][u16 len][u16 len]` entries
+    (the block **offsets and lengths**, same entry shape as the page directory), and
+    within a group the value blocks are laid down in a fixed sequence — the display
+    Member Name pair, then every schema field in **schema order**, each EN then FR. So
+    `ivt_f2_geo_root_dir()` reads the value blocks (record count == chunk size `rootN`)
+    in directory order, pairs them, and maps pair 1 → display name, pair k+1 →
+    `ivt_f2_geo_schema()[k]` (language per pair by `ivt_f2_frscore()`). **No marker, no
+    content sniffing, no `d0 ± k·2G` stride** — block starts come from the header
+    directory, field identity from the schema position. `ivt_f2_geo_attributes()`
+    overrides members 1..rootN with this read. Validated: ADA every root attribute
+    exact (`geo_label` == "Member Name" **5,447/5,447**, `geo_type` Country/Province/
+    ADA, `prov_abbr`/`pr_code`/`alt_geo_code` correct); the positional read matches the
+    stride output **256/256 on every attribute** on 98-10-0478 CT, so the override is
+    byte-identical there; 0023/0174 have no directory → override is a no-op (unchanged
+    63,404/63,404). Still open: **drive *all* groups** (not just the root chunk) from
+    the directory's block order — removing the `d0 ± k·2G` strides entirely — and
+    decode the big tail-codebook directory chain so the directory is available on
+    0023/0174 too (their `@824` points into a deeper structure — two back-pointers + a
+    member-id list — not a flat block directory; today only the small tables
+    0013/0478/0241 expose it directly at `@824`).
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.
