@@ -249,12 +249,11 @@ ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
 # given file (e.g. `@824` is a member-id list on 98-10-0023) is simply skipped.
 IVT_F2_DIR_SLOTS <- c(824L, 572L, 712L)
 
-# Decode a metadata block directory at header slot `slot`: a run of 8-byte entries
-# `[u32 off][u16 len][u16 len]` (null `(0,0)` slots tolerated). Returns a two-column
-# matrix (off, len), or NULL when the slot does not point at a well-formed table.
-ivt_f2_read_block_dir <- function(raw, slot, max_entries = 8000L) {
+# Decode a metadata block directory that STARTS at absolute offset `ptr`: a run of
+# 8-byte entries `[u32 off][u16 len][u16 len]` (null `(0,0)` slots tolerated). Returns
+# a two-column matrix (off, len), or NULL when `ptr` is not a well-formed table.
+ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L) {
   n <- length(raw)
-  ptr <- rd_u32(raw, slot)
   if (is.na(ptr) || ptr < 1L || ptr + 8L > n) return(NULL)
   offs <- integer(0); lens <- integer(0)
   for (i in seq_len(max_entries)) {
@@ -270,24 +269,42 @@ ivt_f2_read_block_dir <- function(raw, slot, max_entries = 8000L) {
   cbind(off = offs, len = lens)
 }
 
-# The geography codebook block directory: the header metadata directory (one of the
-# `IVT_F2_DIR_SLOTS`) whose entries list the geography codebook blocks in LOGICAL
-# order, confirmed by containing the `GEO_NAME_EN` dictionary block. Returns the
-# two-column (off, len) matrix, or NULL when no directory lists geography (the big
-# tail-codebook tables 98-10-0023 / -0174, routed through a deeper pointer chain we
-# do not decode yet). This logical order is what lets us read the reverse-stored
-# root chunk that the byte-ascending block scan cannot (`ivt_f2_geo_names_root_dir`).
-ivt_f2_geo_block_dir <- function(raw) {
+# Decode the block directory a header `slot` points at (`slot` holds the directory's
+# start offset). Kept for the family detector / legacy callers.
+ivt_f2_read_block_dir <- function(raw, slot, max_entries = 8000L) {
+  ivt_f2_read_dir_at(raw, rd_u32(raw, slot), max_entries)
+}
+
+# Does a decoded directory `d` list the geography dictionary block (`GEO_NAME_EN`)?
+ivt_f2_dir_has_geo <- function(raw, d) {
+  if (is.null(d)) return(FALSE)
   n <- length(raw)
+  for (r in seq_len(nrow(d))) {
+    off <- d[r, "off"]; ln <- d[r, "len"]
+    if (off + ln > n) next
+    if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
+      return(TRUE)
+  }
+  FALSE
+}
+
+# The geography codebook block directory: the header metadata directory whose entries
+# list the geography codebook blocks in LOGICAL order, confirmed by containing the
+# `GEO_NAME_EN` dictionary block. Two indirection depths are tried per slot, because
+# the slot value points straight at the directory on the small chunked tables
+# (98-10-0013 / -0478 / -0241: `@824` -> directory) but at a small geography-dimension
+# struct on the big tail-codebook tables (98-10-0023 / -0174: `@824` -> struct whose
+# first u32 is the directory pointer). Returns the (off, len) matrix, or NULL when no
+# slot resolves to a geography directory. This logical order is what lets us read the
+# reverse-stored root chunk positionally (`ivt_f2_geo_root_dir`).
+ivt_f2_geo_block_dir <- function(raw) {
   for (slot in IVT_F2_DIR_SLOTS) {
-    d <- ivt_f2_read_block_dir(raw, slot)
-    if (is.null(d)) next
-    for (r in seq_len(nrow(d))) {
-      off <- d[r, "off"]; ln <- d[r, "len"]
-      if (off + ln > n) next
-      if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
-        return(d)
-    }
+    ptr <- rd_u32(raw, slot)
+    if (is.na(ptr) || ptr < 1L) next
+    d <- ivt_f2_read_dir_at(raw, ptr)                  # flat: slot -> directory
+    if (ivt_f2_dir_has_geo(raw, d)) return(d)
+    d <- ivt_f2_read_dir_at(raw, rd_u32(raw, ptr))     # indirect: slot -> struct -> dir
+    if (ivt_f2_dir_has_geo(raw, d)) return(d)
   }
   NULL
 }

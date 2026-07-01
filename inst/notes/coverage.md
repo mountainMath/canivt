@@ -275,11 +275,13 @@ units) and the directory entries (8-byte entry units).
   `@572`/`@712`) holds a table of `[u32 off][u16 len][u16 len]` entries, the same
   entry shape as the page directory. `ivt_f2_geo_dict_block()` decodes it
   (`ivt_f2_read_block_dir()`) and confirms the block by its `GEO_NAME_EN` field name,
-  so the dictionary start comes **from the file, not a scan** (98-10-0013 / -0478 /
-  -0241 all resolve via the directory; validated byte-identical to the window
-  result). Only the big tail-codebook tables (0023/0174), whose dictionary is routed
-  through a deeper pointer chain not yet decoded, still use the `cb ± 128 KB` centred
-  window as a fallback.
+  so the dictionary start comes **from the file, not a scan**, on **every** table:
+  `ivt_f2_geo_block_dir()` tries two indirection depths per slot — the slot value is
+  the directory itself on the small chunked tables (0013/0478/0241), but a small
+  geography-dimension struct whose first u32 is the directory pointer on the big
+  tail-codebook tables (`@824 → struct → ptr1 → directory`; 6,244 entries on 0023,
+  6,758 on 0174). Validated byte-identical to the window result. The `cb ± 128 KB`
+  centred window survives only as a last-ditch fallback for a directory-less layout.
 - [x] **Reverse-stored root chunk, read positionally from the block directory
   (98-10-0013 ADA root group) — FIXED.** The codebook's first ("root") chunk is stored
   in **reverse byte order** (region A of the tail: the block directory's offsets
@@ -300,14 +302,16 @@ units) and the directory entries (8-byte entry units).
   1..rootN with it. Validated: ADA every root attribute exact (`geo_label` == "Member
   Name" **5,447/5,447**, `geo_type` Country/Province/ADA, `prov_abbr`/`pr_code`/
   `alt_geo_code` correct); the positional read matches the stride output **256/256 on
-  every attribute** on CT (98-10-0478), so the override is byte-identical there; 0023
-  unchanged **63,404/63,404** (no directory → no-op).
+  every attribute** on CT (98-10-0478) **and on both big tables 0023/0174** (whose
+  directory now resolves via the extra indirection), so the override is byte-identical
+  there (unchanged **63,404/63,404**).
 - [ ] **Drive *all* groups from the directory's block order**, not just the root chunk —
-  this removes the remaining `d0 ± k·2G` strides entirely. Prerequisite for the big
-  tables: decode the deeper pointer chain that routes the geography block directory on
-  0023/0174 (their `@824` points into a deeper structure — two back-pointers + a
-  member-id list — not a flat block directory; today only the small tables 0013/0478/0241
-  expose it directly at `@824`).
+  this removes the remaining `d0 ± k·2G` strides entirely. The directory now resolves on
+  every reference table (small tables directly at `@824`; big tables via `@824 → struct →
+  ptr1`), so this no longer needs a separate chain decode — it is a validate-and-switch
+  refactor: segment groups from the directory and read each attribute's `G` chunks in
+  directory order, confirmed byte-identical to the stride output before flipping the
+  default.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

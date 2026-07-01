@@ -59,6 +59,16 @@ test_that("family-2 files are detected as family 2", {
   # geography layout + count come from the header, not the codebook
   expect_false(ivt_f2_geo_is_inline(raw))      # modern DGUID layout
   expect_equal(ivt_f2_header_geo_count(raw), 63404L)
+
+  # the geography block directory resolves even on this big tail-codebook table,
+  # where the header slot points at a struct whose first u32 is the directory
+  # (one indirection deeper than the small tables), so the schema comes from the
+  # directory, not the codebook-window scan.
+  d <- ivt_f2_geo_block_dir(raw)
+  expect_false(is.null(d))
+  expect_true(ivt_f2_dir_has_geo(raw, d))
+  expect_equal(ivt_f2_geo_schema(raw)[1:3],
+               c("GEO_NAME", "GEO_TYPE_DESC", "GEO_TYPE_ABBR"))
 })
 
 test_that("family-2 directory enumerates the expected geographies", {
