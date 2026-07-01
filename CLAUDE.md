@@ -238,13 +238,36 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   - Geography **count** from the descriptor per-type width tag (`0x10`/`0x0d`→u16, else
     u8; 2011's `0x0d` was misread as u8 = 21). 1991's default tidy now labels geography
     by name + GEOUID (was member-id only).
-  - **Stage 3 (the last split):** only the **2021 chunked DGUID** tables (0023/0129)
-    still resolve their uid via the year-locked `"2021"` byte scan
-    (`ivt_f2_geo_dguids()`) and segment 256-member groups by the `"2021…"` anchor +
-    hard-coded `IVT_F2_ATTR_SLOTS` (`ivt_f2_geo_attributes()`). Folding these under the
-    marker+schema view (chunked schema reader, byte-identical on all 63,404 DGUIDs) is
-    the remaining work. The layout appears 2021-specific, so the lock is never
-    exercised on another vintage — but it is the one hard-coded remnant left.
+  - **Stage 3 (the last split) — DONE.** The **2021 chunked DGUID** tables
+    (0023/0129) are now folded under the marker+schema view, **byte-identical on all
+    63,404 DGUIDs and every attribute** (both files). No year literal and no
+    hard-coded slot table drive the chunked read: (a) `ivt_f2_geo_slot_map()` reads
+    each attribute's slot from the file's own schema field list
+    (`ivt_f2_geo_schema()`, now anchored on the header codebook pointer so it is
+    readable despite the ~18 MB tail), reproducing the fixed `IVT_F2_ATTR_SLOTS`
+    order exactly (kept only as the fallback when a schema is absent); (b)
+    `ivt_f2_geo_groups_chunked()` segments the 256-member groups **structurally** —
+    the DGUID slot is a contiguous run of `ivt_f2_is_dguid_block()` blocks (2G per
+    group, EN then FR), split into runs with **deterministic** member ids from the
+    running 256-chunk total (never read from DGUID content); (c) the DGUID column
+    itself falls out of its own schema slot (`ivt_f2_extract_attr()` anchors the
+    group start on `d0 − dguid_slot·2G`, so the anchor is schema-derived too); and
+    (d) `ivt_f2_geo_dguids()` (the fast uid-only scan) hits on the **DGUID shape**
+    `<YYYY><level letter>` restricted to the geography marker region, not the literal
+    `"2021"`, so it is vintage-agnostic. `IVT_F2_ATTR_SLOTS` remains only as the
+    no-schema fallback. The DGUID shape (`IVT_F2_DGUID_RE`, shared by the byte scan
+    and the block detector) admits a **dot** in the code so **census-tract DGUIDs**
+    (`2021S05079320001.00`) are recognised — without it only the ~50 non-dotted
+    higher-level DGUIDs in a CT table were found (this was broken on the old `"2021"`
+    path too). Validated beyond 0023/0129 on two more 2021 tables: **98-10-0174**
+    (dissemination areas; a **family-1** table carrying the same chunked 63,404-geo
+    DGUID codebook — proves the geography reader is family-agnostic) and
+    **98-10-0478** (census tracts; 6,297 geos, geography type `0x0d`, chunk groups
+    `1,1,2,4,8,9`, all DGUIDs/levels/types/codes exact). Known nicety on 0478: 103
+    consecutive CT *names* in one chunk are NA because a special-character CT name
+    truncates that chunk's NAME block below the 150-record keep filter (same
+    block-scanner special-char limitation as 0023's 2 NA names; every other
+    attribute incl. the DGUID uid decodes exact).
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.

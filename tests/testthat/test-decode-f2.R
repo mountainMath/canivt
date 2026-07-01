@@ -157,6 +157,48 @@ test_that("family-2 decodes the full geography attribute table", {
   expect_equal(ga$alt_geo_code[ga$member_id == 6L], "1001105")
 })
 
+test_that("chunked geography is marker+schema anchored, not year-locked", {
+  p <- sample_ivt_f2()
+  skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+
+  # attribute slots come from the file's schema field list, reproducing the fixed
+  # fallback order exactly (so no hard-coded slot table drives the read).
+  slots <- ivt_f2_geo_slot_map(raw)
+  expect_equal(slots, IVT_F2_ATTR_SLOTS)
+  schema <- ivt_f2_geo_schema(raw)                 # readable despite the ~18 MB tail
+  expect_equal(schema[1], "GEO_NAME")
+  expect_true("DGUID" %in% schema)
+
+  # groups are segmented structurally (contiguous DGUID-block runs) with
+  # deterministic member ids — no DGUID array, no "2021" content anchor.
+  blocks <- ivt_f2_codebook_blocks(raw)
+  groups <- ivt_f2_geo_groups_chunked(blocks)
+  expect_true(length(groups) >= 1L)
+  expect_equal(groups[[1]]$starts[1], 1L)
+  # group sizes double then take the remainder; member ids are 256-chunk spaced.
+  gsz <- vapply(groups, `[[`, integer(1), "G")
+  expect_equal(gsz[1:2], c(1L, 1L))
+  expect_equal(groups[[2]]$starts[1], 257L)
+
+  # the DGUID column now falls out of its own schema slot and is byte-identical to
+  # the fast (de-year-locked) DGUID scan.
+  dg_slot <- ivt_f2_extract_attr(blocks, groups, slots[["dguid"]],
+                                 ivt_f2_geo_count(raw), dguid_slot = slots[["dguid"]])
+  expect_equal(dg_slot, ivt_f2_geo_dguids(raw))
+})
+
+test_that("DGUID shape admits dotted census-tract codes but not bare numbers", {
+  # census-tract DGUIDs embed the dotted CT number (e.g. 98-10-0478's
+  # `2021S05079320001.00`); the shape must accept the dot, while the numeric
+  # attribute codes (ALT_GEO_CODE / PR_CODE) must never be mistaken for a DGUID.
+  expect_true(grepl(IVT_F2_DGUID_RE, "2021S05079320001.00"))   # dotted CT DGUID
+  expect_true(grepl(IVT_F2_DGUID_RE, "2021A000011124"))        # plain DGUID
+  expect_true(grepl(IVT_F2_DGUID_RE, "2021A000210"))           # short DGUID
+  expect_false(grepl(IVT_F2_DGUID_RE, "9320001.00"))           # bare CT code
+  expect_false(grepl(IVT_F2_DGUID_RE, "1001105"))              # ALT_GEO_CODE
+})
+
 test_that("family-2 ivt_tidy labels geography by name when requested", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")

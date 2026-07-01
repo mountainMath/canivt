@@ -26,18 +26,36 @@
 #' @noRd
 NULL
 
+# The DGUID string shape: a 4-digit year, an upper-case level letter, then the
+# geographic code. The code may carry a dot -- census-tract DGUIDs embed the dotted
+# CT number (e.g. `2021S05079320001.00`) -- so `.` is allowed after the level
+# letter. The numeric attribute codes (ALT_GEO_CODE, PR_CODE) have a digit, not a
+# letter, in position 5, so they never match. Shared by the byte scan and the
+# block detector to keep them in lock-step.
+IVT_F2_DGUID_RE <- "^[0-9]{4}[A-Z][0-9A-Z.]+$"
+
 # Member-ordered geography DGUIDs, extracted by a fast vectorised scan for the
-# Pascal-prefixed "2021..." strings. DGUIDs are globally unique and laid down in
-# member order (the EN copy first, then an identical FR copy, plus per-chunk
-# repeats), so first-appearance de-duplication yields the geographies in 1-based
-# member-id order. Returns a character vector (length = number of geographies).
+# Pascal-prefixed DGUID strings. A DGUID has the shape `<YYYY><level letter><code>`
+# (e.g. `2021A000011124`), so we anchor on that STRUCTURE -- four leading digits
+# then an upper-case level letter -- rather than the literal year "2021", which
+# keeps the scan vintage-agnostic (2016/2021/...). DGUIDs are globally unique and
+# laid down in member order (the EN copy first, then an identical FR copy, plus
+# per-chunk repeats), so first-appearance de-duplication yields the geographies in
+# 1-based member-id order. The scan is restricted to the geography dimension's
+# marker region (`ivt_f2_geo_marker_region()`) when present, so a chance digit run
+# in the value pages cannot masquerade as a DGUID. Returns a character vector
+# (length = number of geographies).
 ivt_f2_geo_dguids <- function(raw) {
   v <- as.integer(raw)
   n <- length(v)
   if (n < 5L) return(character(0))
-  # positions where the bytes spell "2021"
-  hit <- which(v[1:(n - 4L)] == 0x32L & v[2:(n - 3L)] == 0x30L &
-               v[3:(n - 2L)] == 0x32L & v[4:(n - 1L)] == 0x31L)
+  dig <- function(x) x >= 0x30L & x <= 0x39L        # ASCII '0'..'9'
+  # positions where four digits are followed (the level letter check comes below)
+  hit <- which(dig(v[1:(n - 4L)]) & dig(v[2:(n - 3L)]) &
+               dig(v[3:(n - 2L)]) & dig(v[4:(n - 1L)]))
+  if (!length(hit)) return(character(0))
+  region <- ivt_f2_geo_marker_region(raw)
+  if (!is.null(region)) hit <- hit[hit >= region[1] & hit < region[2]]
   if (!length(hit)) return(character(0))
   len <- v[hit - 1L]            # Pascal length byte
   c5  <- v[hit + 4L]            # 5th character (a level letter, e.g. A/S)
@@ -50,13 +68,22 @@ ivt_f2_geo_dguids <- function(raw) {
     i <- hit[idx]; L <- len[idx]
     if (i - 1L + L > n) next
     s <- intToUtf8(v[i:(i - 1L + L)])
-    if (!is.null(seen[[s]])) next                 # already seen this DGUID
-    if (!grepl("^2021[A-Z][0-9A-Z]+$", s)) next   # reject stray "2021 ..." prose
+    if (!is.null(seen[[s]])) next                       # already seen this DGUID
+    if (!grepl(IVT_F2_DGUID_RE, s)) next                # reject stray digit-runs
     seen[[s]] <- TRUE
     k <- k + 1L; out[k] <- s
   }
   out[seq_len(k)]
 }
+
+# A codebook block is one DGUID array chunk when every entry has the DGUID shape
+# `<YYYY><level letter><code>`. Vintage-agnostic (no "2021" literal): the numeric
+# attribute codes (ALT_GEO_CODE, PR_CODE) carry no letter in position 5 and the
+# name/description/note blocks carry spaces, so the DGUID chunks are the only
+# all-`<4 digits + level letter>` blocks -- the structural anchor used to segment
+# the codebook into attribute groups.
+ivt_f2_is_dguid_block <- function(t)
+  length(t) >= 2L && all(grepl(IVT_F2_DGUID_RE, t))
 
 # Each dimension's member labels are anchored in the codebook by a doubled-name
 # header marker -- the same `81 02 02 00` framing for every table -- that carries
@@ -214,7 +241,12 @@ ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
 # Note: this works in TEXT space (field names + order only) -- never byte offsets,
 # which the latin-1 -> UTF-8 round-trip does not preserve 1:1.
 ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
-  start <- max(1L, length(raw) - tail_bytes + 1L)
+  # Anchor the search on the codebook region: in the large chunked tables the
+  # schema field list sits ~18 MB before EOF -- far outside any fixed tail window --
+  # so start from the header codebook pointer when it is set, else the tail.
+  cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
+  start <- if (!is.na(cb) && cb >= 1) max(1L, as.integer(cb) - 8000L)
+           else max(1L, length(raw) - tail_bytes + 1L)
   s <- raw_to_latin1(raw[start:length(raw)])
   m <- regexpr("GEO_NAME_EN", s, fixed = TRUE)
   if (m < 1L) return(NULL)
@@ -315,18 +347,51 @@ ivt_f2_geo_light <- function(raw, n_geo) {
 
 # --- Full geography attribute table ------------------------------------------
 #
-# Each geography member carries 11 attributes, stored in the codebook as
+# Each geography member carries ~11 attributes, stored in the codebook as
 # member-ordered chunks of 256 grouped attribute-major: groups grow in size
 # (1, 1, 2, 4, 8, ... 256-member chunks), and within a group every attribute is
-# laid down as G English blocks (chunk 0..G-1) then G French blocks, in a fixed
-# slot order. DGUID is slot 5, so a group's first block (NAME English chunk 0) is
-# at `dguid_chunk0_block - 10*G`. Validated exact vs the StatCan metadata.
+# laid down as G English blocks (chunk 0..G-1) then G French blocks, in the schema
+# field order. DGUID is the schema's DGUID slot, so a group's first block (NAME
+# English chunk 0) is at `dguid_chunk0_block - dguid_slot*2*G`. The slot order and
+# the DGUID slot both come from the file's schema (`ivt_f2_geo_slot_map()`), the
+# group boundaries from `ivt_f2_geo_groups_chunked()` -- no year literal, no
+# hard-coded slot table. Validated exact vs the StatCan metadata.
 
-# Slot order of the 11 geography attributes (0-indexed); DGUID is slot 5.
+# Slot order of the 11 geography attributes (0-indexed); DGUID is slot 5. This is
+# now only the FALLBACK order: the slot of each attribute is read from the file's
+# own geography attribute schema (`ivt_f2_geo_schema()`) via `ivt_f2_geo_slot_map()`
+# and this fixed table is used only when that schema field list is absent.
 IVT_F2_ATTR_SLOTS <- c(
   geo_name = 0L, geo_type = 1L, geo_type_abbr = 2L, geo_level = 3L,
   prov_abbr = 4L, dguid = 5L, alt_geo_code = 6L, pr_code = 7L,
   dqf_code = 8L, dqf_note = 9L, tnr_short_form = 10L)
+
+# Map each output attribute to its schema field stem. The codebook attribute schema
+# (`ivt_f2_geo_schema()`) is the file's ordered field list, and a field's 0-based
+# position in it IS that attribute's slot in the group layout, so the slots are read
+# from the file rather than hard-coded. Field names may be stored truncated
+# (`GEO_LEVEL_DES`, `TNR_SHORT_FOR`), so match by prefix in either direction.
+IVT_F2_ATTR_FIELD <- c(
+  geo_name = "GEO_NAME", geo_type = "GEO_TYPE_DESC", geo_type_abbr = "GEO_TYPE_ABBR",
+  geo_level = "GEO_LEVEL", prov_abbr = "PROV_ABBR", dguid = "DGUID",
+  alt_geo_code = "ALT_GEO_CODE", pr_code = "PR_CODE", dqf_code = "DQF_CODE",
+  dqf_note = "DQF_NOTE", tnr_short_form = "TNR_SHORT")
+
+# Slot index (0-based) of every geography attribute, read from the file's schema
+# field list. Falls back to the fixed `IVT_F2_ATTR_SLOTS` order when the schema is
+# absent or does not name every attribute. Validated to reproduce `IVT_F2_ATTR_SLOTS`
+# exactly on 98-10-0023, 98-10-0129 and 98-10-0241.
+ivt_f2_geo_slot_map <- function(raw) {
+  schema <- ivt_f2_geo_schema(raw)
+  if (is.null(schema) || !length(schema)) return(IVT_F2_ATTR_SLOTS)
+  slots <- vapply(IVT_F2_ATTR_FIELD, function(field) {
+    hit <- which(startsWith(schema, field) | startsWith(field, schema))
+    if (length(hit)) hit[1L] - 1L else NA_integer_
+  }, integer(1))
+  names(slots) <- names(IVT_F2_ATTR_FIELD)
+  if (anyNA(slots)) return(IVT_F2_ATTR_SLOTS)   # unexpected schema shape -> fallback
+  slots
+}
 
 # Clean attribute blocks from the codebook tail: member arrays only — drop the
 # tiny garbage byte-runs the block scanner picks up and the consecutive-integer
@@ -347,40 +412,46 @@ ivt_f2_codebook_blocks <- function(raw, tail_bytes = 20000000L) {
   blocks[order(vapply(blocks, function(b) b$start, 1))]
 }
 
-# Segment the codebook into attribute groups using the DGUID blocks. Each group's
-# DGUID blocks are G chunk-starts ascending (English) then the same G (French);
-# returns a list of list(d0 = first DGUID-EN block index, G, starts = member ids).
-ivt_f2_geo_groups <- function(blocks, dguids) {
-  id_by_dg <- new.env(hash = TRUE, parent = emptyenv())
-  for (i in seq_along(dguids)) assign(dguids[i], i, envir = id_by_dg)
-  is_dg <- vapply(blocks, function(b)
-    length(b$texts) >= 2L && all(grepl("^2021[A-Z][0-9]", b$texts)), logical(1))
+# Segment the codebook into member-ordered attribute groups -- WITHOUT a year
+# literal or a pre-scanned DGUID array. The codebook stores geography
+# attribute-major in groups of growing size (1, 1, 2, 4, ... chunks of `chunk`=256
+# members); within a group every attribute is laid down as G English then G French
+# blocks in schema order, so the group's DGUID slot is a run of 2G structurally
+# identified DGUID blocks (G EN then G FR) that is contiguous in block order and
+# separated from the neighbouring groups by their other attributes. We therefore
+# find the DGUID blocks structurally (`ivt_f2_is_dguid_block()`), split them into
+# contiguous-index runs (one per group, length 2G), and assign member ids
+# DETERMINISTICALLY from the running 256-chunk total -- never read from DGUID
+# content. Returns list(d0 = first DGUID-EN block index, G, starts = member ids),
+# byte-identical to what the former "2021"-anchored `ivt_f2_geo_groups()` produced.
+ivt_f2_geo_groups_chunked <- function(blocks, chunk = 256L) {
+  is_dg <- vapply(blocks, function(b) ivt_f2_is_dguid_block(b$texts), logical(1))
   dgi <- which(is_dg)
-  ms <- vapply(dgi, function(j) {
-    f <- blocks[[j]]$texts[1]
-    if (exists(f, envir = id_by_dg, inherits = FALSE)) get(f, envir = id_by_dg) else NA_integer_
-  }, integer(1))
-  ok <- !is.na(ms); dgi <- dgi[ok]; ms <- ms[ok]
-  n <- length(ms); groups <- list(); pos <- 1L
-  while (pos <= n) {
-    e <- pos
-    while (e + 1L <= n && ms[e + 1L] > ms[e]) e <- e + 1L
-    G <- e - pos + 1L
-    paired <- (e + G) <= n && all(ms[(e + 1L):(e + G)] == ms[pos:e])
-    groups[[length(groups) + 1L]] <- list(d0 = dgi[pos], G = G, starts = ms[pos:e])
-    pos <- pos + if (paired) 2L * G else G
+  if (!length(dgi)) return(list())
+  brk <- c(0L, which(diff(dgi) != 1L), length(dgi))   # contiguous-run boundaries
+  groups <- list(); mem <- 1L
+  for (i in seq_len(length(brk) - 1L)) {
+    r <- dgi[(brk[i] + 1L):brk[i + 1L]]
+    G <- length(r) %/% 2L                             # 2G blocks (G EN + G FR)
+    if (G < 1L) next
+    starts <- mem + (seq_len(G) - 1L) * chunk
+    groups[[length(groups) + 1L]] <- list(d0 = r[1L], G = G, starts = starts)
+    mem <- mem + G * chunk
   }
   groups
 }
 
-# Extract one attribute (English) across all members, given the parsed groups.
+# Extract one attribute (English) across all members, given the parsed groups. The
+# group start block `glo` is anchored on the group's DGUID-EN block (`g$d0`), which
+# sits `dguid_slot` attributes into the group (2G blocks per attribute), so the
+# anchor is derived from the schema's DGUID slot rather than a fixed offset.
 ivt_f2_extract_attr <- function(blocks, groups, slot, n_geo, tnr = FALSE,
-                                group1_name = FALSE) {
+                                group1_name = FALSE, dguid_slot = 5L) {
   out <- rep(NA_character_, n_geo)
   ng <- length(groups)
   for (gi in seq_len(ng)) {
     g <- groups[[gi]]; G <- g$G
-    glo <- g$d0 - 10L * G
+    glo <- g$d0 - dguid_slot * 2L * G
     base <- glo + slot * 2L * G
     # group 1 carries an extra leading NAME pair (header table of contents), so
     # its counted NAME English block sits at +G.
@@ -417,19 +488,28 @@ ivt_f2_extract_attr <- function(blocks, groups, slot, n_geo, tnr = FALSE,
 #' (data-quality flag) and `tnr_short_form` (total non-response rate). Validated
 #' exact vs the StatCan metadata for all 63,404 geographies of 98-10-0023.
 #'
-#' This parses the codebook block structure and is slower than the DGUID-only
-#' path (a few seconds of block scanning); call it only when geography labels are
-#' wanted.
+#' The whole read is now marker+schema anchored: the geography member count comes
+#' from the header descriptor (`ivt_f2_geo_count()`), the attribute groups are
+#' segmented structurally with deterministic member ids
+#' (`ivt_f2_geo_groups_chunked()`), the attribute slots are read from the file's
+#' schema field list (`ivt_f2_geo_slot_map()`), and the DGUID column falls out of
+#' its own schema slot -- there is no "2021" year literal and no hard-coded slot
+#' table on this path. This parses the codebook block structure and is slower than
+#' the DGUID-only scan (a few seconds of block scanning); call it only when
+#' geography labels are wanted.
 #'
 #' @keywords internal
 #' @noRd
 ivt_f2_geo_attributes <- function(raw) {
-  dguids <- ivt_f2_geo_dguids(raw)
-  n_geo <- length(dguids)
-  ivt_f2_check_geo_count(raw, n_geo)
+  n_geo <- ivt_f2_geo_count(raw)
   blocks <- ivt_f2_codebook_blocks(raw)
-  groups <- ivt_f2_geo_groups(blocks, dguids)
-  pull <- function(name, ...) ivt_f2_extract_attr(blocks, groups, IVT_F2_ATTR_SLOTS[[name]], n_geo, ...)
+  groups <- ivt_f2_geo_groups_chunked(blocks)
+  slots <- ivt_f2_geo_slot_map(raw)
+  pull <- function(name, ...)
+    ivt_f2_extract_attr(blocks, groups, slots[[name]], n_geo,
+                        dguid_slot = slots[["dguid"]], ...)
+  dguids <- pull("dguid")                       # DGUID is just its own schema slot
+  ivt_f2_check_geo_count(raw, sum(!is.na(dguids)))
   dqf_code <- pull("dqf_code")
   # DQF_NOTE is a long concatenation of suppression statements that spans several
   # codebook blocks, so its direct slot extraction is only ~99.8%. It is a 1:1
