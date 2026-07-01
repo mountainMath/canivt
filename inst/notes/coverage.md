@@ -308,10 +308,17 @@ units) and the directory entries (8-byte entry units).
 - [ ] **Drive *all* groups from the directory's block order**, not just the root chunk —
   this removes the remaining `d0 ± k·2G` strides entirely. The directory now resolves on
   every reference table (small tables directly at `@824`; big tables via `@824 → struct →
-  ptr1`), so this no longer needs a separate chain decode — it is a validate-and-switch
-  refactor: segment groups from the directory and read each attribute's `G` chunks in
-  directory order, confirmed byte-identical to the stride output before flipping the
-  default.
+  ptr1`). A prototype confirms the block layout: value blocks appear in directory order
+  as, per group, `[display + schema fields]` × (EN chunk 0..G-1, then FR chunk 0..G-1),
+  and reading them positionally by that partition is **byte-identical to the stride
+  output on all 9 attributes of 98-10-0013 ADA (5,447/5,447)** — including the
+  reverse-stored root chunk, with no strides at all. **Blocker for the big tables:**
+  the fixed `2G`-blocks-per-attribute partition desyncs on 0023/0174 because `DQF_NOTE`
+  (long suppression text) spans a **variable** number of blocks and `TNR` is
+  content-located, so those attributes must be given structural variable-span detection
+  before the positional read can replace the stride path on schemas that carry them.
+  Until then the stride path stays (it is correct everywhere; only the root chunk needed
+  the directory override).
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 
