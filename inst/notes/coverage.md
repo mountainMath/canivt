@@ -185,17 +185,43 @@ units) and the directory entries (8-byte entry units).
   list `GEO_NAME · GEO_TYPE_DESC · GEO_TYPE_ABBR · GEO_LEVEL_DES · PROV_ABBR · DGUID
   · ALT_GEO_CODE · PR_CODE · DQF_CODE · DQF_NOTE · TNR_…` (each `_EN`/`_FR`), the
   geography analogue of the data dims' Variable List (`ivt_f2_geo_schema()`).
-  **Stage 1 (single-block tables, 0241/0077): done.** `ivt_f2_geo_simple_schema()`
-  locates geography by its marker and reads attribute arrays **by schema slot/name**
-  — DGUID and GEO_NAME are no longer found by sniffing a `"2021…"` prefix or a
-  `"Canada"` first entry. DGUIDs are byte-identical to the legacy `"2021"` scan;
-  `GEO_NAME` is now the canonical short name (e.g. `Corner Brook`), not the long
-  display label the content path returned. Falls back to `ivt_geo_arrays()` for
-  tables whose attribute arrays aren't clean `n_geo`-blocks (0662). **Stages 2–3:**
-  the chunked large tables (`ivt_f2_geo_attributes()`, still hard-codes
-  `IVT_F2_ATTR_SLOTS` + a `"2021…"` group anchor) and the inline pre-DGUID 1991
-  layout should fold under the same schema view. Needs 2016 / pre-DGUID (2011/2006)
-  benchmark tables to confirm the schema names generalise (`GEO_UID` vs `DGUID`).
+  **Stage 1 (single-block DGUID tables, 0241/0077): done.**
+  `ivt_f2_geo_simple_schema()` locates geography by its marker and reads attribute
+  arrays **by schema slot/name** — DGUID and GEO_NAME are no longer found by sniffing
+  a `"2021…"` prefix or a `"Canada"` first entry. DGUIDs are byte-identical to the
+  legacy `"2021"` scan; `GEO_NAME` is now the canonical short name (e.g. `Corner
+  Brook`). Falls back to `ivt_geo_arrays()` for tables whose attribute arrays aren't
+  clean `n_geo`-blocks (0662).
+  **Stage 2 (schema-absent tables, 1991 / 2006 / 2011 / 2016): done.** There are two
+  storage strategies, not one: the 2021 census tables store geography as **separate
+  schema-named arrays** (above), while every **schema-absent** table (older *and*, it
+  turns out, the 2016 `98-400-X` tables — DGUIDs are 2021-specific, not "2016+") stores
+  it as the inline combined block `"<name> (<code>) [<type_abbr>] <dqf> [(<pct>%)]"`.
+  `ivt_f2_geo_inline()` anchors on the geography dimension's own `81 02 02 00` marker
+  (`ivt_f2_geo_marker_region()`) and parses **only** the blocks in that marker region —
+  geography is *located from the metadata*, and each entry's name/uid/flag come from the
+  combined block's **structural format**, not from sniffing `"Canada"`/`"2021"`. The uid
+  is read as **character**: a bare geographic code (2016 `01`/2006 `1001105`), a dotted
+  census-tract code (2011 `0010001.00`), never a DGUID here. The type abbreviation admits
+  accents (Quebec `MÉ`), and a trailing `(pct%)` non-response rate (the 2016
+  single-census tables) is tolerated. Validated exact on member counts: **1991** 41,859
+  (byte-identical to the former whole-file scan), **2006 (97-563-XCB2006072)** 57,523
+  dissemination areas, **2011 (98-312-XCB2011033)** 5,447 census tracts, **2016
+  (98-400-X2016387)** 174 (single-block; its uid was previously empty — no DGUID array,
+  and the content detector could not recover the bare-code uid). The geography count is
+  read from the descriptor with the per-type width tag (`0x10`/`0x0d` → u16; 2011's `0x0d`
+  was misread as u8 = 21 before). `ivt_f2_geo_light()` resolves every family through one
+  marker-anchored entry: **combined-block reader** (schema-absent) → **schema/content
+  single-block** (2021 small) → **DGUID scan** (2021 chunked). 1991's default tidy now
+  labels geography by name + GEOUID (was member-id only).
+  **Stage 3 remaining (the last split):** only the **2021 chunked DGUID** tables
+  (98-10-0023 / 0129) still resolve their uid via the year-locked `"2021"` byte scan
+  (`ivt_f2_geo_dguids()`) and segment their 256-member attribute groups by the `"2021…"`
+  DGUID anchor + hard-coded `IVT_F2_ATTR_SLOTS` (`ivt_f2_geo_attributes()`). Folding these
+  under the marker+schema view (chunked schema reader) is the remaining work; it must stay
+  byte-identical on all 63,404 DGUIDs and the full attribute table. Since the schema+DGUID
+  layout appears 2021-specific, the `"2021"` lock is never exercised on another vintage,
+  but it is the one hard-coded remnant left.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

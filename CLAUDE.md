@@ -59,7 +59,7 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
 | `decode.R`      | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides. `ivt_decode()` walks the paged-coordinate cartesian, decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`) → cell tibble (`geo` + one slug column per data dimension). Handles geography-paged (former family 1) and geography-in-page/multiple-geos-per-page (former family 2) identically. |
 | `container-f2.R`| family-2 page-directory finder (used by the metadata path) + per-page value params (`IVT_F2_PAGE_TRAILER` per marker); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
 | `decode-f2.R`   | shared presence-bitmap primitives used by `ivt_layout()`/`ivt_decode()` for **every** table (the `ivt_f2_` prefix is historical): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()` (power-of-two-nested strides), `ivt_f2_cell_grid()` (cells in dense value order), `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read). |
-| `codebook-f2.R` | **the unified codebook** (the `ivt_f2_` prefix is historical — used for every family): member-ordered geography DGUIDs (fast vectorised `2021…` Pascal-string scan, first-appearance dedup); `ivt_f2_geo_simple()` (cheap single-block geography names+DGUIDs for small/family-1 tables, NULL for the chunked large tables) — **schema-driven and content-free**: geography is dimension 1, located by its own `81 02 02 00` doubled-name marker (like every data dim), and its attribute arrays are named by the file's **geography attribute schema** `ivt_f2_geo_schema()` (the stored `GEO_NAME·GEO_TYPE_DESC·…·DGUID·…` field list), so `GEO_NAME`/`DGUID` are addressed **by slot/name**, not by sniffing a `"Canada"` first entry or a `"2021…"` prefix (DGUIDs byte-identical to the legacy scan on 0241/0077; `GEO_NAME` is the canonical short name). Falls back to the content-based `ivt_geo_arrays()` for layouts whose attribute arrays aren't clean `n_geo`-blocks (e.g. 0662); data-dimension member labels `ivt_f2_dim_member_labels(raw, want)` (anchored on the codebook **doubled-name marker** `81 02 02 00` via `ivt_f2_codebook_dim_markers()` + `ivt_f2_marker_labels()`: each dimension's `81 02 02 00`+name header sits right after its EN block, so labels are matched **by name** and taken as that block's trailing `count` records — robust to leading framing records, e.g. 0077 Ages, and to ordinal-less short dims, e.g. the 2-member reference period Year=`2020`/`2015`; the old ordinal-anchored + FR/EN-pair scans remain as fallback); the full **geography attribute table** `ivt_f2_geo_attributes()` (attribute-major growing groups via the DGUID anchor; `group_lo = d0 − 10·G`; per-attribute EN-then-FR slots); `ivt_f2_geo_inline()` for the **pre-DGUID 1991 layout** (`"name (GEOUID) flag"` blocks; bilingual names). Metadata-driven entry point `ivt_f2_geographies()` reads layout + geography count from the **header**, dispatches, returns a unified `member_id/geo_name/geo_uid/…` table, validated against the header (`ivt_f2_check_geo_count()`). |
+| `codebook-f2.R` | **the unified codebook** (the `ivt_f2_` prefix is historical — used for every family): member-ordered geography DGUIDs (fast vectorised `2021…` Pascal-string scan, first-appearance dedup); `ivt_f2_geo_simple()` (cheap single-block geography names+DGUIDs for small/family-1 tables, NULL for the chunked large tables) — **schema-driven and content-free**: geography is dimension 1, located by its own `81 02 02 00` doubled-name marker (like every data dim), and its attribute arrays are named by the file's **geography attribute schema** `ivt_f2_geo_schema()` (the stored `GEO_NAME·GEO_TYPE_DESC·…·DGUID·…` field list), so `GEO_NAME`/`DGUID` are addressed **by slot/name**, not by sniffing a `"Canada"` first entry or a `"2021…"` prefix (DGUIDs byte-identical to the legacy scan on 0241/0077; `GEO_NAME` is the canonical short name). Falls back to the content-based `ivt_geo_arrays()` for layouts whose attribute arrays aren't clean `n_geo`-blocks (e.g. 0662); data-dimension member labels `ivt_f2_dim_member_labels(raw, want)` (anchored on the codebook **doubled-name marker** `81 02 02 00` via `ivt_f2_codebook_dim_markers()` + `ivt_f2_marker_labels()`: each dimension's `81 02 02 00`+name header sits right after its EN block, so labels are matched **by name** and taken as that block's trailing `count` records — robust to leading framing records, e.g. 0077 Ages, and to ordinal-less short dims, e.g. the 2-member reference period Year=`2020`/`2015`; the old ordinal-anchored + FR/EN-pair scans remain as fallback); the full **geography attribute table** `ivt_f2_geo_attributes()` (attribute-major growing groups via the DGUID anchor; `group_lo = d0 − 10·G`; per-attribute EN-then-FR slots); `ivt_f2_geo_inline()` the **combined-block reader** for every **schema-absent** layout (1991/2006/2011/2016: `"name (code) [type_abbr] flag [(pct%)]"` blocks; bilingual names; character GEOUIDs incl. dotted census-tract codes and bare 2016 codes) — **marker-anchored**: parses only the geography dimension's `81 02 02 00` marker region (`ivt_f2_geo_marker_region()`), not the whole file; returns NULL for schema'd tables (they have no combined block). `ivt_f2_geo_light()` resolves all families through one entry (combined-block → schema/content single-block → DGUID scan). Metadata-driven entry point `ivt_f2_geographies()` prefers the combined-block reader, else the DGUID attribute table, returns a unified `member_id/geo_name/geo_uid/…` table, validated against the header (`ivt_f2_check_geo_count()`). |
 | `read-f2.R`     | **the unified metadata + tidy**: `ivt_f2_metadata()` (descriptor dimensions + member labels + geography names/uids + footnotes, for every family); `ivt_f2_vl_pairs()` + `ivt_f2_dim_name()` (full dimension names from the header Variable List, matched to the descriptor **by count** since display order ≠ storage order); `ivt_f2_dimensions()` (uniform per-dim `name/count/type/is_geography/members`); `ivt_f2_tidy()` (label geography by name/uid + data dims by member names). |
 | `codebook.R`    | shared codebook primitives (used by `codebook-f2.R`): `ivt_find_member_blocks()` Pascal-run scanner, `ivt_header_text()` / `ivt_table_info()` identity, `ivt_geo_arrays()` (clean name/DGUID blocks), `ivt_footnotes()` text-run extraction. (The old hard-coded family-1 `IVT_DIMS` / `ivt_read_codebook()` are gone — metadata is now fully descriptor-driven.) |
 | `read.R`        | public `read_ivt()`, `ivt_metadata()`, `ivt_tidy()`, `print.ivt` — **one path for all families** (decode via `ivt_decode()`, metadata via `ivt_f2_metadata()`; `family` now only tags provenance and gates the `geo_attributes` option); `ivt_family()` detector + `ivt_is_supported()` gate. |
@@ -109,10 +109,13 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   descriptors), for any geography sizing.
 - **Geography is the first descriptor dimension** (`ivt_f2_geo_dim()`), identified
   **positionally, not by a type byte**: the geography descriptor *type* differs by
-  format (`0x10` in modern 2021 family-2 files, count u16; `0x08` in the family-1
-  reference table, count u8). The old `type == 0x10` filter silently misread
-  98-10-0241's geography count as 16383. `ivt_f2_data_dims()` likewise takes "all
-  dims after the first" rather than filtering by type.
+  format and is a **storage-width tag** for the (large) member count — `0x10` (modern
+  2021/DGUID family-2 files) and `0x0d` (the 2011 census-tract table) carry a **u16**
+  count, `0x08` (the family-1 reference table) a **u8**. The old `type == 0x10` filter
+  silently misread 98-10-0241's geography count as 16383; reading 2011's `0x0d` as u8
+  misread its 5447 geographies as 21. `ivt_f2_descriptor()` reads u16 for `0x10`/`0x0d`,
+  u8 otherwise; `ivt_f2_data_dims()` likewise takes "all dims after the first" rather
+  than filtering by type.
 - **`ivt_f2_descriptor()` anchors dimension records on the doubled name**, not on a
   fixed `<type> 01 <upper>` marker (the type list is gone). Each record stores its
   name twice back-to-back after a `0x01`; count/type framing bytes before it vary.
@@ -210,21 +213,38 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   dimensions per dimension **by name**. The 2048-bit presence cap is assumed
   constant (all six tables use it); a float64 table or a no-straddle table would
   harden it.
-- **Uniform, content-free geography parsing (in progress).** Geography is just
-  dimension 1 with richer metadata: it has the same `81 02 02 00` doubled-name
-  marker as every data dim, and the file stores a **geography attribute schema**
-  (`ivt_f2_geo_schema()`: the named field list `GEO_NAME·…·DGUID·…`, the geography
-  analogue of the data dims' Variable List). **Stage 1 done:** single-block tables
-  (0241/0077) parse geography schema-driven via `ivt_f2_geo_simple_schema()` —
-  attribute arrays addressed by schema name/slot, no `"2021"`/`"Canada"` content
-  sniffing; DGUIDs byte-identical to the legacy scan, `GEO_NAME` the canonical short
-  name. **Stages 2–3 remaining:** the chunked large tables (`ivt_f2_geo_attributes()`
-  still uses the hard-coded `IVT_F2_ATTR_SLOTS` + a `"2021…"` DGUID anchor for the
-  256-member group segmentation) and the inline pre-DGUID 1991 layout
-  (`ivt_f2_geo_inline()`) should fold under the same schema view; the year-locked
-  `ivt_f2_geo_dguids()` `"2021"` scan stays only on those fallback paths for now.
-  Needs 2016 / pre-DGUID (2011/2006) benchmark tables to confirm the schema field
-  names generalise (e.g. `GEO_UID` vs `DGUID`).
+- **Uniform, content-free geography parsing.** Geography is dimension 1 with the same
+  `81 02 02 00` doubled-name marker as every data dim; `ivt_f2_geo_light()` resolves
+  every family through **one marker-anchored entry**. There are **two storage
+  strategies** (not one): the 2021 census tables store geography as **separate
+  schema-named arrays** (`ivt_f2_geo_schema()` field list `GEO_NAME·…·DGUID·…`), while
+  every **schema-absent** table stores it as the inline combined block `"<name>
+  (<code>) [<type_abbr>] <dqf> [(<pct>%)]"`. **DGUIDs are 2021-specific, not "2016+"**
+  — the 2016 `98-400-X` tables carry no schema and no DGUID. `ivt_f2_geo_light()`
+  order: **combined-block reader** (schema-absent) → **schema/content single-block**
+  (2021 small) → **DGUID scan** (2021 chunked); the combined-block reader returns NULL
+  for schema'd tables (they have no combined block: e.g. 0241's `Corner Brook (CA),
+  N.L.` parens are part of the *name*), so they fall through cleanly.
+  - **Schema'd single-block (0241/0077):** `ivt_f2_geo_simple_schema()` reads arrays by
+    schema slot/name, no `"2021"`/`"Canada"` sniffing; `GEO_NAME` is the canonical short
+    name, DGUID byte-identical to the legacy scan.
+  - **Combined-block (1991/2006/2011/2016):** `ivt_f2_geo_inline()` anchors on
+    `ivt_f2_geo_marker_region()` and parses **only** that region; name/uid/flag come
+    from the block's **structural format**. The uid is **character** — a bare code
+    (2016 `01`, 2006 `1001105`), a dotted census-tract code (2011 `0010001.00`), never
+    a DGUID here. Admits accented type abbrevs (`MÉ`) and the 2016 trailing `(pct%)`.
+    Exact member counts: 1991 41,859 (byte-identical to the former scan), 2006 57,523,
+    2011 5,447, 2016 (98-400-X2016387) 174 (single-block; its uid was previously empty).
+  - Geography **count** from the descriptor per-type width tag (`0x10`/`0x0d`→u16, else
+    u8; 2011's `0x0d` was misread as u8 = 21). 1991's default tidy now labels geography
+    by name + GEOUID (was member-id only).
+  - **Stage 3 (the last split):** only the **2021 chunked DGUID** tables (0023/0129)
+    still resolve their uid via the year-locked `"2021"` byte scan
+    (`ivt_f2_geo_dguids()`) and segment 256-member groups by the `"2021…"` anchor +
+    hard-coded `IVT_F2_ATTR_SLOTS` (`ivt_f2_geo_attributes()`). Folding these under the
+    marker+schema view (chunked schema reader, byte-identical on all 63,404 DGUIDs) is
+    the remaining work. The layout appears 2021-specific, so the lock is never
+    exercised on another vintage — but it is the one hard-coded remnant left.
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.

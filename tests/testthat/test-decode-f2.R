@@ -17,6 +17,30 @@ sample_ivt_f2_4d <- function() {
                     legacy = "/tmp/t129/98100129.ivt")
 }
 
+# Pre-DGUID modern-export tables whose geography uses the inline "name (code) flag"
+# codebook with character GEOUIDs: a 2011 census-tract table (dotted CTUIDs, e.g.
+# "0010001.00") and a 2006 dissemination-area table. Point CANIVT_SAMPLE_IVT_2011 /
+# CANIVT_SAMPLE_IVT_2006 at copies to run; skip otherwise.
+sample_ivt_2011 <- function() {
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_2011", "98-312-XCB2011033",
+                    file = "98-312-XCB2011033.IVT",
+                    legacy = "/tmp/ivt2/98-312-XCB2011033.IVT")
+}
+sample_ivt_2006 <- function() {
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_2006", "97-563-XCB2006072",
+                    file = "97-563-XCB2006072.IVT",
+                    legacy = "/tmp/ivt2/97-563-XCB2006072.IVT")
+}
+# A small single-block 2016 table (98-400-X2016387: the 2016 twin of 98-10-0077 —
+# 174 geographies, a "Census year (2)" reference period). No schema and no DGUID:
+# geography is the inline combined block whose entry carries a trailing non-response
+# "(pct%)" the older tables lack, and the uid is the bare geographic code.
+sample_ivt_2016 <- function() {
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_2016", "98-400-X2016387",
+                    file = "98-400-X2016387.IVT",
+                    legacy = "/tmp/ivt2/98-400-X2016387.IVT")
+}
+
 test_that("family-2 files are detected as family 2", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
@@ -294,12 +318,15 @@ test_that("read_ivt() handles the legacy 1991 table end-to-end", {
   expect_equal(vapply(fn, function(f) f$number, 1L), 1:40)
   expect_match(fn[[1]]$text, "first five months")
 
-  # default tidy keys geography by member id (no fast uid in the legacy format)
+  # default tidy now labels geography from the marker-anchored inline codebook
+  # (name + character GEOUID), the same content-free path used for 2006/2011
   td <- ivt_tidy(x)
-  expect_equal(names(td), c("geo", "single", "sex", "value"))
-  ca <- td[td$geo == 1L, ]
+  expect_equal(names(td), c("geo_name", "geo_uid", "single", "sex", "value"))
+  expect_type(td$geo_uid, "character")
+  ca <- td[td$geo_name == "Canada", ]
   expect_equal(ca$value[ca$single == "Total - Age Groups" & ca$sex == "Total - Sex"], 27296860)
   expect_equal(ca$value[ca$single == "Total - Age Groups" & ca$sex == "Male"], 13454580)
+  expect_equal(unique(ca$geo_uid), "00")
 
   # geo_attributes = TRUE labels geography by name + GEOUID
   x2 <- read_ivt(p, geo_attributes = TRUE)
@@ -307,6 +334,50 @@ test_that("read_ivt() handles the legacy 1991 table end-to-end", {
   expect_true(all(c("geo_name", "geo_uid") %in% names(td2)))
   expect_equal(unique(td2$geo_name[x2$cells$geo == 1L]), "Canada")
   expect_equal(unique(td2$geo_uid[x2$cells$geo == 1L]), "00")
+})
+
+test_that("pre-DGUID geography is parsed from the dimension marker, content-free", {
+  # The 2006/2011 census tables have no DGUID attribute schema; geography is the
+  # inline "name (code) flag" codebook. It must be located by the geography
+  # dimension's own 81 02 02 00 marker (like every data dimension), NOT by sniffing
+  # the file for a "Canada"/"2021" entry, and the GEOUID must stay character (the
+  # 2011 census-tract codes are dotted, e.g. "0010001.00").
+  p11 <- sample_ivt_2011()
+  if (p11 != "") {
+    raw <- readBin(p11, "raw", n = file.info(p11)$size)
+    m <- ivt_f2_metadata(raw)
+    expect_equal(m$n_geographies, 5447L)                 # type-0x0d u16 count
+    expect_equal(length(m$geographies$geo_uid), 5447L)
+    expect_equal(length(m$geographies$geo_name), 5447L)
+    expect_type(m$geographies$geo_uid, "character")
+    expect_true(any(grepl("\\.", m$geographies$geo_uid)))  # dotted census-tract codes
+    expect_equal(m$geographies$geo_uid[1], "001")          # St. John's CMA
+  }
+  p06 <- sample_ivt_2006()
+  if (p06 != "") {
+    raw <- readBin(p06, "raw", n = file.info(p06)$size)
+    m <- ivt_f2_metadata(raw)
+    expect_equal(m$n_geographies, 57523L)
+    expect_equal(length(m$geographies$geo_uid), 57523L)
+    expect_type(m$geographies$geo_uid, "character")
+    expect_equal(m$geographies$geo_name[1], "Canada")
+    expect_equal(m$geographies$geo_uid[1], "01")
+  }
+  # 2016 single-block table: no schema, no DGUID; the combined block adds a trailing
+  # non-response "(pct%)". The uid is the bare geographic code, still character.
+  p16 <- sample_ivt_2016()
+  if (p16 != "") {
+    raw <- readBin(p16, "raw", n = file.info(p16)$size)
+    m <- ivt_f2_metadata(raw)
+    expect_equal(m$n_geographies, 174L)
+    expect_equal(length(m$geographies$geo_uid), 174L)
+    expect_type(m$geographies$geo_uid, "character")
+    expect_equal(m$geographies$geo_name[1], "Canada")
+    expect_equal(m$geographies$geo_uid[1], "01")             # bare code, not a DGUID
+    expect_false(any(grepl("^2016[A-Z]", m$geographies$geo_uid)))  # no DGUID present
+  }
+  if (p11 == "" && p06 == "" && p16 == "")
+    skip("no pre-DGUID sample (set CANIVT_SAMPLE_IVT_2011 / _2006 / _2016)")
 })
 
 test_that("the whole file layout maps from the header", {

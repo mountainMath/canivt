@@ -70,7 +70,10 @@ ivt_f2_geo_dguids <- function(raw) {
 ivt_f2_codebook_dim_markers <- function(raw, search_start) {
   v <- as.integer(raw); n <- length(v)
   if (search_start >= n - 4L) return(data.frame(offset = integer(0), name = character(0)))
-  reg <- search_start:(n - 4L)
+  # v is 1-indexed; clamp the low end so a 0 search_start (small files, where
+  # length(raw) - tail_bytes underflows) does not put index 0 in reg and drop an
+  # element, which would misalign the v[reg] / v[reg + 1L] comparison.
+  reg <- max(1L, as.integer(search_start)):(n - 4L)
   off <- reg[v[reg] == 0x81L & v[reg + 1L] == 0x02L &
              v[reg + 2L] == 0x02L & v[reg + 3L] == 0x00L]
   if (!length(off)) return(data.frame(offset = integer(0), name = character(0)))
@@ -280,6 +283,36 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
        dguid = if (!is.null(ga$dguids)) ga$dguids$texts else NULL)
 }
 
+# Light geography labels (name + uid) for the metadata path, family-agnostic and
+# located from the metadata, not the content. Three layouts, in priority order:
+#   1. a single clean block per attribute (schema- or content-addressed) -> the
+#      small modern single-block tables (98-10-0241/0077); names + DGUIDs;
+#   2. the marker-anchored inline "name (code) flag" codebook -> the pre-DGUID
+#      tables (1991, 2006, 2011); bilingual names + character GEOUIDs;
+#   3. the fast DGUID scan -> the large chunked modern tables (98-10-0023/0129):
+#      uid only (names need the slower read_ivt(geo_attributes = TRUE) path).
+# Returns list(geo_name, geo_uid) where either element may be NULL.
+ivt_f2_geo_light <- function(raw, n_geo) {
+  # 2. the marker-anchored combined-block parser is tried before the content-based
+  #    single-block detector: it returns NULL for the schema'd DGUID tables (no
+  #    combined block), so they fall through to the schema/content path below, but
+  #    it wins for the schema-absent tables (1991/2006/2011/2016) -- including the
+  #    single-block 2016 case whose uid the content detector cannot recover (no
+  #    DGUID array; the uid is the bare code inside the combined block).
+  inl <- ivt_f2_geo_inline(raw)
+  if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo))
+    return(list(geo_name = inl$geo_name, geo_uid = inl$geouid))
+  # 1./3. schema-named single block (2021 DGUID) or the content-based array detector
+  simple <- ivt_f2_geo_simple(raw, n_geo)
+  if (!is.null(simple)) {
+    geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
+               else ivt_f2_geo_dguids(raw)
+    return(list(geo_name = simple$name, geo_uid = geo_uid))
+  }
+  # 4. chunked DGUID tables (0023/0129): uid only via the fast DGUID scan
+  list(geo_name = NULL, geo_uid = ivt_f2_geo_dguids(raw))
+}
+
 # --- Full geography attribute table ------------------------------------------
 #
 # Each geography member carries 11 attributes, stored in the codebook as
@@ -433,18 +466,27 @@ ivt_f2_derive_text <- function(raw_vals, key) {
   out
 }
 
-# --- Inline-codebook geography (pre-DGUID layout, e.g. 1991 table 1003011) ----
+# --- Inline-codebook geography (pre-DGUID layout, e.g. 1991, 2006, 2011) -------
 #
 # Tables older than the 2016 DGUID store geography differently from 98-10-0023:
 # instead of a separate DGUID array plus a slotted attribute table, one block type
 # per chunk packs everything into each entry as
-#     "<name> (<GEOUID>)   <dqf_code>"
-# where <name> is the bilingual label ("English | French"), <GEOUID> is the bare
-# geographic code (a shortened DGUID without the year and statistical-area-type
-# prefix that 2016+ tables carry), and <dqf_code> is the 5-digit data-quality flag.
-# These blocks repeat per chunk and per language; the GEOUID is unique, so
-# first-appearance de-duplication yields the geographies in member order.
-# Validated exact for all 41,859 geographies of 1003011 (1991 census, E9101).
+#     "<name> (<GEOUID>) [<type_abbr>] <dqf_code>"
+# where <name> is the (often bilingual "English | French") label, <GEOUID> is the
+# bare geographic code (a shortened DGUID without the year and statistical-area-type
+# prefix that 2016+ tables carry; it may be dotted, e.g. a census-tract code
+# "0010001.00", or carry letters, so it is treated as character), an optional
+# <type_abbr> is a short geography-type abbreviation ("T", the accented "MÉ", ...),
+# and <dqf_code> is the data-quality flag. These blocks repeat per chunk and per
+# language; the GEOUID is unique, so first-appearance de-duplication yields the
+# geographies in member order. Crucially the parse is **anchored on the geography
+# dimension's `81 02 02 00` doubled-name marker** (`ivt_f2_geo_marker_region()`),
+# exactly as the data dimensions are anchored, so geography is *located* from the
+# metadata, not by sniffing the whole file for a "Canada"/"2021" first entry; only
+# the blocks in geography's own marker region are parsed. Validated exact on the
+# member counts for 1003011 (1991, 41,859), 98-312-XCB2011033 (2011 census tracts,
+# 5,447) and 97-563-XCB2006072 (2006 dissemination areas, 57,523); byte-identical to
+# the former whole-file scan on 1991's names/GEOUIDs/flags.
 
 # Fixed-header field offsets (0-based). The header carries a dimension descriptor
 # pointer and, in the legacy export format, out-of-line title-string pointers.
@@ -513,20 +555,62 @@ ivt_f2_geo_is_inline <- function(raw) {
   rd_u32(raw, IVT_HDR_TITLE_EN_PTR) != 0 || rd_u32(raw, IVT_HDR_TITLE_FR_PTR) != 0
 }
 
-IVT_F2_INLINE_PAT <- "^(.*) \\(([0-9A-Za-z]+)\\)\\s+([0-9]+)\\s*$"
+# The inline geography entry: "<name> (<code>) [<type_abbr>] <dqf_code> [(<pct>%)]".
+# The code group allows dots and letters (census-tract codes are dotted, e.g.
+# "0010001.00") so GEOUIDs are read as character; the optional type-abbreviation
+# token is any space-delimited run that does NOT start with a digit (so it is the
+# abbreviation, not the numeric flag) -- this admits "T" and the accented Quebec
+# "MÉ"; and an optional trailing parenthesised group carries the non-response rate
+# that the 2016 single-census-year tables append (e.g. "Canada (01) 20000 ( 4.0%)").
+IVT_F2_INLINE_PAT <- paste0(
+  "^(.*) \\(([0-9A-Za-z.]+)\\)\\s+(?:[^0-9\\s]\\S*\\s+)?([0-9]+)",
+  "(?:\\s*\\([^)]*\\))?\\s*$")
+
+# Byte range [start, end) of the geography dimension's codebook region, anchored on
+# its `81 02 02 00` doubled-name marker (the same anchor used for every data
+# dimension) and bounded by the next dimension marker (or EOF). Geography is dim 1,
+# so its marker is the first; we match it by name to be safe. Searching from the
+# header's codebook pointer (@572) keeps this correct for the large files whose
+# geography codebook sits far from EOF (e.g. the 2006 table's marker at ~32 MB).
+# Returns c(start, end) or NULL when the descriptor or the marker is absent.
+ivt_f2_geo_marker_region <- function(raw) {
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || !length(d$dims)) return(NULL)
+  geo <- ivt_f2_geo_dim(d$dims)
+  if (is.null(geo) || is.null(geo$name) || is.na(geo$name)) return(NULL)
+  cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
+  start <- if (is.na(cb) || cb < 1) 0L else max(0L, as.integer(cb) - 8000L)
+  markers <- ivt_f2_codebook_dim_markers(raw, start)
+  if (!nrow(markers)) return(NULL)
+  geo_mk <- vapply(markers$name, function(nm) {
+    if (is.na(nm)) return(FALSE)
+    k <- min(nchar(nm), nchar(geo$name))
+    k >= 4L && substr(nm, 1L, k) == substr(geo$name, 1L, k)
+  }, logical(1))
+  hit <- which(geo_mk)
+  if (!length(hit)) return(NULL)
+  geomk <- markers$offset[hit[1]]
+  others <- markers$offset[markers$offset > geomk]
+  c(geomk, if (length(others)) min(others) else length(raw))
+}
 
 #' Geography table for an inline-codebook (pre-DGUID) family-2 IVT.
 #'
 #' Returns a tibble with one row per geography (member order) and columns
-#' `geo_name` (bilingual "EN | FR" label), `geouid` (bare geographic code) and
-#' `dqf_code` (data-quality flag). Validated exact vs the StatCan member metadata
-#' for the 1991 table 1003011.
+#' `geo_name` (often a bilingual "EN | FR" label), `geouid` (bare geographic code,
+#' character) and `dqf_code` (data-quality flag). The blocks scanned are restricted
+#' to the geography dimension's marker region, so geography is located from the
+#' metadata rather than by content. Returns NULL when there is no geography marker
+#' region (modern DGUID layouts). Validated exact vs the StatCan member metadata for
+#' 1003011 (1991), 98-312-XCB2011033 (2011) and 97-563-XCB2006072 (2006).
 #'
 #' @keywords internal
 #' @noRd
-ivt_f2_geo_inline <- function(raw, tail_bytes = 8000000L) {
-  start <- max(0L, length(raw) - tail_bytes)
-  blocks <- ivt_find_member_blocks(raw, start, min_records = 3L)
+ivt_f2_geo_inline <- function(raw) {
+  region <- ivt_f2_geo_marker_region(raw)
+  if (is.null(region)) return(NULL)
+  blocks <- ivt_find_member_blocks(raw, max(0L, region[1] - 50L), min_records = 3L)
+  blocks <- Filter(function(b) b$start >= region[1] && b$start < region[2], blocks)
   blocks <- blocks[order(vapply(blocks, function(b) b$start, 1))]
   pat <- IVT_F2_INLINE_PAT
   is_inline <- vapply(blocks, function(b)
@@ -543,6 +627,7 @@ ivt_f2_geo_inline <- function(raw, tail_bytes = 8000000L) {
       nm <- c(nm, gg[2]); cd <- c(cd, code); fl <- c(fl, gg[4])
     }
   }
+  if (!length(cd)) return(NULL)
   g <- tibble::tibble(member_id = seq_along(cd), geo_name = trimws(nm),
                       geouid = cd, dqf_code = fl)
   ivt_f2_check_geo_count(raw, nrow(g))
@@ -567,9 +652,9 @@ ivt_f2_check_geo_count <- function(raw, got) {
 #' Decode the geography table, driven by the header metadata.
 #'
 #' Single metadata-driven entry point that consolidates the two codebook layouts:
-#' it reads the layout flag and the declared geography count from the file header,
-#' dispatches to the modern DGUID attribute parser (`ivt_f2_geo_attributes()`) or
-#' the pre-DGUID inline parser (`ivt_f2_geo_inline()`), validates the row count
+#' it prefers the marker-anchored inline parser (`ivt_f2_geo_inline()`, the pre-DGUID
+#' "name (code) flag" codebook found in 1991/2006/2011) and otherwise falls to the
+#' modern DGUID attribute parser (`ivt_f2_geo_attributes()`), validates the row count
 #' against the header, and returns a tibble whose leading columns are always
 #' `member_id`, `geo_name` and `geo_uid` (the DGUID for 2016+ tables, the bare
 #' GEOUID for older ones), followed by any layout-specific attribute columns.
@@ -577,8 +662,8 @@ ivt_f2_check_geo_count <- function(raw, got) {
 #' @keywords internal
 #' @noRd
 ivt_f2_geographies <- function(raw) {
-  if (ivt_f2_geo_is_inline(raw)) {
-    g <- ivt_f2_geo_inline(raw)
+  g <- ivt_f2_geo_inline(raw)
+  if (!is.null(g)) {
     names(g)[names(g) == "geouid"] <- "geo_uid"
   } else {
     g <- ivt_f2_geo_attributes(raw)
@@ -653,7 +738,14 @@ ivt_f2_descriptor <- function(raw) {
           type <- v[k - 3L]; count <- v[k - 2L]
         } else {
           type <- v[k - 1L]
-          count <- if (type == 0x10L) v[k - 3L] + v[k - 2L] * 256L else v[k - 2L]
+          # the geography descriptor stores its (large) member count as a 16-bit
+          # little-endian value; the type byte tags the storage width: 0x10 (modern
+          # DGUID geography, e.g. 63404 in 98-10-0023; 57523 in the 2006 DA table)
+          # and 0x0d (the 2011 census-tract geography, 5447) carry a u16, whereas
+          # the small family-1 geography (type 0x08, <=255) and the data dimensions
+          # carry a u8. Reading 0x0d as u8 misread 2011's 5447 geographies as 21.
+          count <- if (type %in% c(0x10L, 0x0dL)) v[k - 3L] + v[k - 2L] * 256L
+                   else v[k - 2L]
         }
         dims[[length(dims) + 1L]] <- list(name = trimws(intToUtf8(run[1:half])),
                                           count = count, type = type)

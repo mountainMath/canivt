@@ -145,20 +145,18 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
 # `geographies` is a uniform list with `member_id`, an optional `geo_name`, and an
 # optional `geo_uid` (the DGUID, or the bare GEOUID for pre-DGUID tables).
 ivt_f2_metadata <- function(raw, dir = NULL) {
+  # `inline` (the out-of-line title pointers) tags the legacy *export* format, which
+  # only governs identity/footnote storage; geography is resolved uniformly below
+  # (`ivt_f2_geo_light()`), since the pre-DGUID inline geography codebook also occurs
+  # in modern-export files (e.g. the 2006/2011 census tables).
   inline <- ivt_f2_geo_is_inline(raw)
   info <- if (inline) ivt_f2_legacy_identity(raw) else ivt_table_info(raw)
   dims <- ivt_f2_dimensions(raw)
   n_geo <- ivt_f2_geo_count(raw)
-  if (inline) {
-    geographies <- list(member_id = seq_len(if (is.na(n_geo)) 0L else n_geo))
-  } else {
-    simple <- ivt_f2_geo_simple(raw, n_geo)
-    geo_uid <- if (!is.null(simple) && length(simple$dguid) == n_geo) simple$dguid
-               else ivt_f2_geo_dguids(raw)
-    ivt_f2_check_geo_count(raw, length(geo_uid))
-    geographies <- list(geo_name = if (!is.null(simple)) simple$name else NULL,
-                        geo_uid = geo_uid, member_id = seq_along(geo_uid))
-  }
+  g <- ivt_f2_geo_light(raw, n_geo)
+  ivt_f2_check_geo_count(raw, length(g$geo_uid))
+  geographies <- list(geo_name = g$geo_name, geo_uid = g$geo_uid,
+                      member_id = seq_along(g$geo_uid))
   list(
     product_id        = info$product_id,
     title_en          = info$title_en,
