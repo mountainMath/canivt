@@ -305,20 +305,42 @@ units) and the directory entries (8-byte entry units).
   every attribute** on CT (98-10-0478) **and on both big tables 0023/0174** (whose
   directory now resolves via the extra indirection), so the override is byte-identical
   there (unchanged **63,404/63,404**).
-- [ ] **Drive *all* groups from the directory's block order**, not just the root chunk —
-  this removes the remaining `d0 ± k·2G` strides entirely. The directory now resolves on
-  every reference table (small tables directly at `@824`; big tables via `@824 → struct →
-  ptr1`). A prototype confirms the block layout: value blocks appear in directory order
-  as, per group, `[display + schema fields]` × (EN chunk 0..G-1, then FR chunk 0..G-1),
-  and reading them positionally by that partition is **byte-identical to the stride
-  output on all 9 attributes of 98-10-0013 ADA (5,447/5,447)** — including the
-  reverse-stored root chunk, with no strides at all. **Blocker for the big tables:**
-  the fixed `2G`-blocks-per-attribute partition desyncs on 0023/0174 because `DQF_NOTE`
-  (long suppression text) spans a **variable** number of blocks and `TNR` is
-  content-located, so those attributes must be given structural variable-span detection
-  before the positional read can replace the stride path on schemas that carry them.
-  Until then the stride path stays (it is correct everywhere; only the root chunk needed
-  the directory override).
+- [x] **Drive *all* groups from the directory's block order — DONE.** The whole
+  chunked geography codebook is now read **positionally** from the file's own metadata
+  block directory (`ivt_f2_geo_attrs_dir()`), with **no `d0 ± k·2G` strides**, no
+  byte-ascending block scan (so the reverse-stored root chunk needs no special
+  override), and **no content-location of TNR**. Value blocks appear in directory
+  (logical) order as, per group of `G` chunks, `[display Member Name, then every schema
+  field]` each stored as an EN run (chunks 0..G-1) then an FR run — exactly `2G` blocks
+  per attribute, `2·(nfield+1)·G` per group. The reader collects the ordinal-filtered
+  value blocks, gates on that regular block count (`ivt_f2_geo_attrs_dir()` returns NULL
+  → fall back to the stride path when the directory drops a trailing partial), then
+  consumes exactly `G` blocks per language-run and places each chunk at its member
+  offset; language per attribute by `ivt_f2_frscore()`. Group chunk-sizes come from
+  `ivt_f2_geo_group_sizes(n_geo)` (1,1,2,4,8,… last trimmed), not the DGUID-run
+  segmenter. `DQF_NOTE`'s long suppression text still does not map cleanly to member
+  boundaries, so it keeps the `ivt_f2_derive_text()` majority-vote from `DQF_CODE` (the
+  same post-step the stride path used) — **every other attribute is exact by position.**
+  The "variable-span DQF_NOTE / content-located TNR" blocker is gone: the block *count*
+  is perfectly regular (`5,952 = 24·248` value blocks on 0023), so the positional
+  partition never desyncs.
+  - **Validated byte-identical to the stride path on 98-10-0023** (all 63,404 members,
+    every one of the 15 columns), and slightly faster (~20 s vs ~26 s).
+  - **Fixes latent stride bugs on the tables that carry the extra `TNR_LONG_FORM`
+    schema field** (which shifted the fixed slot offsets): on **98-10-0478** (census
+    tracts, 12 schema fields) the directory read is **exact vs the StatCan metadata**
+    for `pr_code`, `dqf_code` and `tnr_short_form` (0 mismatches each), where the stride
+    path was silently wrong (1,278 / 327 / 1,897 mismatches); on **98-10-0129** the
+    directory `tnr_short_form` is exact vs metadata where the stride root-override was
+    wrong for 237 members. `geo_label`/`dguid`/`geo_level`/`geo_type`/`geo_type_abbr`/
+    `prov_abbr`/`alt_geo_code` stay correct.
+  - **Fallback still runs on 98-10-0013 ADA** (its directory drops a trailing partial →
+    irregular block count → stride path with the `ivt_f2_geo_root_dir()` root override).
+  - **Residual (unchanged, pre-existing):** on 0478 the last group's two code-valued
+    attributes (`geo_name`, `alt_geo_code`) lose their trailing 153-member partial — the
+    block scanner fragments that code chunk (and a data-page fragment sits in its
+    directory slot); the display label and every other attribute are complete. Same
+    root as the block-finder-fidelity nicety noted for the big-group long text.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

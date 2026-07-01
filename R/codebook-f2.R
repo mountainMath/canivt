@@ -772,6 +772,122 @@ ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
   out
 }
 
+# --- Directory-driven geography attributes (all groups, no strides) ----------
+#
+# The whole codebook is read POSITIONALLY from the file's own metadata block
+# directory (`ivt_f2_geo_block_dir()`), which lists every codebook block in LOGICAL
+# order with its exact offset and length. There are no `d0 ± k*2G` strides, no
+# byte-ascending block scan (so the reverse-stored root chunk needs no special
+# override), and no content-location of TNR: every attribute is read by position.
+#
+# Layout in directory order: the codebook is a sequence of member groups whose chunk
+# counts follow `ivt_f2_geo_group_sizes()` (1,1,2,4,8,... last trimmed). Within a
+# group of `G` chunks, the value blocks are laid down as, for each attribute in the
+# fixed order [display Member Name, then every schema field], an English run of the
+# `G` chunks (0..G-1) followed by a French run of the `G` chunks -- i.e. exactly
+# `2G` blocks per attribute, `2*(nfield+1)*G` per group. This regular block count is
+# the self-consistency gate: if the parsed value-block total is not
+# `2*(nfield+1)*sum(sizes)`, the directory is incomplete for this layout and the
+# caller falls back to the stride path. Validated byte-identical to the stride path
+# on 98-10-0023 (all 63,404 members, every attribute) and 98-10-0129 (which carries
+# an extra TNR_LONG_FORM schema field, consumed positionally and skipped).
+
+# Chunk-count sequence of the geography attribute groups, derived from the member
+# count: two singleton chunk-groups then powers of two (1,1,2,4,8,...), the last
+# group trimmed to the remaining chunks. Reproduces `ivt_f2_geo_groups_chunked()`'s
+# G sequence (e.g. 63,404 members -> 1,1,2,4,8,16,32,64,120; 6,297 -> 1,1,2,4,8,9).
+ivt_f2_geo_group_sizes <- function(n_geo, chunk = 256L) {
+  total <- as.integer(ceiling(n_geo / chunk))
+  if (total <= 1L) return(total)
+  sizes <- c(1L, 1L)
+  while (sum(sizes) < total) {
+    nxt <- sizes[length(sizes)] * 2L
+    if (sum(sizes) + nxt >= total) { sizes <- c(sizes, total - sum(sizes)); break }
+    sizes <- c(sizes, nxt)
+  }
+  sizes
+}
+
+# Is a member-array block a consecutive-integer ordinal delimiter (1,2,3,... or
+# 2049,2050,...)?  These sit between groups and must be skipped so they don't shift
+# positional block indexing.
+ivt_f2_is_ordinal <- function(t) {
+  iv <- suppressWarnings(as.integer(t))
+  !anyNA(iv) && length(iv) >= 3L && all(diff(iv) == 1L)
+}
+
+# Directory-driven geography attribute table. Returns the same tibble as
+# `ivt_f2_geo_attributes()`, or NULL to signal the caller to fall back to the stride
+# path (no block directory, no schema, or a value-block total that does not match
+# the regular `2*(nfield+1)*sum(sizes)` count -- e.g. a layout whose directory drops
+# a trailing partial, which the stride path handles).
+ivt_f2_geo_attrs_dir <- function(raw) {
+  d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
+  schema <- ivt_f2_geo_schema(raw); if (is.null(schema) || !length(schema)) return(NULL)
+  n_geo <- ivt_f2_geo_count(raw); if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  # value blocks in directory (logical) order, ordinal- and framing-filtered
+  vb <- vector("list", nrow(d)); k <- 0L
+  for (r in seq_len(nrow(d))) {
+    t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
+    if (length(t) >= 3L && !ivt_f2_is_ordinal(t)) { k <- k + 1L; vb[[k]] <- trimws(t) }
+  }
+  length(vb) <- k
+  sizes <- ivt_f2_geo_group_sizes(n_geo)
+  nattr <- length(schema) + 1L                       # display Member Name + schema fields
+  if (k != 2L * nattr * sum(sizes)) return(NULL)     # irregular layout -> fall back
+  starts <- cumsum(c(1L, head(sizes, -1L) * 256L))   # member start per group
+  stem_col <- function(stem) {
+    hit <- which(startsWith(stem, IVT_F2_ATTR_FIELD) | startsWith(IVT_F2_ATTR_FIELD, stem))
+    if (length(hit)) names(IVT_F2_ATTR_FIELD)[hit[1L]] else NA_character_
+  }
+  cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr", "dguid",
+            "geo_level", "geo_type", "geo_type_abbr", "prov_abbr", "alt_geo_code",
+            "pr_code", "dqf_code", "dqf_note", "tnr_short_form")
+  out <- setNames(rep(list(rep(NA_character_, n_geo)), length(cols)), cols)
+  pos <- 1L
+  for (gi in seq_along(sizes)) {
+    G <- sizes[gi]; s <- starts[gi]
+    M <- min(G * 256L, n_geo - s + 1L)
+    place <- function(bi) {                          # G blocks -> M-long member vector
+      v <- rep(NA_character_, M)
+      for (c in seq_len(G)) {
+        t <- vb[[bi + c - 1L]]; if (is.null(t)) next
+        idx <- 256L * (c - 1L) + seq_along(t); ok <- idx <= M
+        v[idx[ok]] <- t[ok]
+      }
+      v
+    }
+    for (a in seq_len(nattr)) {
+      va <- place(pos);        pos <- pos + G         # run A (G chunks)
+      vbv <- place(pos);       pos <- pos + G         # run B (G chunks)
+      col <- if (a == 1L) "geo_label" else stem_col(schema[a - 1L])
+      if (is.na(col)) next                            # unmapped field (e.g. TNR_LONG_FORM)
+      dd <- which(!is.na(va) & !is.na(vbv) & va != vbv)
+      a_en <- ivt_f2_frscore(va[dd]) <= ivt_f2_frscore(vbv[dd])
+      en <- if (a_en) va else vbv; fr <- if (a_en) vbv else va
+      idx <- s:(s + M - 1L)
+      out[[col]][idx] <- en
+      if (a == 1L) out[["geo_label_fr"]][idx] <- fr
+      if (col == "geo_name") out[["geo_name_fr"]][idx] <- fr
+    }
+  }
+  ivt_f2_check_geo_count(raw, sum(!is.na(out$dguid)))
+  # DQF_NOTE's long suppression text does not map cleanly to member boundaries; it is
+  # a 1:1 function of DQF_CODE, so recover it by per-key majority vote (as the stride
+  # path does). Every other attribute is exact by position.
+  out$dqf_note <- ivt_f2_derive_text(out$dqf_note, out$dqf_code)
+  tibble::tibble(
+    member_id      = seq_len(n_geo),
+    geo_label      = out$geo_label,      geo_label_fr   = out$geo_label_fr,
+    geo_name       = out$geo_name,       geo_name_fr    = out$geo_name_fr,
+    dguid          = out$dguid,          geo_level      = out$geo_level,
+    geo_type       = out$geo_type,       geo_type_abbr  = out$geo_type_abbr,
+    prov_abbr      = out$prov_abbr,      alt_geo_code   = out$alt_geo_code,
+    pr_code        = out$pr_code,        dqf_code       = out$dqf_code,
+    dqf_note       = out$dqf_note,       tnr_short_form = out$tnr_short_form
+  )
+}
+
 #' Full geography attribute table for a family-2 IVT (member-ordered).
 #'
 #' Returns a tibble with one row per geography (1-based member id) and columns for
@@ -784,19 +900,23 @@ ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
 #' column for all 63,404 geographies of 98-10-0023 and all 6,297 census tracts of
 #' 98-10-0478 (`geo_name` on the latter is the bare CT code).
 #'
-#' The whole read is now marker+schema anchored: the geography member count comes
-#' from the header descriptor (`ivt_f2_geo_count()`), the attribute groups are
-#' segmented structurally with deterministic member ids
-#' (`ivt_f2_geo_groups_chunked()`), the attribute slots are read from the file's
-#' schema field list (`ivt_f2_geo_slot_map()`), and the DGUID column falls out of
-#' its own schema slot -- there is no "2021" year literal and no hard-coded slot
-#' table on this path. This parses the codebook block structure and is slower than
-#' the DGUID-only scan (a few seconds of block scanning); call it only when
-#' geography labels are wanted.
+#' Two reads are available. The primary is the **directory-driven positional read**
+#' (`ivt_f2_geo_attrs_dir()`): every attribute is read from the file's own metadata
+#' block directory in logical order, with no strides, no reverse-root special case,
+#' and no content-location of TNR. It applies whenever the block directory resolves
+#' and lists the codebook regularly (validated byte-identical on 98-10-0023 /
+#' -0129). The **stride fallback** below runs when the directory is absent or the
+#' block count is irregular (a dropped trailing partial): it segments the groups
+#' structurally (`ivt_f2_geo_groups_chunked()`), reads attributes by their schema
+#' slot (`ivt_f2_geo_slot_map()`, no "2021" literal / hard-coded slot table),
+#' content-locates TNR past the variable-span DQF_NOTE, and overrides the
+#' reverse-stored root chunk positionally (`ivt_f2_geo_root_dir()`).
 #'
 #' @keywords internal
 #' @noRd
 ivt_f2_geo_attributes <- function(raw) {
+  dir_tbl <- ivt_f2_geo_attrs_dir(raw)
+  if (!is.null(dir_tbl)) return(dir_tbl)
   n_geo <- ivt_f2_geo_count(raw)
   blocks <- ivt_f2_codebook_blocks(raw)
   groups <- ivt_f2_geo_groups_chunked(blocks)

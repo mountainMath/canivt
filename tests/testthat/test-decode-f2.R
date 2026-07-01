@@ -141,6 +141,26 @@ test_that("family-2 ivt_tidy labels geography by DGUID and ages/genders", {
   expect_equal(pick("Average age", "Total - Gender"), 41.9)
 })
 
+test_that("geography attribute group chunk-sizes follow the doubling rule", {
+  # 1,1,2,4,8,... doubling, last group trimmed to the remaining chunks.
+  expect_equal(ivt_f2_geo_group_sizes(63404L), c(1, 1, 2, 4, 8, 16, 32, 64, 120))
+  expect_equal(ivt_f2_geo_group_sizes(6297L),  c(1, 1, 2, 4, 8, 9))     # 98-10-0478
+  expect_equal(sum(ivt_f2_geo_group_sizes(63404L)) * 256L, 63488L)      # >= n_geo
+  expect_equal(ivt_f2_geo_group_sizes(256L), 1L)                        # single chunk
+  expect_equal(ivt_f2_geo_group_sizes(300L), c(1, 1))                   # two chunks
+})
+
+test_that("family-2 geography attributes come from the directory-driven read", {
+  p <- sample_ivt_f2()
+  skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  # the block directory resolves and lists the codebook regularly, so the
+  # positional (stride-free) reader is the one that runs -- not the fallback.
+  dir_tbl <- ivt_f2_geo_attrs_dir(raw)
+  expect_false(is.null(dir_tbl))
+  expect_identical(dir_tbl, ivt_f2_geo_attributes(raw))
+})
+
 test_that("family-2 decodes the full geography attribute table", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
