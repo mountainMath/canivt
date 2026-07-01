@@ -240,26 +240,80 @@ ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
 # attribute names, or NULL when no schema is present (older / inline layouts).
 # Note: this works in TEXT space (field names + order only) -- never byte offsets,
 # which the latin-1 -> UTF-8 round-trip does not preserve 1:1.
-ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
-  # The attribute dictionary (`GEO_NAME_EN`, `GEO_NAME_FR`, ...) sits in the codebook
-  # dictionary region near the header codebook pointer -- but not at a fixed offset
-  # from it, and no header field points at it exactly: across tables it lands from
-  # ~14 KB *before* to ~16 KB *after* the pointer (e.g. 98-10-0013 is cb-13780,
-  # 98-10-0478 is cb+16284). So anchor the search on the codebook pointer (metadata)
-  # and locate the dictionary by its own field name `GEO_NAME_EN` within a generous
-  # window *centred* on the pointer -- not the old `[cb-8000, EOF]` half-window,
-  # which missed any dictionary lying more than 8 KB before the pointer and (on the
-  # tail-codebook tables) scanned ~18 MB. When the pointer is unset, fall back to the
-  # tail. The window bound is only a search cap; the actual anchor is the field name.
-  cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
+# Header slots that, on some layouts, hold a **metadata block directory**: an array
+# of 8-byte entries `[u32 block-offset][u16 len][u16 len]` (the same entry shape the
+# page directory uses, `ivt_f2_entry_valid()`). `@824` indexes the geography codebook
+# blocks on the small chunked tables (98-10-0013 / 98-10-0478); `@572` (the codebook
+# pointer) indexes the dimension records. We do not assume which slot holds what --
+# we follow each and confirm by content -- so a slot that means something else on a
+# given file (e.g. `@824` is a member-id list on 98-10-0023) is simply skipped.
+IVT_F2_DIR_SLOTS <- c(824L, 572L, 712L)
+
+# Decode a metadata block directory at header slot `slot`: a run of 8-byte entries
+# `[u32 off][u16 len][u16 len]` (null `(0,0)` slots tolerated). Returns a two-column
+# matrix (off, len), or NULL when the slot does not point at a well-formed table.
+ivt_f2_read_block_dir <- function(raw, slot, max_entries = 8000L) {
   n <- length(raw)
-  if (!is.na(cb) && cb >= 1) {
-    lo <- max(1L, as.integer(cb) - 131072L)
-    hi <- min(n, as.integer(cb) + 131072L)
-  } else {
-    lo <- max(1L, n - tail_bytes + 1L); hi <- n
+  ptr <- rd_u32(raw, slot)
+  if (is.na(ptr) || ptr < 1L || ptr + 8L > n) return(NULL)
+  offs <- integer(0); lens <- integer(0)
+  for (i in seq_len(max_entries)) {
+    base <- as.integer(ptr) + (i - 1L) * 8L
+    if (base + 8L > n) break
+    off <- rd_u32(raw, base); a <- rd_u16(raw, base + 4L); b <- rd_u16(raw, base + 6L)
+    if (is.na(off) || is.na(a) || is.na(b)) break
+    if (off == 0 && a == 0) next                       # null slot
+    if (a != b || a <= 0L || off < 1 || off > n) break # end of table
+    offs <- c(offs, off); lens <- c(lens, a)
   }
-  s <- raw_to_latin1(raw[lo:hi])
+  if (!length(offs)) return(NULL)
+  cbind(off = offs, len = lens)
+}
+
+# Locate the geography attribute dictionary block ("GEO_NAME_EN ... DGUID_EN ...")
+# by following the file's own metadata directories and confirming the block by its
+# field name. Returns c(off, len) of the dictionary block, or NULL if no directory
+# lists it (then `ivt_f2_geo_schema()` falls back to the codebook-anchored search).
+ivt_f2_geo_dict_block <- function(raw) {
+  n <- length(raw)
+  for (slot in IVT_F2_DIR_SLOTS) {
+    d <- ivt_f2_read_block_dir(raw, slot)
+    if (is.null(d)) next
+    for (r in seq_len(nrow(d))) {
+      off <- d[r, "off"]; ln <- d[r, "len"]
+      if (off + ln > n) next
+      if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
+        return(c(off = unname(off), len = unname(ln)))
+    }
+  }
+  NULL
+}
+
+ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
+  # Preferred: follow the file's own metadata directory (a header pointer -> a table
+  # of block offsets/lengths) to the *exact* dictionary block, so its start comes
+  # from the file rather than a scan. `ivt_f2_geo_dict_block()` confirms the block by
+  # its `GEO_NAME_EN` field name, so a directory slot that means something else on a
+  # given layout is skipped. Works on the small chunked tables (98-10-0013 / -0478).
+  blk <- ivt_f2_geo_dict_block(raw)
+  n <- length(raw)
+  if (!is.null(blk)) {
+    s <- raw_to_latin1(raw[(blk[["off"]] + 1L):min(n, blk[["off"]] + blk[["len"]])])
+  } else {
+    # Fallback (the big tail-codebook tables, whose dictionary is routed through a
+    # deeper pointer chain we do not decode yet): the dictionary sits near the
+    # codebook pointer but off-centre (~14 KB before to ~16 KB after), so search a
+    # generous window *centred* on it, anchored by the `GEO_NAME_EN` field name --
+    # not the old `[cb-8000, EOF]` half-window, which missed a dictionary lying more
+    # than 8 KB before the pointer and scanned ~18 MB on the big files.
+    cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
+    if (!is.na(cb) && cb >= 1) {
+      lo <- max(1L, as.integer(cb) - 131072L); hi <- min(n, as.integer(cb) + 131072L)
+    } else {
+      lo <- max(1L, n - tail_bytes + 1L); hi <- n
+    }
+    s <- raw_to_latin1(raw[lo:hi])
+  }
   m <- regexpr("GEO_NAME_EN", s, fixed = TRUE)
   if (m < 1L) return(NULL)
   win <- substr(s, m, m + 600L)

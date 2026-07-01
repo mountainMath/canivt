@@ -224,9 +224,15 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
   n_geo <- ivt_f2_geo_count(raw)
   expect_equal(n_geo, 5447L)
 
-  # the schema dictionary sits ~14 KB *before* the codebook pointer -- outside the
-  # old cb-8000 half-window -- so it must still be found (metadata-derived, not the
-  # heuristic that reported it "absent").
+  # the schema dictionary is located by following the file's own metadata directory
+  # (a header pointer -> a table of block offsets/lengths), confirmed by its field
+  # name -- not by a fixed window. On this table the directory lists the dictionary
+  # block directly.
+  blk <- ivt_f2_geo_dict_block(raw)
+  expect_false(is.null(blk))
+  expect_true(grepl("GEO_NAME_EN",
+                    raw_to_latin1(raw[(blk[["off"]] + 1L):(blk[["off"]] + blk[["len"]])]),
+                    fixed = TRUE))
   schema <- ivt_f2_geo_schema(raw)
   expect_false(is.null(schema))
   expect_equal(schema[1], "GEO_NAME")

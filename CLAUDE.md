@@ -298,12 +298,21 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     and are still dropped. All 5,447 DGUIDs decode; 0023/0478 stay byte-identical.
     (b) `ivt_f2_geo_schema` called ADA's schema "absent" — it isn't; the attribute
     dictionary sits ~14 KB *before* the codebook pointer, outside the old
-    `[cb−8000, EOF]` half-window. Now a window **centred** on the pointer
-    (`cb ± 128 KB`), still located by the field name `GEO_NAME_EN` (metadata-anchored;
-    also faster — no ~18 MB tail scan). Still open: ADA's **root group** (members
-    1–256, the named aggregates) stores its attributes **transposed** (DGUID early,
-    names last), so those 256 `geo_label`/`geo_name` read NA; the ~5,000 unnamed data
-    ADAs label fine. No ADA metadata CSV exists to validate a transposed-root handler.
+    `[cb−8000, EOF]` half-window. The dictionary block is now located by **following
+    the file's own metadata directory**: a header slot (`@824` on the small chunked
+    tables indexes the geography codebook blocks; also `@572`/`@712`) holds a table of
+    `[u32 off][u16 len][u16 len]` entries — the same entry shape as the page directory
+    — which `ivt_f2_geo_dict_block()` / `ivt_f2_read_block_dir()` decode, confirming
+    the block by its `GEO_NAME_EN` field name (so a slot meaning something else on a
+    given file is skipped). The dictionary start thus comes **from the file, not a
+    scan** on 98-10-0013/-0478/-0241; the big tail-codebook tables (0023/0174), whose
+    dictionary routes through a deeper pointer chain not yet decoded, fall back to a
+    `cb ± 128 KB` centred window. Validated vs the StatCan CSV: ADA `geo_label` ==
+    "Member Name" **5,191/5,447**. Still open: ADA's **root group** (members 1–256)
+    stores its attributes **transposed** (DGUID early, names last), so those 256
+    `geo_label`/`geo_name` read NA (only 4 are named — Canada/N.L./P.E.I./N.S.); the
+    ~5,000 unnamed data ADAs label fine. Driving extraction from the directory's block
+    order (instead of the `d0 ± k·2G` strides) is the proper fix and a larger follow-up.
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.

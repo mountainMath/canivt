@@ -269,16 +269,26 @@ units) and the directory entries (8-byte entry units).
   — which cluster on their own — are still dropped. All 5,447 DGUIDs now decode, and
   0023/0478 DGUIDs stay byte-identical. (b) `ivt_f2_geo_schema` reported the schema
   "absent" — it wasn't: the attribute dictionary sits ~14 KB *before* the codebook
-  pointer, outside the old `[cb-8000, EOF]` half-window. The search is now a generous
-  window **centred** on the pointer (`cb ± 128 KB`) and still locates the dictionary
-  by its own field name `GEO_NAME_EN` (metadata-anchored, not a fixed offset; also
-  faster — it no longer scans ~18 MB on the tail-codebook tables). Still open on ADA:
-  its **root group** (members 1–256, the named aggregates Canada / provinces / census
-  divisions) stores its attributes in a **transposed order** (DGUID early, the name
-  attributes last) unlike the data groups, so backward name-anchoring underflows and
-  those 256 `geo_label`/`geo_name` read NA; the ~5,000 unnamed ADAs in the data groups
-  label fine (their name is the code). No ADA metadata CSV exists to validate a
-  transposed-root handler, so it was not added speculatively.
+  pointer, outside the old `[cb-8000, EOF]` half-window. Geography's dictionary block
+  is now located by **following the file's own metadata directory** — a header slot
+  (`@824` on the small chunked tables, indexing the geography codebook blocks; also
+  `@572`/`@712`) holds a table of `[u32 off][u16 len][u16 len]` entries, the same
+  entry shape as the page directory. `ivt_f2_geo_dict_block()` decodes it
+  (`ivt_f2_read_block_dir()`) and confirms the block by its `GEO_NAME_EN` field name,
+  so the dictionary start comes **from the file, not a scan** (98-10-0013 / -0478 /
+  -0241 all resolve via the directory; validated byte-identical to the window
+  result). Only the big tail-codebook tables (0023/0174), whose dictionary is routed
+  through a deeper pointer chain not yet decoded, still use the `cb ± 128 KB` centred
+  window as a fallback. Still open on ADA: its **root group** (members 1–256, the
+  named aggregates Canada / provinces / census divisions) stores its attributes in a
+  **transposed order** (DGUID early, the name attributes last) unlike the data groups,
+  so backward name-anchoring underflows and those 256 `geo_label`/`geo_name` read NA;
+  the ~5,000 unnamed ADAs in the data groups label fine (their name is the code).
+  Validated vs the StatCan CSV: `geo_label` == "Member Name" **5,191 / 5,447** (the
+  256 NA are exactly the root group; only 4 of them — Canada, N.L., P.E.I., N.S. — are
+  actually named, the rest being codes). The proper fix is to drive geography
+  extraction from the directory's block order rather than the `d0 ± k·2G` strides,
+  which would also remove the last hard-coded offsets — a larger follow-up.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 
