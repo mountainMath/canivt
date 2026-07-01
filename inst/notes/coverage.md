@@ -279,16 +279,27 @@ units) and the directory entries (8-byte entry units).
   -0241 all resolve via the directory; validated byte-identical to the window
   result). Only the big tail-codebook tables (0023/0174), whose dictionary is routed
   through a deeper pointer chain not yet decoded, still use the `cb ± 128 KB` centred
-  window as a fallback. Still open on ADA: its **root group** (members 1–256, the
-  named aggregates Canada / provinces / census divisions) stores its attributes in a
-  **transposed order** (DGUID early, the name attributes last) unlike the data groups,
-  so backward name-anchoring underflows and those 256 `geo_label`/`geo_name` read NA;
-  the ~5,000 unnamed ADAs in the data groups label fine (their name is the code).
-  Validated vs the StatCan CSV: `geo_label` == "Member Name" **5,191 / 5,447** (the
-  256 NA are exactly the root group; only 4 of them — Canada, N.L., P.E.I., N.S. — are
-  actually named, the rest being codes). The proper fix is to drive geography
-  extraction from the directory's block order rather than the `d0 ± k·2G` strides,
-  which would also remove the last hard-coded offsets — a larger follow-up.
+  window as a fallback.
+- [x] **Reverse-stored root chunk (98-10-0013 ADA root group) — FIXED.** The codebook's
+  first ("root") chunk is stored in **reverse byte order** (region A of the tail: the
+  block directory's offsets *decrease* through the root chunk, then jump up for the
+  bulk). The byte-ascending block scan reverses that chunk's logical order, and because
+  ADA's root chunk also carries extra framing blocks (a second GEO_TYPE_DESC pair +
+  binary attrs), the stride name-walk lands on the wrong blocks — leaving members
+  1–256 `geo_label`/`geo_name` NA (ADA read 5,191/5,447; the ~5,000 unnamed data ADAs
+  labelled fine). The metadata block directory lists every codebook block in **logical**
+  order, so the root chunk's four name runs (display Member Name + schema GEO_NAME, each
+  EN+FR) are now read straight from it (`ivt_f2_geo_block_dir()` →
+  `ivt_f2_geo_names_root_dir()`; language picked per pair by `ivt_f2_frscore()`) and
+  spliced into `ivt_f2_geo_names()` as a **fill** for members the stride walk leaves NA.
+  Validated vs the StatCan CSV: ADA `geo_label` == "Member Name" **5,447/5,447**; CT
+  (98-10-0478) byte-identical **6,297/6,297** (its root chunk already resolved, so the
+  fill is a no-op); 0023 unchanged **63,404/63,404** (no directory → no-op).
+- [ ] **Drive *all* geography attributes from the directory's block order**, not just
+  the two NAME attributes on the reverse-stored root chunk — this removes the remaining
+  `d0 ± k·2G` strides. Prerequisite for the big tables: decode the deeper pointer chain
+  that routes the geography block directory on 0023/0174 (today only the small tables
+  0013/0478/0241 expose it directly at `@824`).
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

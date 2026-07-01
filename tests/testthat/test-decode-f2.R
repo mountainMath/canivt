@@ -248,6 +248,16 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
   expect_equal(ga$dguid[1], "2021A000011124")           # Canada
   expect_equal(ga$dguid[2], "2021A000210")              # Newfoundland and Labrador
   expect_equal(ga$dguid[5447], "2021S051662080008")     # last member of the 71-partial
+
+  # the root chunk (members 1..256) is reverse-stored, so the byte-ascending stride
+  # walk cannot label it; it is filled from the metadata block directory (logical
+  # order). Every member now has a display name, matching the published Member Name.
+  expect_equal(sum(!is.na(ga$geo_label)), 5447L)
+  expect_equal(ga$geo_label[1], "Canada")
+  expect_equal(ga$geo_label[2], "Newfoundland and Labrador")
+  expect_equal(ga$geo_label[3], "10010001")             # first code-only root ADA
+  expect_equal(ga$geo_label_fr[1], "Canada")
+  expect_equal(ga$geo_name[1], "Canada")
 })
 
 test_that("family-2 ivt_tidy labels geography by name when requested", {

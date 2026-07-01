@@ -270,11 +270,14 @@ ivt_f2_read_block_dir <- function(raw, slot, max_entries = 8000L) {
   cbind(off = offs, len = lens)
 }
 
-# Locate the geography attribute dictionary block ("GEO_NAME_EN ... DGUID_EN ...")
-# by following the file's own metadata directories and confirming the block by its
-# field name. Returns c(off, len) of the dictionary block, or NULL if no directory
-# lists it (then `ivt_f2_geo_schema()` falls back to the codebook-anchored search).
-ivt_f2_geo_dict_block <- function(raw) {
+# The geography codebook block directory: the header metadata directory (one of the
+# `IVT_F2_DIR_SLOTS`) whose entries list the geography codebook blocks in LOGICAL
+# order, confirmed by containing the `GEO_NAME_EN` dictionary block. Returns the
+# two-column (off, len) matrix, or NULL when no directory lists geography (the big
+# tail-codebook tables 98-10-0023 / -0174, routed through a deeper pointer chain we
+# do not decode yet). This logical order is what lets us read the reverse-stored
+# root chunk that the byte-ascending block scan cannot (`ivt_f2_geo_names_root_dir`).
+ivt_f2_geo_block_dir <- function(raw) {
   n <- length(raw)
   for (slot in IVT_F2_DIR_SLOTS) {
     d <- ivt_f2_read_block_dir(raw, slot)
@@ -283,10 +286,74 @@ ivt_f2_geo_dict_block <- function(raw) {
       off <- d[r, "off"]; ln <- d[r, "len"]
       if (off + ln > n) next
       if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
-        return(c(off = unname(off), len = unname(ln)))
+        return(d)
     }
   }
   NULL
+}
+
+# Locate the geography attribute dictionary block ("GEO_NAME_EN ... DGUID_EN ...")
+# by following the file's own metadata directories and confirming the block by its
+# field name. Returns c(off, len) of the dictionary block, or NULL if no directory
+# lists it (then `ivt_f2_geo_schema()` falls back to the codebook-anchored search).
+ivt_f2_geo_dict_block <- function(raw) {
+  d <- ivt_f2_geo_block_dir(raw)
+  if (is.null(d)) return(NULL)
+  n <- length(raw)
+  for (r in seq_len(nrow(d))) {
+    off <- d[r, "off"]; ln <- d[r, "len"]
+    if (off + ln > n) next
+    if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
+      return(c(off = unname(off), len = unname(ln)))
+  }
+  NULL
+}
+
+# Parse the member-array records inside one directory entry's byte window (the entry
+# is [off, off+len)); returns the largest Pascal-record sub-block found there, or
+# character(0). Bounded to the window so it is cheap even on the big files.
+ivt_f2_dir_entry_records <- function(raw, off, len) {
+  win <- raw[(off + 1L):min(length(raw), off + len)]
+  b <- ivt_find_member_blocks(win, 0L, min_records = 3L)
+  if (!length(b)) return(character(0))
+  b[[which.max(vapply(b, function(x) length(x$texts), 1L))]]$texts
+}
+
+# Directory-driven bilingual names for the ROOT geography chunk (members 1..rootN).
+#
+# The codebook's first ("root") chunk is stored in reverse byte order (region A of
+# the tail), so the byte-ascending block scan that `ivt_f2_geo_names()` relies on
+# reverses that chunk's logical block order and, when the chunk also carries extra
+# framing blocks (e.g. 98-10-0013 ADA), lands its stride walk on the wrong blocks --
+# leaving members 1..256 unlabelled. The metadata block directory lists every
+# codebook block in LOGICAL order, and each geography group opens with its two NAME
+# attributes (display Member Name, then schema GEO_NAME), each stored EN and FR. So
+# the root chunk's four name runs are simply the first four `rootN`-record text runs
+# the directory lists. Language is picked per pair by `ivt_f2_frscore()` (the two
+# runs are laid down EN-first here, but we decide structurally, not by position).
+# Returns list(geo_label, geo_label_fr, geo_name, geo_name_fr) each rootN long, or
+# NULL when no directory is present.
+ivt_f2_geo_names_root_dir <- function(raw, n_geo) {
+  d <- ivt_f2_geo_block_dir(raw)
+  if (is.null(d)) return(NULL)
+  rootN <- min(256L, n_geo)
+  runs <- list()
+  for (r in seq_len(nrow(d))) {
+    t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
+    if (length(t) == rootN) {
+      runs[[length(runs) + 1L]] <- trimws(t)
+      if (length(runs) == 4L) break
+    }
+  }
+  if (length(runs) < 4L) return(NULL)
+  pick <- function(a, b) {                       # return c(en, fr)
+    diff <- which(a != b)
+    if (ivt_f2_frscore(a[diff]) <= ivt_f2_frscore(b[diff])) list(en = a, fr = b)
+    else list(en = b, fr = a)
+  }
+  disp <- pick(runs[[1]], runs[[2]]); name <- pick(runs[[3]], runs[[4]])
+  list(geo_label = disp$en, geo_label_fr = disp$fr,
+       geo_name = name$en,  geo_name_fr = name$fr)
 }
 
 ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
@@ -650,7 +717,7 @@ ivt_f2_geo_name_runs <- function(blocks, g, dguid_slot, n_geo) {
 # (`geo_label`/`geo_label_fr`) and the schema GEO_NAME (`geo_name`/`geo_name_fr`).
 # Per group we pick which language run is English by `ivt_f2_frscore()` over the
 # members where the two runs differ. Returns a list of four member-ordered vectors.
-ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
+ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo, raw = NULL) {
   z <- rep(NA_character_, n_geo)
   out <- list(geo_label = z, geo_label_fr = z, geo_name = z, geo_name_fr = z)
   for (g in groups) {
@@ -663,6 +730,19 @@ ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
     out$geo_label_fr[idx] <- if (a_en) r$db else r$da
     out$geo_name[idx]     <- if (a_en) r$ga else r$gb
     out$geo_name_fr[idx]  <- if (a_en) r$gb else r$ga
+  }
+  # The root chunk (members 1..rootN) is reverse-stored, so the byte-ascending stride
+  # walk above can miss it (e.g. 98-10-0013 ADA leaves 1..256 NA). Fill those members
+  # from the metadata block directory, which lists the codebook in logical order. This
+  # only *fills* unresolved members, so tables whose stride walk already labels the
+  # root chunk (e.g. 98-10-0478 CT) are untouched.
+  if (!is.null(raw)) {
+    rd <- ivt_f2_geo_names_root_dir(raw, n_geo)
+    if (!is.null(rd)) {
+      rootN <- length(rd$geo_label)
+      miss <- which(is.na(out$geo_label[seq_len(rootN)]))
+      for (k in names(out)) out[[k]][miss] <- rd[[k]][miss]
+    }
   }
   out
 }
@@ -713,7 +793,7 @@ ivt_f2_geo_attributes <- function(raw) {
   # bilingually by the drop-tolerant, per-group-language name reader rather than by
   # a fixed slot offset (GEO_NAME's trailing partial can be lost on census-tract
   # tables, and the root group stores the name languages in the opposite order).
-  nm <- ivt_f2_geo_names(blocks, groups, slots[["dguid"]], n_geo)
+  nm <- ivt_f2_geo_names(blocks, groups, slots[["dguid"]], n_geo, raw = raw)
   tibble::tibble(
     member_id      = seq_len(n_geo),
     geo_label      = nm$geo_label,

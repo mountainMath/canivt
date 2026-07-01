@@ -307,12 +307,28 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     given file is skipped). The dictionary start thus comes **from the file, not a
     scan** on 98-10-0013/-0478/-0241; the big tail-codebook tables (0023/0174), whose
     dictionary routes through a deeper pointer chain not yet decoded, fall back to a
-    `cb ± 128 KB` centred window. Validated vs the StatCan CSV: ADA `geo_label` ==
-    "Member Name" **5,191/5,447**. Still open: ADA's **root group** (members 1–256)
-    stores its attributes **transposed** (DGUID early, names last), so those 256
-    `geo_label`/`geo_name` read NA (only 4 are named — Canada/N.L./P.E.I./N.S.); the
-    ~5,000 unnamed data ADAs label fine. Driving extraction from the directory's block
-    order (instead of the `d0 ± k·2G` strides) is the proper fix and a larger follow-up.
+    `cb ± 128 KB` centred window.
+  - **Reverse-stored root chunk (98-10-0013 ADA root group) — DONE.** The codebook's
+    first ("root") chunk is stored in **reverse byte order** (region A of the tail:
+    directory offsets *decrease* through it, then jump up for the bulk). The
+    byte-ascending block scan `ivt_f2_codebook_blocks()` / `ivt_f2_geo_groups_chunked()`
+    therefore reverses that chunk's logical block order, and because ADA's root chunk
+    also carries extra framing blocks (a second GEO_TYPE_DESC pair + binary attrs) the
+    stride name-walk lands wrong — leaving members 1–256 `geo_label`/`geo_name` NA (so
+    ADA read 5,191/5,447). The metadata block directory lists every codebook block in
+    **logical** order, so the root chunk's four name runs (display Member Name +
+    schema GEO_NAME, each EN+FR) are read straight from it (`ivt_f2_geo_block_dir()` →
+    `ivt_f2_geo_names_root_dir()`: the first four `rootN`-record text runs the
+    directory lists, language picked per pair by `ivt_f2_frscore()`). Spliced into
+    `ivt_f2_geo_names()` as a **fill** for members the stride walk leaves NA, so tables
+    whose stride walk already labels the root chunk (98-10-0478 CT) are byte-identical
+    and the big tables with no directory (0023/0174) are a no-op. Validated vs the
+    StatCan CSV: ADA `geo_label` == "Member Name" **5,447/5,447** (was 5,191); CT
+    unchanged 6,297/6,297; 0023 unchanged 63,404/63,404. Still open: **driving *all*
+    geography attributes from the directory's block order** (not just the two NAME
+    attributes on the reverse-stored root chunk), and decoding the big tail-codebook
+    directory chain so the directory is available on 0023/0174 too (today only the
+    small tables 0013/0478/0241 expose it at `@824`).
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.
