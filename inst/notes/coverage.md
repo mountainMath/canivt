@@ -235,10 +235,30 @@ units) and the directory entries (8-byte entry units).
   **98-10-0174** (dissemination areas, a **family-1** table with the same chunked
   63,404-geo codebook — the reader is family-agnostic) and **98-10-0478** (census
   tracts, 6,297 geos, geography type `0x0d`, chunk groups `1,1,2,4,8,9`; all
-  DGUIDs/levels/types/codes exact). Known nicety on 0478: 103 consecutive CT *names*
-  in one chunk read NA — a special-character CT name truncates that chunk's NAME
-  block below the 150-record keep filter (same block-scanner limitation as 0023's 2
-  NA names; DGUID uid + every other attribute decode exact).
+  DGUIDs/levels/types/codes exact).
+- [x] **Bilingual geography member names (display label + GEO_NAME) — DONE.**
+  `ivt_f2_geo_attributes()` now emits `geo_label`/`geo_label_fr` (the human-readable
+  display **Member Name**, e.g. `0001.00 - Abbotsford - Mission`) and
+  `geo_name`/`geo_name_fr` (the schema **GEO_NAME** — a bare code like `9320001.00`
+  for census tracts / unnamed dissemination areas). Both are read structurally from
+  the codebook, **not inferred from content**: the two NAME attributes sit at the
+  front of each group and are anchored on `GEO_TYPE_DESC`'s block (`d0 −
+  (dguid_slot−1)·2G`, reliable because every attribute from type through DGUID keeps
+  its trailing partial), walking backward through the two GEO_NAME runs (drop-aware:
+  a code run's lost trailing partial is detected by its last block being a full 256
+  instead of the partial size) then the two display runs (`ivt_f2_geo_name_runs()`).
+  Language is decided **per group** by `ivt_f2_frscore()` (accents + French
+  connective tokens − English tokens over the members where the two runs differ),
+  because the physical EN/FR order is EN-first in most groups but **FR-first in the
+  root group** (0023's group 1 stores `Terre-Neuve-et-Labrador` before
+  `Newfoundland and Labrador`). Validated: `geo_label` matches the StatCan "Member
+  Name" column **63,404/63,404** on 98-10-0023 and **6,297/6,297** on 98-10-0478,
+  and cross-checks 63,404/63,404 between 0023 and 0174 (same DA universe).
+  `ivt_tidy()` / the `geographies` table now front `geo_label` before `geo_name`.
+  Known nicety on 0478: the last group's GEO_NAME (code) loses its trailing 153-member
+  partial to the block scanner (special bytes after the short block) → those 153
+  `geo_name` codes are NA; `geo_label` (text, keeps its partial) and every other
+  attribute are complete. Same root as 0023's 2 special-char NA names.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 

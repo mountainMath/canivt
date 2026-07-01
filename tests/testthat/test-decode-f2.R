@@ -128,8 +128,17 @@ test_that("family-2 decodes the full geography attribute table", {
   raw <- readBin(p, "raw", n = file.info(p)$size)
   ga <- ivt_f2_geo_attributes(raw)
   expect_equal(nrow(ga), 63404L)
-  expect_true(all(c("geo_name", "dguid", "geo_level", "geo_type_abbr", "prov_abbr",
-                    "alt_geo_code", "pr_code", "dqf_code", "tnr_short_form") %in% names(ga)))
+  expect_true(all(c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr", "dguid",
+                    "geo_level", "geo_type_abbr", "prov_abbr", "alt_geo_code",
+                    "pr_code", "dqf_code", "tnr_short_form") %in% names(ga)))
+
+  # display Member Name (geo_label) + its French twin. On this dissemination-area
+  # table the display label equals the schema GEO_NAME (they diverge only on tables
+  # whose GEO_NAME is a bare code, e.g. census tracts), so both read "Canada".
+  expect_equal(ga$geo_label[ga$member_id == 1L], "Canada")
+  expect_equal(ga$geo_label[ga$member_id == 2L], "Newfoundland and Labrador")
+  expect_equal(ga$geo_label_fr[ga$member_id == 2L], "Terre-Neuve-et-Labrador")
+  expect_equal(ga$geo_name_fr[ga$member_id == 6L], "Portugal Cove South")
 
   # Canada (member 1) — every attribute
   ca <- ga[ga$member_id == 1L, ]
@@ -205,8 +214,10 @@ test_that("family-2 ivt_tidy labels geography by name when requested", {
   x <- read_ivt(p, geo_attributes = TRUE)
   expect_false(is.null(x$metadata$geographies$geo_name))
   td <- ivt_tidy(x)
-  expect_equal(names(td), c("geo_name", "geo_uid", "geo_level", "age", "gender", "value"))
+  expect_equal(names(td),
+               c("geo_label", "geo_name", "geo_uid", "geo_level", "age", "gender", "value"))
   can <- td[x$cells$geo == 1L, ]
+  expect_equal(unique(can$geo_label), "Canada")
   expect_equal(unique(can$geo_name), "Canada")
   expect_equal(unique(can$geo_uid), "2021A000011124")
   expect_equal(unique(can$geo_level), "Country")

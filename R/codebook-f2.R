@@ -480,13 +480,112 @@ ivt_f2_extract_attr <- function(blocks, groups, slot, n_geo, tnr = FALSE,
   out
 }
 
+# --- Geography member names (display label + GEO_NAME), bilingual -------------
+#
+# Two NAME attributes sit at the FRONT of each codebook group, before the schema
+# attributes: a display **Member Name** (the human-readable label StatCan shows,
+# e.g. "0001.00 - Abbotsford - Mission" or "Newfoundland and Labrador") and the
+# schema's GEO_NAME (the short geographic name, which for code-only geographies —
+# census tracts, unnamed dissemination areas — is the bare code "9320001.00").
+# Each is stored as a pair of same-attribute block runs, one per language; the two
+# language runs are laid down back to back (G blocks each). We recover both, in
+# English and French.
+#
+# Anchoring is drop-tolerant. The trailing *partial* chunk of a code-valued run
+# (GEO_NAME on a census-tract table) is sometimes lost to the block scanner
+# (special bytes after the last short block), which would shift a fixed offset. So
+# we anchor on GEO_TYPE_DESC's first block (`type0 = d0 - (dguid_slot-1)*2G`) —
+# reliable because every attribute from GEO_TYPE_DESC through DGUID is full text/
+# code that keeps its partial — and walk BACKWARD through GEO_NAME (2 runs) then
+# the display pair (2 runs), inspecting each code run's last-block length to detect
+# a dropped partial. The two text display runs are always full.
+IVT_F2_FR_TOK <- paste0("(^|[ '-])(et|de|des|du|de-la|la|le|les|aux?|sur|sous|",
+                        "ouest|est|nord|sud|sainte?|île|rivière|lac|baie)([ '-]|$)")
+IVT_F2_EN_TOK <- paste0("(^|[ '-])(and|of|west|east|north|south|saint|island|",
+                        "river|lake|bay)([ '-]|$)")
+IVT_F2_ACCENT <- "[^àâäçéèêëîïôöùûüÀÂÄÇÉÈÊËÎÏÔÖÙÛÜœ]"
+
+# A French-ness score over the members where two candidate name blocks differ:
+# accented-character count + French-connective tokens - English tokens. Used per
+# group to pick the English of the two language runs (the physical language order
+# is EN-first in most groups but FR-first in the root group, so this is decided
+# per group, not once per file). Ties mean the two runs are identical (code-only
+# geographies), so either is correct.
+ivt_f2_frscore <- function(v) {
+  v <- v[!is.na(v)]
+  if (!length(v)) return(0)
+  sum(nchar(gsub(IVT_F2_ACCENT, "", v))) +
+    sum(grepl(IVT_F2_FR_TOK, v, ignore.case = TRUE)) -
+    sum(grepl(IVT_F2_EN_TOK, v, ignore.case = TRUE))
+}
+
+# Locate one group's four name runs (display EN/FR-order pair `da`/`db`, GEO_NAME
+# pair `ga`/`gb`) as member-parallel value vectors. Returns NULL if the anchor
+# falls out of range. Language is NOT assigned here (see `ivt_f2_geo_names()`).
+ivt_f2_geo_name_runs <- function(blocks, g, dguid_slot, n_geo) {
+  G <- g$G; ms <- g$starts[1]
+  mcount <- min(256L * G, n_geo - ms + 1L)
+  partial <- mcount - 256L * (G - 1L)
+  type0 <- g$d0 - (dguid_slot - 1L) * 2L * G          # GEO_TYPE_DESC chunk 0
+  if (type0 < 1L) return(NULL)
+  blen <- function(bi)
+    if (bi >= 1L && bi <= length(blocks)) length(blocks[[bi]]$texts) else NA_integer_
+  # a code run drops its trailing partial iff there is a partial (< 256) and the
+  # block ending the run is a full 256 (the partial that should sit there is gone).
+  nb_code <- function(last)
+    if (partial < 256L) (if (!is.na(blen(last)) && blen(last) == partial) G else G - 1L)
+    else G
+  gb_last <- type0 - 1L;   gb_n <- nb_code(gb_last); gb0 <- type0 - gb_n
+  ga_last <- gb0 - 1L;     ga_n <- nb_code(ga_last); ga0 <- gb0 - ga_n
+  db0 <- ga0 - G; da0 <- db0 - G                     # display runs are full text
+  gather <- function(c0, nb) {
+    vals <- rep(NA_character_, mcount)
+    for (c in seq_len(nb)) {
+      bi <- c0 + c - 1L
+      if (bi < 1L || bi > length(blocks)) next
+      t <- trimws(blocks[[bi]]$texts)
+      idx <- 256L * (c - 1L) + seq_along(t)
+      idx <- idx[idx <= mcount]
+      vals[idx] <- t[seq_along(idx)]
+    }
+    vals
+  }
+  list(da = gather(da0, G), db = gather(db0, G),
+       ga = gather(ga0, ga_n), gb = gather(gb0, gb_n), ms = ms, mcount = mcount)
+}
+
+# Bilingual geography member names for the chunked codebook: display Member Name
+# (`geo_label`/`geo_label_fr`) and the schema GEO_NAME (`geo_name`/`geo_name_fr`).
+# Per group we pick which language run is English by `ivt_f2_frscore()` over the
+# members where the two runs differ. Returns a list of four member-ordered vectors.
+ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
+  z <- rep(NA_character_, n_geo)
+  out <- list(geo_label = z, geo_label_fr = z, geo_name = z, geo_name_fr = z)
+  for (g in groups) {
+    r <- ivt_f2_geo_name_runs(blocks, g, dguid_slot, n_geo)
+    if (is.null(r)) next
+    d <- which(!is.na(r$da) & !is.na(r$db) & r$da != r$db)
+    a_en <- ivt_f2_frscore(r$da[d]) <= ivt_f2_frscore(r$db[d])
+    idx <- r$ms + seq_len(r$mcount) - 1L
+    out$geo_label[idx]    <- if (a_en) r$da else r$db
+    out$geo_label_fr[idx] <- if (a_en) r$db else r$da
+    out$geo_name[idx]     <- if (a_en) r$ga else r$gb
+    out$geo_name_fr[idx]  <- if (a_en) r$gb else r$ga
+  }
+  out
+}
+
 #' Full geography attribute table for a family-2 IVT (member-ordered).
 #'
 #' Returns a tibble with one row per geography (1-based member id) and columns for
-#' the decoded codebook attributes: `geo_name`, `dguid`, `geo_level`,
-#' `geo_type_abbr`, `prov_abbr`, `alt_geo_code`, `pr_code`, `dqf_code`
-#' (data-quality flag) and `tnr_short_form` (total non-response rate). Validated
-#' exact vs the StatCan metadata for all 63,404 geographies of 98-10-0023.
+#' the decoded codebook attributes: `geo_label` (the human-readable display Member
+#' Name) and `geo_label_fr`, `geo_name` (the schema GEO_NAME — a bare code for
+#' census tracts / unnamed dissemination areas) and `geo_name_fr`, `dguid`,
+#' `geo_level`, `geo_type_abbr`, `prov_abbr`, `alt_geo_code`, `pr_code`,
+#' `dqf_code` (data-quality flag) and `tnr_short_form` (total non-response rate).
+#' Validated exact vs the StatCan metadata: `geo_label` matches the "Member Name"
+#' column for all 63,404 geographies of 98-10-0023 and all 6,297 census tracts of
+#' 98-10-0478 (`geo_name` on the latter is the bare CT code).
 #'
 #' The whole read is now marker+schema anchored: the geography member count comes
 #' from the header descriptor (`ivt_f2_geo_count()`), the attribute groups are
@@ -518,9 +617,17 @@ ivt_f2_geo_attributes <- function(raw) {
   # (geo_type needs no such fix-up: accepting Windows-1252 label bytes in
   # `is_label_byte` makes its direct slot extraction exact.)
   dqf_note <- ivt_f2_derive_text(pull("dqf_note"), dqf_code)
+  # The two NAME attributes (display Member Name + schema GEO_NAME) are recovered
+  # bilingually by the drop-tolerant, per-group-language name reader rather than by
+  # a fixed slot offset (GEO_NAME's trailing partial can be lost on census-tract
+  # tables, and the root group stores the name languages in the opposite order).
+  nm <- ivt_f2_geo_names(blocks, groups, slots[["dguid"]], n_geo)
   tibble::tibble(
     member_id      = seq_len(n_geo),
-    geo_name       = pull("geo_name", group1_name = TRUE),
+    geo_label      = nm$geo_label,
+    geo_label_fr   = nm$geo_label_fr,
+    geo_name       = nm$geo_name,
+    geo_name_fr    = nm$geo_name_fr,
     dguid          = dguids,
     geo_level      = pull("geo_level"),
     geo_type       = pull("geo_type"),
@@ -749,7 +856,7 @@ ivt_f2_geographies <- function(raw) {
     g <- ivt_f2_geo_attributes(raw)
     names(g)[names(g) == "dguid"] <- "geo_uid"
   }
-  front <- intersect(c("member_id", "geo_name", "geo_uid"), names(g))
+  front <- intersect(c("member_id", "geo_label", "geo_name", "geo_uid"), names(g))
   g[, c(front, setdiff(names(g), front))]
 }
 

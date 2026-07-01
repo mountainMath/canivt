@@ -263,11 +263,32 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     (dissemination areas; a **family-1** table carrying the same chunked 63,404-geo
     DGUID codebook — proves the geography reader is family-agnostic) and
     **98-10-0478** (census tracts; 6,297 geos, geography type `0x0d`, chunk groups
-    `1,1,2,4,8,9`, all DGUIDs/levels/types/codes exact). Known nicety on 0478: 103
-    consecutive CT *names* in one chunk are NA because a special-character CT name
-    truncates that chunk's NAME block below the 150-record keep filter (same
-    block-scanner special-char limitation as 0023's 2 NA names; every other
-    attribute incl. the DGUID uid decodes exact).
+    `1,1,2,4,8,9`, all DGUIDs/levels/types/codes exact).
+  - **Bilingual geography names (display label + GEO_NAME) — DONE.**
+    `ivt_f2_geo_attributes()` emits `geo_label`/`geo_label_fr` (the human-readable
+    display **Member Name**, e.g. `0001.00 - Abbotsford - Mission`) and
+    `geo_name`/`geo_name_fr` (the schema **GEO_NAME** — a bare code like `9320001.00`
+    for census tracts / unnamed DAs). Both are read **structurally from the codebook,
+    not inferred from content** (`ivt_f2_geo_names()` + `ivt_f2_geo_name_runs()`): the
+    two NAME attributes sit at the front of each group and are anchored on
+    `GEO_TYPE_DESC`'s block (`d0 − (dguid_slot−1)·2G`, reliable because type→DGUID
+    keep their trailing partials), walking **backward** through the two GEO_NAME runs
+    (drop-aware — a code run's lost trailing partial is detected by its last block
+    being a full 256 vs the partial size) then the two display runs. Language is
+    decided **per group** by `ivt_f2_frscore()` (accents + French connective tokens −
+    English tokens over the members where the two runs differ), because the physical
+    EN/FR order is EN-first in most groups but **FR-first in the root group** (0023's
+    group 1 stores `Terre-Neuve-et-Labrador` before `Newfoundland and Labrador`).
+    Validated: `geo_label` == the StatCan "Member Name" column **63,404/63,404** on
+    0023, **6,297/6,297** on 0478, and cross-checks 63,404/63,404 between 0023 and 0174
+    (same DA universe). `ivt_tidy()` / `geographies` front `geo_label` before
+    `geo_name`. The old `group1_name` GEO_NAME hack in `ivt_f2_extract_attr()` (slot 0
+    only) is superseded; the other attributes (slots ≥1) still use the fixed
+    `d0 − (dguid_slot−slot)·2G` stride, which is correct even under a GEO_NAME partial
+    drop since the drop is entirely within slot 0. Known nicety on 0478: the last
+    group's GEO_NAME (code) loses its trailing 153-member partial to the block scanner
+    (special bytes after the short block) → those 153 `geo_name` codes are NA;
+    `geo_label` (text, keeps its partial) and every other attribute are complete.
 - **Family-2 geography DGUID member-ordering** has a few tail artifacts
   (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
   complete and exact, but a handful of DGUID *labels* near the end can be misordered.

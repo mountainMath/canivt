@@ -183,11 +183,13 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE) {
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
   geo <- meta$geographies
-  # geography columns, included only when decoded: `geo_name` + `geo_level` come
-  # from the full attribute table (read_ivt(geo_attributes = TRUE)), `geo_uid` from
-  # the light path (DGUID; legacy files have none until geo_attributes = TRUE). If
-  # nothing is available, fall back to the bare member id.
+  # geography columns, included only when decoded: `geo_label` (display Member
+  # Name), `geo_name` (schema GEO_NAME) + `geo_level` come from the full attribute
+  # table (read_ivt(geo_attributes = TRUE)), `geo_uid` from the light path (DGUID;
+  # legacy files have none until geo_attributes = TRUE). If nothing is available,
+  # fall back to the bare member id.
   out <- tibble::tibble(.rows = nrow(cells))
+  if (!is.null(geo[["geo_label"]])) out$geo_label <- fix(geo[["geo_label"]])[cells$geo]
   if (!is.null(geo[["geo_name"]]))  out$geo_name  <- fix(geo[["geo_name"]])[cells$geo]
   if (!is.null(geo[["geo_uid"]]))   out$geo_uid   <- geo[["geo_uid"]][cells$geo]
   if (!is.null(geo[["geo_level"]])) out$geo_level <- fix(geo[["geo_level"]])[cells$geo]
