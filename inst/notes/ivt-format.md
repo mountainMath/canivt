@@ -82,13 +82,27 @@ u32 @572  → codebook region start (~124.31M / 22.75M)
 (`[u32 offset][u16 size][u16 size]`), so all data blocks are located from the
 header without marker scanning.
 
-A **variable section table** follows (≈ `@690..1080`, format-specific offsets)
-describing the codebook sub-blocks, the dimension member blocks and the notes
-block. Its entries carry a **type tag** — `16` = member/data block, `15` = notes
-(e.g. legacy `u32@1016` → the notes block, type 15). The full record grammar is
-heterogeneous and not yet decoded, so the codebook/notes sub-blocks are still found
-by bounded tail scans; the fixed-offset map above already locates every major
-region.
+A **section-pointer region** follows (≈ `@544..1080`), now decoded and wired —
+every pointer resolves to a block directory of the same 8-byte entry shape
+(`[u32 off][u16 len][u16 len]`) as the page directory:
+
+```
+u32 @544  → the MASTER directory (at offset 992; ~10 entries covering the whole
+            file: FACET04 titles EN/FR, the dimension descriptor, the EN/FR
+            identity/notes blobs — the legacy out-of-line title+footnotes blocks
+            are entries here — the product id, and a 15-byte EOF trailer)
+u32 @712  → the DATA-QUALITY-FLAG legend (15 entries on 2021 tables: EN/FR
+            records per code A..E/R/P, framed [82 01][u16][flags][02][code][00]
+            [u16 len][text]; a 1-entry stub on pre-DGUID tables)
+@824+14·(k−1) → dimension k's codebook block directory (14-byte slot records
+            [u32 dir_ptr][u32 ?][u32 n_entries][2B]; see dimdir.R) — the
+            member-label blocks, ordinals, doubled-name marker and per-dimension
+            footnotes are all read positionally from these
+```
+
+So the codebook, the notes and the legends are located **from the header**, with
+the bounded tail scans surviving only as fallbacks for layouts whose directories
+do not resolve.
 
 ### Undecoded / unused pockets
 

@@ -481,14 +481,27 @@ directory slot table**:
   / 2016 vintages (run rosters differ — see the schema-absent stage above), each
   viewer-validated. The regex scan survives only as the fallback for layouts whose
   directory does not resolve.
-- **`@712`** points at the data-quality-flag legend directory (`A…E/R/P` texts, EN
-  + FR); a symbol legend directory ("Not available for a specific reference
-  period", …) sits nearby (reference slot not yet identified). **`@992`/`@1000`**
-  point into a ~10-entry **master directory at offset 992** (also reachable via
-  `@544`, and `@12` with one indirection) whose entries cover the whole file:
-  the FACET04 title blocks, the dimension descriptor, the inline identity text,
-  EN/FR title/notes blobs (the legacy 1003011's out-of-line title + footnote
-  blocks are entries here), and an EOF trailer.
+- **`@712` — the data-quality-flag legend directory: DECODED and WIRED**
+  (`ivt_f2_dqf_legend()`, dimdir.R). 15 entries on every 2021 table: a u32 index
+  entry, then 14 legend records framed `[82 01][u16][flags][02][code char][00]
+  [u16 text_len][text]` (FR records carry an extra flag dword; `text_len` counts
+  a trailing NUL the entry length may drop), in EN/FR pairs per code — A…E
+  quality classes, R Revised, P Preliminary, language per pair by
+  `ivt_f2_frscore()`. Exposed as `dqf_legend` on `ivt_metadata()`
+  (tibble `code/text_en/text_fr`); the pre-DGUID tables carry a 1-entry 6-byte
+  stub → NULL. A symbol legend directory ("Not available for a specific
+  reference period", …) sits nearby (reference slot not yet identified).
+- **`@544` → the master directory at offset 992: DECODED and WIRED**
+  (`ivt_f2_master_dir()`; also reachable via `@992`/`@1000` and `@12` with one
+  indirection). Its ~10 entries cover the whole file in a stable order: the
+  FACET04 + EN title block, the dimension descriptor (the same block `@32`
+  points at, 14 framing bytes earlier), a 15-byte EOF trailer, the **EN
+  identity/notes blob** (modern: the inline `Product ID: … Title: …` text;
+  legacy/2016: the out-of-line title + notes blob the header EN title pointer
+  `@48` also addresses), the product-id string, small framing blocks, then the
+  FACET04 + FR title and the FR blob. `ivt_f2_legacy_footnotes()` now bounds the
+  legacy "(N) …" notes parse to exactly the EN blob entry (matched to the `@48`
+  pointer; the 200 KB tail window survives as fallback).
 
 ## [ ] Unknown / possibly not in the binary
 
@@ -510,11 +523,12 @@ For the **reference tables** (family 1: 98-10-0241; 3-dim family 2: 98-10-0023;
 legacy: 1003011), ~100 % of information-bearing bytes are identified and the data
 plus all geography/dimension/footnote metadata decode exactly. The bit-level gaps
 there, by size: (1) the **French label copies** (~half the codebook, recoverable,
-just not surfaced); (2) the **master directory at 992 / DQF-legend slots**
-(decoded but not read from — the per-dimension section-pointer table itself is
-now wired, see above); (3) a few small header/marker bytes with inferred/unknown
-semantics; plus the footnote↔*member* linkage (dimension linkage is decoded) and
-structured member hierarchy that may be absent from the binary.
+just not surfaced); (2) a few small header/marker bytes with inferred/unknown
+semantics and the dense value arrays' **bitstream per-member coding** (their
+values decode fully via the plain siblings' NA pattern); plus the
+footnote↔*member* linkage (dimension linkage is decoded) and structured member
+hierarchy that may be absent from the binary. The master directory at 992 and
+the `@712` DQF legend are now read (see the header section-pointer table above).
 
 The family-2 decoder now handles **arbitrary-dimension** tables (validated on the
 4-dim 98-10-0129, cell-exact) in addition to the 3-dim and legacy tables. The

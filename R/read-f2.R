@@ -123,13 +123,24 @@ ivt_f2_legacy_identity <- function(raw) {
 }
 
 # Footnotes for the legacy format. Unlike the modern framed "Footnote N" / "Renvoi
-# N" records, the legacy notes block is one text blob (header `01 01 <u16 len>`,
-# running to EOF) with sections; the footnotes are "(N) <text>" lines under a
-# "Footnotes" section header, ending at the next section header ("Abbreviations").
-# Validated against 1003011 (40 footnotes, numbered 1..40).
+# N" records, the legacy notes block is one text blob (header `01 01 <u16 len>`)
+# with sections; the footnotes are "(N) <text>" lines under a "Footnotes" section
+# header, ending at the next section header ("Abbreviations"). The blob is located
+# from the MASTER directory (dimdir.R): it is the entry the header EN title
+# pointer (`@48`) also addresses, so the parse is bounded to exactly that section;
+# the trailing `tail_bytes` window survives as the fallback when the master
+# directory does not resolve. Validated against 1003011 (40 footnotes, 1..40).
 ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
-  start <- max(1L, length(raw) - tail_bytes + 1L)
-  lines <- strsplit(raw_to_latin1(raw[start:length(raw)]), "\r\n", fixed = TRUE)[[1]]
+  span <- NULL
+  md <- ivt_f2_master_dir(raw)
+  en <- rd_u32(raw, IVT_HDR_TITLE_EN_PTR)
+  if (!is.null(md) && !is.na(en) && en > 0) {
+    r <- which(md[, "off"] == en)
+    if (length(r) == 1L)
+      span <- c(md[r, "off"] + 1L, min(length(raw), md[r, "off"] + md[r, "len"]))
+  }
+  if (is.null(span)) span <- c(max(1L, length(raw) - tail_bytes + 1L), length(raw))
+  lines <- strsplit(raw_to_latin1(raw[span[1]:span[2]]), "\r\n", fixed = TRUE)[[1]]
   lines <- trimws(lines)
   fh <- which(lines == "Footnotes")
   if (!length(fh)) return(list())
@@ -184,7 +195,9 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
                           ivt_f2_geography_count(raw, dir)
                         },
     footnotes         = if (inline) ivt_f2_legacy_footnotes(raw)
-                        else ivt_f2_footnotes(raw, dims)
+                        else ivt_f2_footnotes(raw, dims),
+    # the data-quality-flag legend (dimdir.R; NULL when the table carries none)
+    dqf_legend        = ivt_f2_dqf_legend(raw)
   )
 }
 

@@ -163,6 +163,92 @@ ivt_f2_geo_dir_span <- function(raw) {
   c(min(d[, "off"]), min(length(raw), max(d[, "off"] + d[, "len"])))
 }
 
+# --- Master directory + DQF legend --------------------------------------------
+#
+# Two more header slots point at block directories of the same 8-byte entry shape:
+#
+# `@544` -> the MASTER directory (at offset 992 on every known layout, also
+# reachable via `@992`/`@1000` and `@12` with one indirection). Its ~10 entries
+# cover whole-file sections in a stable order: [1] the FACET04 + EN title block,
+# [2] the dimension descriptor (the same block `@32` points at), [3] a 15-byte EOF
+# trailer, [4] the EN identity text (modern: the inline "Product ID: ... Title:
+# ..." block; legacy/2016: the out-of-line title + notes blob the header EN title
+# pointer `@48` also addresses), [5] the product-id string, [6-8] small framing
+# blocks, [9] the FACET04 + FR title, [10/11] the FR identity/notes blob. Decoded
+# on 98-10-0241/0023 (10 entries), 1003011 and 98-400-X2016387 (11).
+#
+# `@712` -> the DATA-QUALITY-FLAG LEGEND directory (2021 tables: 15 entries; the
+# pre-DGUID tables carry a 1-entry 6-byte stub). Entry 1 is a u32 index list; each
+# following entry is one legend record framed
+#
+#     [82 01][u16][flag bytes][02][code char][00][u16 text_len][text]
+#
+# (the FR records carry one extra flag dword; `text_len` counts a trailing NUL the
+# entry length may drop). Records come in EN/FR pairs per code letter (A..E
+# quality classes, R revised, P preliminary, ...), language per pair by
+# `ivt_f2_frscore()`.
+
+IVT_HDR_MASTER_SLOT <- 544L   # u32 -> the master (whole-file section) directory
+IVT_HDR_DQF_SLOT    <- 712L   # u32 -> the data-quality-flag legend directory
+
+# The master directory's (off, len) entries, or NULL.
+ivt_f2_master_dir <- function(raw) {
+  ptr <- rd_u32(raw, IVT_HDR_MASTER_SLOT)
+  if (is.na(ptr) || ptr < 1L) return(NULL)
+  d <- ivt_f2_read_dir_at(raw, ptr, max_entries = 24L)
+  if (is.null(d) || nrow(d) < 3L) return(NULL)
+  d
+}
+
+# The data-quality-flag legend: tibble(code, text_en, text_fr), or NULL when the
+# table carries none (the pre-DGUID stub) or the slot does not decode.
+ivt_f2_dqf_legend <- function(raw) {
+  ptr <- rd_u32(raw, IVT_HDR_DQF_SLOT)
+  if (is.na(ptr) || ptr < 1L) return(NULL)
+  d <- ivt_f2_read_dir_at(raw, ptr, max_entries = 64L)
+  if (is.null(d) || nrow(d) < 3L) return(NULL)         # the 1-entry stub
+  parse1 <- function(off, len) {
+    if (off + len > length(raw) || as.integer(raw[off + 1L]) != 0x82L) return(NULL)
+    v <- as.integer(raw[(off + 1L):(off + len)])
+    for (i in 5:min(14L, len - 5L)) {                  # find [02][code][00][u16 len]
+      if (v[i] != 0x02L) next
+      code <- v[i + 1L]
+      if (code < 32L || code > 126L || v[i + 2L] != 0x00L) next
+      tl <- v[i + 3L] + 256L * v[i + 4L]
+      if (tl < 1L || i + 4L + tl > len + 1L) next      # +1: a dropped trailing NUL
+      txt <- raw[(off + i + 5L):(off + min(i + 4L + tl, len))]
+      txt <- txt[txt != as.raw(0)]
+      return(list(code = intToUtf8(code), text = raw_to_latin1(txt)))
+    }
+    NULL
+  }
+  recs <- list()
+  for (r in seq_len(nrow(d))) {
+    p <- parse1(d[r, "off"], d[r, "len"])
+    if (!is.null(p)) recs[[length(recs) + 1L]] <- p
+  }
+  if (length(recs) < 2L) return(NULL)
+  code <- vapply(recs, `[[`, "", "code")
+  text <- vapply(recs, `[[`, "", "text")
+  out_code <- character(0); out_en <- character(0); out_fr <- character(0)
+  i <- 1L
+  while (i <= length(code)) {
+    if (i < length(code) && code[i + 1L] == code[i]) {
+      a <- text[i]; b <- text[i + 1L]
+      en_first <- ivt_f2_frscore(a) <= ivt_f2_frscore(b)
+      out_code <- c(out_code, code[i])
+      out_en <- c(out_en, if (en_first) a else b)
+      out_fr <- c(out_fr, if (en_first) b else a)
+      i <- i + 2L
+    } else {
+      out_code <- c(out_code, code[i]); out_en <- c(out_en, text[i])
+      out_fr <- c(out_fr, NA_character_)
+      i <- i + 1L
+    }
+  }
+  tibble::tibble(code = out_code, text_en = out_en, text_fr = out_fr)
+}
+
 # Footnotes read from the per-dimension slot directories, each attributed to its
 # owning dimension (`dimension` = the full display name when `dim_names` is
 # given, else the descriptor name). Every footnote is stored as an entry of the

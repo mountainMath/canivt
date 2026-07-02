@@ -632,6 +632,29 @@ test_that("pre-DGUID geography is read positionally from the block directory", {
     skip("no pre-DGUID sample (set CANIVT_SAMPLE_IVT_2011 / _2006 / _2016)")
 })
 
+test_that("the master directory and DQF legend read from their header slots", {
+  p <- sample_ivt_f2()
+  skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  # @544 -> the master (whole-file section) directory at offset 992; one of its
+  # entries is the dimension descriptor block (the @32 pointer targets the same
+  # block, 14 framing bytes before the directory-listed start)
+  md <- ivt_f2_master_dir(raw)
+  expect_false(is.null(md))
+  expect_gte(nrow(md), 9L)
+  expect_true(any(abs(md[, "off"] - rd_u32(raw, 32L)) <= 16L))
+  # @712 -> the data-quality-flag legend (EN/FR pairs per code letter)
+  lg <- ivt_f2_dqf_legend(raw)
+  expect_false(is.null(lg))
+  expect_equal(lg$code, c("A", "B", "C", "D", "E", "R", "P"))
+  expect_equal(lg$text_en[1], "Data quality: excellent")
+  expect_match(lg$text_fr[1], "excellente")
+  expect_equal(lg$text_en[7], "Preliminary")
+  # and it is exposed on the metadata
+  m <- ivt_f2_metadata(raw)
+  expect_identical(m$dqf_legend, lg)
+})
+
 test_that("the whole file layout maps from the header", {
   p <- sample_ivt_f2()
   if (p != "") {
@@ -662,6 +685,9 @@ test_that("the 1991 legacy file carries the same dimension slot table", {
   expect_equal(length(slots), 3L)
   # geography's slot directory lists the inline pre-DGUID codebook blocks
   expect_equal(nrow(ivt_f2_dim_dir(raw, 1L, slots)), 1097L)
+  # the master directory resolves too; the pre-DGUID @712 slot is a stub (no legend)
+  expect_gte(nrow(ivt_f2_master_dir(raw)), 9L)
+  expect_null(ivt_f2_dqf_legend(raw))
   # Age (110) and Sex (3) label positionally, byte-identical to the marker scan
   lab <- ivt_f2_dim_dir_labels(raw)
   expect_equal(length(lab[[2L]]), 110L)
