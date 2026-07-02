@@ -113,6 +113,43 @@ test_that("geography is parsed from the file's attribute schema, content-free", 
   expect_false(anyNA(s$name))
 })
 
+test_that("the header dimension slot table drives labels and footnotes", {
+  p <- sample_ivt()
+  skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  # one 14-byte slot per descriptor dimension at @824 + 14*(k-1); each resolves
+  # to that dimension's block directory (dictionary, ordinals, doubled-name
+  # marker, EN/FR member blocks, footnotes), validated by the slot's entry count.
+  slots <- ivt_f2_dim_slots(raw)
+  expect_equal(length(slots), 7L)
+  expect_equal(nrow(ivt_f2_dim_dir(raw, 1L, slots)), 58L)   # geography codebook
+  lab <- ivt_f2_dim_dir_labels(raw)
+  expect_null(lab[[1L]])
+  expect_equal(lengths(lab)[-1L], c(9L, 16L, 13L, 3L, 6L, 7L))
+  # the positional read is byte-identical to the marker-anchored scan
+  dims <- ivt_f2_dimensions(raw)
+  for (i in 2:7) expect_identical(lab[[i]], dims[[i]]$members)
+  # footnotes come from the slot directories, attributed to their dimension
+  fn <- ivt_f2_dir_footnotes(raw)
+  expect_equal(length(fn), 20L)
+  expect_true(all(nzchar(vapply(fn, `[[`, "", "dimension"))))
+})
+
+test_that("all 98-10-0077 dimensions label from the slot directories, incl. Ages and Year", {
+  p <- sample_ivt_077()
+  skip_if(p == "", "no 98-10-0077 sample (set CANIVT_SAMPLE_IVT_F1_077)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  lab <- ivt_f2_dim_dir_labels(raw)
+  expect_equal(lengths(lab)[-1L], c(9L, 5L, 18L, 6L, 22L, 2L))
+  # Ages' EN block carries 2 leading framing records (only its trailing 18 are
+  # labels) and Year is a 2-member reference period whose EN/FR blocks are
+  # identical -- both read correctly by position.
+  expect_match(trimws(lab[[4L]][1]), "^Total - Economic families by number")
+  expect_equal(trimws(lab[[7L]]), c("2020", "2015"))
+  dims <- ivt_f2_dimensions(raw)
+  for (i in 2:7) expect_identical(lab[[i]], dims[[i]]$members)
+})
+
 test_that("footnotes are extracted in both languages", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")

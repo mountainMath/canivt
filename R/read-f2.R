@@ -62,20 +62,33 @@ ivt_f2_dim_name <- function(dim, is_geo, vl) {
 ivt_f2_dimensions <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(list())
-  want <- vapply(d$dims[-1L], `[[`, 1L, "count")
-  labels <- ivt_f2_dim_member_labels(raw, want = want)        # count-keyed fallback
-  # prefer the name-anchored marker labels so two dimensions of the same member
-  # count (e.g. 98-10-0662's 6-member "French used at work" / "English used at
-  # work") get their own labels rather than collapsing onto one count key.
-  by_name <- ivt_f2_marker_labels(raw)
-  name_lut <- stats::setNames(lapply(by_name, `[[`, "labels"),
-                              vapply(by_name, `[[`, "", "name"))
+  # primary: read each dimension's label pair positionally from its header slot
+  # directory (dimdir.R) -- keyed by dimension INDEX, so same-name and same-count
+  # dimensions cannot collide, and no tail-window scan is needed.
+  dirlab <- ivt_f2_dim_dir_labels(raw)
+  # scan fallbacks, computed only for dimensions the slot directories miss: the
+  # name-anchored marker labels (so two dimensions of the same member count --
+  # e.g. 98-10-0662's 6-member "French used at work" / "English used at work" --
+  # get their own labels rather than collapsing onto one count key), then the
+  # count-keyed block heuristics.
+  unresolved <- length(d$dims) > 1L &&
+    any(vapply(2:length(d$dims), function(i)
+      is.null(dirlab) || is.null(dirlab[[i]]), logical(1)))
+  labels <- list(); name_lut <- list()
+  if (unresolved) {
+    want <- vapply(d$dims[-1L], `[[`, 1L, "count")
+    labels <- ivt_f2_dim_member_labels(raw, want = want)      # count-keyed fallback
+    by_name <- ivt_f2_marker_labels(raw)
+    name_lut <- stats::setNames(lapply(by_name, `[[`, "labels"),
+                                vapply(by_name, `[[`, "", "name"))
+  }
   vl <- ivt_f2_vl_pairs(raw)
   lapply(seq_along(d$dims), function(i) {
     dim <- d$dims[[i]]
     is_geo <- i == 1L                       # geography is the first dimension
     members <- if (is_geo) NULL else {
-      m <- name_lut[[dim$name]]
+      m <- if (!is.null(dirlab)) dirlab[[i]] else NULL
+      if (is.null(m)) m <- name_lut[[dim$name]]
       if (is.null(m)) labels[[as.character(dim$count)]] else m
     }
     list(name = ivt_f2_dim_name(dim, is_geo, vl), count = dim$count,
@@ -171,8 +184,22 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
                           ivt_f2_geography_count(raw, dir)
                         },
     footnotes         = if (inline) ivt_f2_legacy_footnotes(raw)
-                        else ivt_footnotes(raw, max(0L, length(raw) - 200000L))
+                        else ivt_f2_footnotes(raw, dims)
   )
+}
+
+# Footnotes for the modern (framed "Footnote N"/"Renvoi N") format. Primary: the
+# per-dimension slot directories (dimdir.R), which list each footnote as an entry
+# of the dimension it annotates -- so the result carries a `dimension` field.
+# Falls back to the tail text-scan when the slot table is absent, or when the
+# directories resolve but list no footnotes while the scan finds some (an
+# unknown layout storing them elsewhere degrades gracefully rather than
+# silently losing footnotes).
+ivt_f2_footnotes <- function(raw, dims = NULL) {
+  dim_names <- if (length(dims)) vapply(dims, `[[`, "", "name") else NULL
+  fn <- ivt_f2_dir_footnotes(raw, dim_names = dim_names)
+  if (length(fn)) return(fn)
+  ivt_footnotes(raw, max(0L, length(raw) - 200000L))
 }
 
 # Label a decoded cell table (any family): geography by name and/or uid, each data

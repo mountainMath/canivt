@@ -92,22 +92,25 @@ is_text_byte <- function(v) {
   (v >= 32L & v <= 126L) | v %in% c(9L, 10L, 13L) | (v >= 160L & v <= 255L)
 }
 
-# Extract footnotes from the codebook tail by isolating maximal text-byte runs
-# and keeping those that begin (after optional leading whitespace) with a
-# "Footnote N" (en) / "Renvoi N" (fr) marker. The text length prefix's high byte
-# can be a whitespace text byte (\t \n \r), so it may prepend a stray space to
-# the run -- hence the leading-whitespace tolerance. `number` is the footnote's
-# position within its language in file order (not the StatCan Note ID, which the
-# IVT does not record per footnote).
-ivt_footnotes <- function(raw, search_start) {
-  v <- as.integer(raw[(search_start + 1L):length(raw)])
+# Footnote texts inside the byte window [from, to) (0-based), by isolating
+# maximal text-byte runs and keeping those that begin (after optional leading
+# whitespace) with a "Footnote N" (en) / "Renvoi N" (fr) marker. The text length
+# prefix's high byte can be a whitespace text byte (\t \n \r), so it may prepend
+# a stray space to the run -- hence the leading-whitespace tolerance. Returns a
+# list of list(language, text) in window order; numbering is the caller's
+# concern (the tail scan and the per-dimension directory read number
+# differently).
+ivt_footnote_texts <- function(raw, from, to = length(raw)) {
+  search_start <- from
+  to <- min(to, length(raw))
+  if (search_start >= to) return(list())
+  v <- as.integer(raw[(search_start + 1L):to])
   txt <- is_text_byte(v)
   r <- rle(txt)
   ends <- cumsum(r$lengths)
   starts <- ends - r$lengths + 1L
   marker <- "^[[:space:]]*(Footnote|Renvoi)[[:space:]]*([0-9]+)[[:space:]]*"
   langs <- c(Footnote = "en", Renvoi = "fr")
-  counts <- c(en = 0L, fr = 0L)
   out <- list()
   for (i in which(r$values)) {
     if (r$lengths[i] < 12L) next  # too short to be a footnote
@@ -118,9 +121,23 @@ ivt_footnotes <- function(raw, search_start) {
     body <- trimws(gsub(" ", " ", sub(marker, "", s)))
     body <- gsub("[[:space:]]+", " ", body)
     if (!nzchar(body)) next
-    counts[lang] <- counts[lang] + 1L
-    out[[length(out) + 1L]] <- list(language = lang,
-                                    number = counts[[lang]], text = body)
+    out[[length(out) + 1L]] <- list(language = lang, text = body)
+  }
+  out
+}
+
+# Extract footnotes from the codebook tail (fallback for files without a header
+# dimension slot table; the primary path is `ivt_f2_dir_footnotes()`, which also
+# attributes each footnote to its owning dimension). `number` is the footnote's
+# position within its language in file order (not the StatCan Note ID, which the
+# IVT does not record per footnote).
+ivt_footnotes <- function(raw, search_start) {
+  counts <- c(en = 0L, fr = 0L)
+  out <- list()
+  for (f in ivt_footnote_texts(raw, search_start)) {
+    counts[f$language] <- counts[[f$language]] + 1L
+    out[[length(out) + 1L]] <- list(language = f$language,
+                                    number = counts[[f$language]], text = f$text)
   }
   out
 }

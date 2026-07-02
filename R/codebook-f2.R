@@ -167,7 +167,7 @@ ivt_f2_marker_labels <- function(raw, tail_bytes = 600000L) {
     if (length(t) < cnt) next
     cand <- t[(length(t) - cnt + 1L):length(t)]
     if (identical(cand, as.character(seq_len(cnt)))) next   # an ordinal block
-    if (all(grepl("^2021[A-Z][0-9]", cand))) next           # a DGUID block
+    if (ivt_f2_is_dguid_block(cand)) next                   # a DGUID block
     out[[length(out) + 1L]] <- list(name = dd$name, count = cnt, labels = cand)
   }
   out
@@ -240,13 +240,12 @@ ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
 # attribute names, or NULL when no schema is present (older / inline layouts).
 # Note: this works in TEXT space (field names + order only) -- never byte offsets,
 # which the latin-1 -> UTF-8 round-trip does not preserve 1:1.
-# Header slots that, on some layouts, hold a **metadata block directory**: an array
-# of 8-byte entries `[u32 block-offset][u16 len][u16 len]` (the same entry shape the
-# page directory uses, `ivt_f2_entry_valid()`). `@824` indexes the geography codebook
-# blocks on the small chunked tables (98-10-0013 / 98-10-0478); `@572` (the codebook
-# pointer) indexes the dimension records. We do not assume which slot holds what --
-# we follow each and confirm by content -- so a slot that means something else on a
-# given file (e.g. `@824` is a member-id list on 98-10-0023) is simply skipped.
+# Legacy header-slot guesses for the geography block directory, kept only as the
+# fallback behind the decoded per-dimension slot table (dimdir.R): `@824` is in
+# fact dimension 1 (geography)'s slot in that table (stride 14, so `@852` is
+# dimension 3's -- the old 4-aligned probing missed the odd slots), and `@712`
+# points at the data-quality legend directory. Each is followed and confirmed by
+# content (`GEO_NAME_EN`), so a slot that means something else is skipped.
 IVT_F2_DIR_SLOTS <- c(824L, 572L, 712L)
 
 # Decode a metadata block directory that STARTS at absolute offset `ptr`: a run of
@@ -288,16 +287,20 @@ ivt_f2_dir_has_geo <- function(raw, d) {
   FALSE
 }
 
-# The geography codebook block directory: the header metadata directory whose entries
-# list the geography codebook blocks in LOGICAL order, confirmed by containing the
-# `GEO_NAME_EN` dictionary block. Two indirection depths are tried per slot, because
-# the slot value points straight at the directory on the small chunked tables
-# (98-10-0013 / -0478 / -0241: `@824` -> directory) but at a small geography-dimension
-# struct on the big tail-codebook tables (98-10-0023 / -0174: `@824` -> struct whose
-# first u32 is the directory pointer). Returns the (off, len) matrix, or NULL when no
-# slot resolves to a geography directory. This logical order is what lets us read the
-# reverse-stored root chunk positionally (`ivt_f2_geo_root_dir`).
+# The geography codebook block directory: the block directory of DIMENSION 1 in
+# the header per-dimension slot table (dimdir.R), which lists the geography
+# codebook blocks in LOGICAL order with their exact offsets/lengths (and is
+# validated against the slot's own entry count). `ivt_f2_dim_dir()` handles the
+# two indirection depths (the slot points straight at the directory on the small
+# chunked tables 98-10-0013 / -0478 / -0241, but at a small geography-dimension
+# struct whose first u32 is the directory pointer on the big tail-codebook
+# tables 98-10-0023 / -0174). When the slot table is absent, fall back to the
+# legacy slot guesses, confirmed by content (the `GEO_NAME_EN` dictionary
+# block). Returns the (off, len) matrix, or NULL. This logical order is what
+# lets us read the reverse-stored root chunk positionally (`ivt_f2_geo_root_dir`).
 ivt_f2_geo_block_dir <- function(raw) {
+  d <- ivt_f2_dim_dir(raw, 1L)                         # geography = dimension 1
+  if (!is.null(d)) return(d)
   for (slot in IVT_F2_DIR_SLOTS) {
     ptr <- rd_u32(raw, slot)
     if (is.na(ptr) || ptr < 1L) next

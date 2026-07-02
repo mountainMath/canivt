@@ -178,7 +178,10 @@ units) and the directory entries (8-byte entry units).
   language dimensions** (`French used at work` / `English used at work` — same count,
   so the count-keyed store collapsed them; `ivt_f2_dimensions()` now resolves them
   per dimension by NAME). All six tables label every data dimension; byte-identical
-  to the old output on every dimension that previously labelled.
+  to the old output on every dimension that previously labelled. **Now the
+  fallback**: the primary label read is positional from each dimension's slot
+  directory (`ivt_f2_dim_dir_labels()`, see the header section-pointer table
+  below); the marker scan runs only for dimensions the directories miss.
 - [x] **Geography parsed from the file's own attribute schema (content-free).**
   Geography is dimension 1 with the same `81 02 02 00` doubled-name marker as every
   data dim; the file also stores a **geography attribute schema** — the named field
@@ -398,19 +401,62 @@ target), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`; int
 container we already decode), and older layouts whose container is not yet located
 (`97F0015X`, 1981 `97-570-X`).
 
-## [ ] Not parsed at all
+## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
-- [ ] The **variable section-pointer table** (~header bytes 690–1080). Known to
-  exist and to tag entries with a type byte (`16` = member/data block, `15` =
-  notes), but its record grammar is undecoded. Not needed (everything is located
-  from the fixed header + scanning), but it is the single unparsed structure.
+The "variable section-pointer table" (~header bytes 690–1080) is decoded
+(2026-07-01, confirmed on 98-10-0241, 98-10-0077, 98-10-0129, 98-10-0023 and
+1003011) and is now the **primary anchor** for member labels, footnotes and the
+geography block directory (`ivt_f2_dim_slots()` / `ivt_f2_dim_dir()` /
+`ivt_f2_dim_dir_labels()` / `ivt_f2_dir_footnotes()` in `dimdir.R`; the marker /
+tail-scan paths survive as fallbacks). Wiring validated byte-identical to the
+previous output on all five local reference tables (labels, geographies,
+footnote text sets), with the footnotes now **dimension-attributed** and the
+small family-1 metadata ~5× faster (no tail scans). It is a **per-dimension
+directory slot table**:
+
+- **`@824 + 14·(k−1)`** holds a 14-byte record for descriptor dimension `k` (in
+  descriptor order, geography = dim 1): `[u32 dir_ptr][u32 ?][u32 n_entries][2B]`.
+  `dir_ptr` points at that dimension's **block directory** (the familiar
+  `[u32 off][u16 len][u16 len]` entry shape), either directly or — for the big
+  chunked geography directories (98-10-0023: 6,244 entries) — via a small struct
+  whose first u32 is the directory (the two indirection depths
+  `ivt_f2_geo_block_dir()` already implements). `n_entries` matches the decoded
+  entry count (up to 2 null slots). The current `IVT_F2_DIR_SLOTS = c(824, 572,
+  712)` guesses were accidental hits on this table (`@852` = dimension 3's slot).
+- Each **dimension directory lists that dimension's complete codebook in logical
+  order** with exact offsets/lengths: dictionary/schema block, member-id table,
+  ordinal block, the `81 02 02 00` doubled-name marker block, then **row 6 = the
+  EN member block, row 8 = the FR member block** (consistent across all 17 data
+  dimensions of the three files; labels byte-identical to the marker-anchored
+  reader), then **that dimension's footnotes** (EN/FR pairs, preceded by small
+  member-reference records) — i.e. the footnote → dimension attribution the tail
+  text-scan cannot provide. 98-10-0241's 20 footnote entries = the known 10 EN +
+  10 FR, now attributed to Age/Household type/Period/Housing/Tenure.
+- **The 1991 legacy file has the same table** (`@824` → 1,097-entry geography
+  directory; `@838` Age; `@852` Sex). Its geography directory exposes, per
+  256-member chunk, the combined `"name (code) flag"` block (EN row, FR row) plus
+  **separate clean bilingual-name and bare-GEOUID array blocks** — so the inline
+  regex parse (`IVT_F2_INLINE_PAT`) and the first-appearance code dedup can be
+  replaced by positional reads with deterministic member ids.
+- **`@712`** points at the data-quality-flag legend directory (`A…E/R/P` texts, EN
+  + FR); a symbol legend directory ("Not available for a specific reference
+  period", …) sits nearby (reference slot not yet identified). **`@992`/`@1000`**
+  point into a ~10-entry **master directory at offset 992** (also reachable via
+  `@544`, and `@12` with one indirection) whose entries cover the whole file:
+  the FACET04 title blocks, the dimension descriptor, the inline identity text,
+  EN/FR title/notes blobs (the legacy 1003011's out-of-line title + footnote
+  blocks are entries here), and an EOF trailer.
 
 ## [ ] Unknown / possibly not in the binary
 
-- [ ] **Footnote → member/dimension linkage.** The metadata CSV carries per-member
-  Note IDs; we extract footnote *text* but not *which* footnote annotates which
-  member. (The inline `01 01 … 00 01` markers we investigated are block framing,
-  not note references, so it is unproven this linkage is stored inline at all.)
+- [~] **Footnote → member/dimension linkage.** The metadata CSV carries per-member
+  Note IDs. Footnote → *dimension* linkage IS stored and is now decoded: each
+  footnote is an entry of its owning dimension's slot directory (see the header
+  section-pointer table above), and `ivt_f2_footnotes()` emits it as a
+  `dimension` field on every footnote. Per-*member* linkage remains open: the
+  small records preceding each footnote pair in the directory look like member
+  references (plausible, unverified). (The inline `01 01 … 00 01` markers we
+  investigated earlier are block framing, not note references.)
 - [ ] **Member hierarchy as a structured tree** for family 2. Encoded via leading-
   space indentation in the labels (preserved verbatim) but not parsed into
   parent/child. Family 1 exposes `ivt_label_depth()`; family 2 does not yet.
@@ -421,10 +467,11 @@ For the **reference tables** (family 1: 98-10-0241; 3-dim family 2: 98-10-0023;
 legacy: 1003011), ~100 % of information-bearing bytes are identified and the data
 plus all geography/dimension/footnote metadata decode exactly. The bit-level gaps
 there, by size: (1) the **French label copies** (~half the codebook, recoverable,
-just not surfaced); (2) the **section-pointer table grammar** (routed around); (3)
-a few small header/marker bytes with inferred/unknown semantics; plus the
-footnote↔member linkage and structured member hierarchy that may be absent from the
-binary.
+just not surfaced); (2) the **master directory at 992 / DQF-legend slots**
+(decoded but not read from — the per-dimension section-pointer table itself is
+now wired, see above); (3) a few small header/marker bytes with inferred/unknown
+semantics; plus the footnote↔*member* linkage (dimension linkage is decoded) and
+structured member hierarchy that may be absent from the binary.
 
 The family-2 decoder now handles **arbitrary-dimension** tables (validated on the
 4-dim 98-10-0129, cell-exact) in addition to the 3-dim and legacy tables. The

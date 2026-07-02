@@ -141,6 +141,42 @@ test_that("family-2 ivt_tidy labels geography by DGUID and ages/genders", {
   expect_equal(pick("Average age", "Total - Gender"), 41.9)
 })
 
+test_that("the header dimension slot table resolves every dimension's directory", {
+  p <- sample_ivt_f2()
+  skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  # one 14-byte slot per descriptor dimension at @824 + 14*(k-1), each holding a
+  # pointer to that dimension's block directory plus the directory's entry count
+  # (the geography slot routes through the extra struct indirection on this file).
+  slots <- ivt_f2_dim_slots(raw)
+  expect_equal(length(slots), 3L)
+  d_geo <- ivt_f2_dim_dir(raw, 1L, slots)
+  expect_equal(nrow(d_geo), 6244L)                  # the chunked geography codebook
+  expect_identical(d_geo, ivt_f2_geo_block_dir(raw))
+  # the data-dimension directories carry the label pairs positionally: reading
+  # them needs no tail-window scan and reproduces the marker-anchored labels.
+  lab <- ivt_f2_dim_dir_labels(raw)
+  expect_null(lab[[1L]])                            # geography has no member labels
+  expect_equal(length(lab[[2L]]), 128L)
+  expect_equal(trimws(lab[[3L]]), c("Total - Gender", "Men+", "Women+"))
+})
+
+test_that("footnotes are read from the slot directories and attributed", {
+  p <- sample_ivt_f2()
+  skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
+  m <- ivt_metadata(p)
+  # every footnote is stored as an entry of the directory of the dimension it
+  # annotates, so the metadata carries the dimension attribution the old tail
+  # text-scan could not provide.
+  expect_equal(length(m$footnotes), 8L)
+  dims <- vapply(m$footnotes, `[[`, "", "dimension")
+  expect_setequal(unique(dims),
+                  c("Age (in single years), average age and median age", "Gender"))
+  langs <- vapply(m$footnotes, `[[`, "", "language")
+  expect_equal(sum(langs == "en"), 4L)
+  expect_equal(sum(langs == "fr"), 4L)
+})
+
 test_that("geography attribute group chunk-sizes follow the doubling rule", {
   # 1,1,2,4,8,... doubling, last group trimmed to the remaining chunks.
   expect_equal(ivt_f2_geo_group_sizes(63404L), c(1, 1, 2, 4, 8, 16, 32, 64, 120))
@@ -546,6 +582,22 @@ test_that("the whole file layout maps from the header", {
     expect_equal(L$value_pages, 133107)
     expect_false(is.na(L$title_en))          # legacy stores titles out of line
   }
+})
+
+test_that("the 1991 legacy file carries the same dimension slot table", {
+  p <- sample_ivt_1991()
+  skip_if(p == "", "no 1991 sample (set CANIVT_SAMPLE_IVT_1991)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  slots <- ivt_f2_dim_slots(raw)
+  expect_equal(length(slots), 3L)
+  # geography's slot directory lists the inline pre-DGUID codebook blocks
+  expect_equal(nrow(ivt_f2_dim_dir(raw, 1L, slots)), 1097L)
+  # Age (110) and Sex (3) label positionally, byte-identical to the marker scan
+  lab <- ivt_f2_dim_dir_labels(raw)
+  expect_equal(length(lab[[2L]]), 110L)
+  expect_equal(trimws(lab[[2L]][1]), "Total - Age Groups")
+  expect_equal(trimws(lab[[3L]]), c("Total - Sex", "Male", "Female"))
+  expect_identical(lab[[3L]], ivt_f2_dimensions(raw)[[3L]]$members)
 })
 
 test_that("the page directory is located from the header pointer (no marker scan)", {
