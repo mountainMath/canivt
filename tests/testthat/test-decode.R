@@ -216,6 +216,24 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   en <- Filter(function(d) grepl("^English", d$name), dims)[[1]]
   expect_match(trimws(fr$members[1]), "French used at work")
   expect_match(trimws(en$members[1]), "English used at work")
+
+  # member 26 ("Canada outside Quebec and New Brunswick") is a derived aggregate
+  # with NO geography attributes: an explicit empty record (00 00) in the plain
+  # member arrays and skipped entirely in the bit-headed dense arrays. The
+  # positional directory read keeps the member slots aligned -- the run-scanner
+  # split the arrays at the empty record, shifting every uid after member 25 by
+  # one and dropping the count to 90 (which also warned). Validated exact vs the
+  # StatCan metadata CSV on all 11 attributes for all 91 members.
+  expect_no_warning(m <- ivt_f2_metadata(raw))
+  expect_equal(length(m$geographies$geo_uid), 91L)
+  expect_equal(length(m$geographies$geo_name), 91L)
+  expect_true(is.na(m$geographies$geo_uid[26]))
+  expect_equal(m$geographies$geo_name[26], "Canada outside Quebec and New Brunswick")
+  expect_equal(m$geographies$geo_uid[27], "2021A000210")  # Newfoundland and Labrador
+  at <- ivt_f2_geo_attributes(raw)
+  expect_equal(nrow(at), 91L)
+  expect_true(all(is.na(unlist(at[26, c("geo_name", "dguid", "geo_type_abbr", "pr_code")]))))
+  expect_equal(at$geo_label[26], "Canada outside Quebec and New Brunswick")
 })
 
 test_that("the uniform family-1 decoder derives the 98-10-0241 page geometry", {

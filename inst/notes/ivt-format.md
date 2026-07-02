@@ -187,6 +187,36 @@ geographic identifiers and align with the geography index order.
 - English member-name blocks start with `Total - <dimension>` (except Statistics,
   whose first member is `Number of private households`); `canivt` selects the
   English block by that keyword + the expected member count.
+
+### Value-entry block framings (strict positional parse)
+
+Each codebook value block (one attribute × one 256-member chunk × one language,
+addressed exactly by its dimension's block directory entry — see the header
+section-pointer table) carries one of two byte framings, decoded by
+`ivt_f2_dir_entry_members()`:
+
+- **Plain member array** — `[01 01][u16 payload_len][u16 n_slots]` then exactly
+  `n_slots` records `[len][text][00]`. `payload_len` = entry length − 4;
+  `n_slots` is the chunk size **padded to a power of two** (a 91-member chunk
+  stores 128 slots, a full chunk 256), the pad being **empty records** `00 00`.
+  An **absent member** (one carrying no value, e.g. 98-10-0662's derived
+  aggregate "Canada outside Quebec and New Brunswick") is likewise an explicit
+  empty record, keeping every member at its positional slot. A record's `len` is
+  a single byte, so values are **capped at 252 bytes** (`0xFC`; longer texts —
+  some `DQF_NOTE` suppression notes — are stored truncated in the file itself).
+- **Bit-headed dense array** — `[81 01][u16 nbits][bitstream][80|01]` then
+  **unterminated** records `[len][text]`. The bitstream occupies
+  `2*ceil(nbits/16)` bytes (u16-padded); its per-member coding is not yet
+  decoded. Absent members are **skipped** in the record run, so the values must
+  be re-aligned using the empty-slot pattern of a plain sibling block from the
+  same chunk.
+
+The generic run-scanner (`ivt_find_member_blocks()`) mis-handles both: it splits
+a plain array at every empty record (an absent member or the pow-2 pad) and
+fragments long records, and it cannot know a dense array skips members. The
+strict parse is therefore the primary read wherever a block directory addresses
+the entry; the scanner remains the classifier and the fallback.
+
 ### Footnotes
 
 Footnotes live just before the member arrays. Each is framed as

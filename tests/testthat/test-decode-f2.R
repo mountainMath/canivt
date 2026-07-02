@@ -587,6 +587,51 @@ test_that("pre-DGUID geography is parsed from the dimension marker, content-free
     skip("no pre-DGUID sample (set CANIVT_SAMPLE_IVT_2011 / _2006 / _2016)")
 })
 
+test_that("pre-DGUID geography is read positionally from the block directory", {
+  # The regex fallback scans blocks in BYTE order and dedups on first appearance,
+  # which scrambles chunks stored out of byte order: it silently misordered 2,435
+  # members on 1003011, 18,432 on the 2006 table and 1,351 on the 2011 table. The
+  # directory read follows the member order; every pin below is validated against
+  # the Beyond 20/20 viewer's geography member list.
+  p11 <- sample_ivt_2011()
+  if (p11 != "") {
+    raw <- readBin(p11, "raw", n = file.info(p11)$size)
+    g <- ivt_f2_geo_inline_dir(raw)
+    expect_false(is.null(g))
+    expect_identical(g, ivt_f2_geo_inline(raw))        # and it is the primary path
+    expect_equal(nrow(g), 5447L)
+    expect_false(anyNA(g$geouid))
+    # in the tail range the byte-order scan misordered (its final 71-member
+    # partial chunk is also a bit-headed dense block the run-scanner fragments)
+    expect_equal(g$geouid[4097], "7050100.05")
+    expect_equal(g$geouid[5447], "9700103.00")
+  }
+  p06 <- sample_ivt_2006()
+  if (p06 != "") {
+    raw <- readBin(p06, "raw", n = file.info(p06)$size)
+    g <- ivt_f2_geo_inline_dir(raw)
+    expect_false(is.null(g))
+    expect_equal(nrow(g), 57523L)
+    expect_false(anyNA(g$geouid))
+    # the 2006 vintage has NO separate code array (3 runs per group; the uid is
+    # the combined block's parsed code) and stores the last group's partial chunk
+    # FIRST within each run
+    expect_equal(g$geouid[9473], "24470100247")
+    expect_equal(g$geo_name[9473], "24470247")
+    expect_equal(g$geouid[57523], "62080870017")
+  }
+  p16 <- sample_ivt_2016()
+  if (p16 != "") {
+    raw <- readBin(p16, "raw", n = file.info(p16)$size)
+    g <- ivt_f2_geo_inline_dir(raw)
+    expect_false(is.null(g))                           # extra leading run tolerated
+    expect_equal(nrow(g), 174L)
+    expect_equal(g$geouid[c(1L, 174L)], c("01", "62"))
+  }
+  if (p11 == "" && p06 == "" && p16 == "")
+    skip("no pre-DGUID sample (set CANIVT_SAMPLE_IVT_2011 / _2006 / _2016)")
+})
+
 test_that("the whole file layout maps from the header", {
   p <- sample_ivt_f2()
   if (p != "") {

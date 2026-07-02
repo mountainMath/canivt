@@ -339,6 +339,77 @@ ivt_f2_dir_entry_records <- function(raw, off, len) {
   b[[which.max(vapply(b, function(x) length(x$texts), 1L))]]$texts
 }
 
+# Strict positional parse of one directory VALUE entry, driven by the entry's own
+# block header (the two value-block framings, byte-exact):
+#
+#   [01 01][u16 payload_len][u16 n_slots] <records>   plain member array: exactly
+#       `n_slots` records `[len][text][00]`, where an ABSENT member is stored as an
+#       explicit EMPTY record `00 00` -- which the run-scanner above misreads as a
+#       separator, splitting the array (98-10-0662 member 26, "Canada outside
+#       Quebec and New Brunswick", carries no geography attributes) -- and long
+#       records (e.g. the DQF_NOTE suppression texts) parse exactly where the
+#       run-scanner fragments. Empties come back as NA so the member positions stay
+#       aligned. `n_slots` is the chunk size padded to a power of two (91 members
+#       -> 128 slots, trailing slots empty; the 256-member chunks of the big tables
+#       carry n_slots = 256), so the caller trims the all-NA tail back to the
+#       chunk size.
+#   [81 01][u16 nbits][bitstream, u16-padded: 2*ceil(nbits/16) bytes][80|01]
+#       <records>   bit-headed DENSE array: records are unterminated `[len][text]`
+#       and absent members are skipped entirely (the bitstream's per-member coding
+#       is not yet decoded; the caller re-aligns the dense values with the NA
+#       pattern of the entry's plain siblings). The one-byte marker before the
+#       records is 0x80 or 0x01 (semantics unknown; both observed).
+#
+# Returns list(values, dense) -- `values` with NA holes for a plain array, the
+# packed values for a dense one -- or NULL when the entry does not carry either
+# framing or does not parse exactly to its declared payload end (the caller falls
+# back to the run-scanner). Validated byte-identical to the run-scanner on every
+# clean array (no empties) of the chunked reference tables.
+ivt_f2_dir_entry_members <- function(raw, off, len) {
+  n <- length(raw)
+  if (len < 8L || off + len > n) return(NULL)
+  b0 <- as.integer(raw[off + 1L]); b1 <- as.integer(raw[off + 2L])
+  if (b1 != 0x01L || !(b0 %in% c(0x01L, 0x81L))) return(NULL)
+  u16 <- rd_u16(raw, off + 2L)
+  vals <- character(512L); k <- 0L
+  add <- function(x) { if (k == length(vals)) length(vals) <<- 2L * k
+                       k <<- k + 1L; vals[k] <<- x }
+  if (b0 == 0x01L) {                                   # plain, NUL-terminated
+    if (is.na(u16) || u16 != len - 4L) return(NULL)
+    n_slots <- rd_u16(raw, off + 4L)
+    if (is.na(n_slots) || n_slots < 1L) return(NULL)
+    i <- off + 6L; end <- off + len                    # payload [i, end)
+    while (i < end && k < n_slots) {
+      L <- as.integer(raw[i + 1L])
+      if (L == 0L) {                                   # empty record: 00 00
+        if (i + 2L > end || as.integer(raw[i + 2L]) != 0x00L) return(NULL)
+        add(NA_character_); i <- i + 2L
+      } else {
+        if (i + 1L + L + 1L > end || as.integer(raw[i + 1L + L + 1L]) != 0x00L)
+          return(NULL)
+        add(raw_to_latin1(raw[(i + 2L):(i + 1L + L)])); i <- i + 2L + L
+      }
+    }
+    if (k != n_slots || i != end) return(NULL)         # must parse exactly n_slots
+    return(list(values = vals[seq_len(k)], dense = FALSE))
+  }
+  # 0x81: bit-headed dense array
+  if (is.na(u16) || u16 < 1L || u16 > 8L * len) return(NULL)
+  i <- off + 4L + 2L * as.integer(ceiling(u16 / 16))   # skip the u16-padded bitstream
+  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L)))
+    return(NULL)
+  i <- i + 1L; end <- off + len
+  while (i < end) {
+    L <- as.integer(raw[i + 1L])
+    if (L == 0L) break                                 # trailing padding
+    if (i + 1L + L > end) break
+    add(raw_to_latin1(raw[(i + 2L):(i + 1L + L)]))
+    i <- i + 1L + L
+  }
+  if (k < 1L) return(NULL)
+  list(values = vals[seq_len(k)], dense = TRUE)
+}
+
 # Directory-driven attributes for the ROOT geography chunk (members 1..rootN),
 # read positionally from the metadata block directory's offsets/lengths.
 #
@@ -511,15 +582,20 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   inl <- ivt_f2_geo_inline(raw)
   if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo))
     return(list(geo_name = inl$geo_name, geo_uid = inl$geouid))
-  # 1. single-chunk schema'd tables (98-10-0241/0077): the directory-driven
+  # 1. single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
   #    positional attribute read is cheap here (one group of one chunk) and fully
   #    metadata-addressed; trim = FALSE keeps the hierarchy indentation the
-  #    single-block reader preserves. Larger tables skip this (the full read costs
-  #    ~20 s on a 63k-geography codebook; the DGUID scan below is 3x faster).
+  #    single-block reader preserves. GEO_NAME can carry legitimate NA holes
+  #    (98-10-0662's derived aggregate member has no attributes at all) -- label
+  #    by the display Member Name then, which every member carries. Larger tables
+  #    skip this (the full read costs ~20 s on a 63k-geography codebook; the DGUID
+  #    scan below is 3x faster).
   if (!is.na(n_geo) && n_geo <= 256L) {
     at <- ivt_f2_geo_attrs_dir(raw, trim = FALSE)
-    if (!is.null(at) && nrow(at) == n_geo && !anyNA(at$geo_name))
-      return(list(geo_name = at$geo_name, geo_uid = at$dguid))
+    if (!is.null(at) && nrow(at) == n_geo) {
+      nm <- if (!anyNA(at$geo_name)) at$geo_name else at$geo_label
+      if (!anyNA(nm)) return(list(geo_name = nm, geo_uid = at$dguid))
+    }
   }
   # 1b. schema-named single block (2021 DGUID) or the content-based array detector
   simple <- ivt_f2_geo_simple(raw, n_geo)
@@ -843,12 +919,21 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
   schema <- ivt_f2_geo_schema(raw); if (is.null(schema) || !length(schema)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw); if (is.na(n_geo) || n_geo < 1L) return(NULL)
-  # value blocks in directory (logical) order, ordinal- and framing-filtered
+  # value blocks in directory (logical) order, ordinal- and framing-filtered. The
+  # run-scanner CLASSIFIES the entries (so the gate below sees the same block set
+  # as always); the strict header-driven parse then supplies the VALUES where it
+  # applies, preserving explicit empty records as NA holes (absent members, e.g.
+  # 98-10-0662's aggregate member 26) and flagging bit-headed dense arrays, both of
+  # which the run-scanner silently fragments or packs.
   vb <- vector("list", nrow(d)); k <- 0L
   for (r in seq_len(nrow(d))) {
     t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
     if (length(t) >= 3L && !ivt_f2_is_ordinal(t)) {
-      k <- k + 1L; vb[[k]] <- if (trim) trimws(t) else t
+      e <- ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"])
+      if (is.null(e)) e <- list(values = t, dense = FALSE, strict = FALSE)
+      else e$strict <- TRUE
+      if (trim) e$values <- trimws(e$values)
+      k <- k + 1L; vb[[k]] <- e
     }
   }
   length(vb) <- k
@@ -862,24 +947,56 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   }
   cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr", "dguid",
             "geo_level", "geo_type", "geo_type_abbr", "prov_abbr", "alt_geo_code",
-            "pr_code", "dqf_code", "dqf_note", "tnr_short_form")
+            "pr_code", "dqf_code", "dqf_note", "dqf_note_strict", "tnr_short_form")
   out <- setNames(rep(list(rep(NA_character_, n_geo)), length(cols)), cols)
   pos <- 1L
   for (gi in seq_along(sizes)) {
     G <- sizes[gi]; s <- starts[gi]
     M <- min(G * 256L, n_geo - s + 1L)
-    place <- function(bi) {                          # G blocks -> M-long member vector
+    chunk_sz <- pmin(256L, M - 256L * (seq_len(G) - 1L))
+    # per-chunk absent-member pattern, from the plain arrays' NA holes; every
+    # NA-carrying plain array of the chunk must agree, else the layout is not
+    # understood and the caller falls back. Plain arrays are stored padded with
+    # empty records to the next power of two of the chunk size -- trim the all-NA
+    # tail back to the chunk size first.
+    empt <- vector("list", G)
+    for (c in seq_len(G)) {
+      empt[[c]] <- integer(0)
+      for (b in seq_len(2L * nattr)) {
+        j <- pos + (b - 1L) * G + (c - 1L)
+        e <- vb[[j]]
+        if (is.null(e) || e$dense) next
+        if (length(e$values) > chunk_sz[c] &&
+            all(is.na(e$values[(chunk_sz[c] + 1L):length(e$values)]))) {
+          e$values <- e$values[seq_len(chunk_sz[c])]
+          vb[[j]] <- e
+        }
+        if (length(e$values) != chunk_sz[c] || !anyNA(e$values)) next
+        pat <- which(is.na(e$values))
+        if (length(empt[[c]]) && !identical(pat, empt[[c]])) return(NULL)
+        empt[[c]] <- pat
+      }
+    }
+    place <- function(bi, strict_only = FALSE) {     # G blocks -> M-long member vector
       v <- rep(NA_character_, M)
       for (c in seq_len(G)) {
-        t <- vb[[bi + c - 1L]]; if (is.null(t)) next
+        e <- vb[[bi + c - 1L]]; if (is.null(e)) next
+        if (strict_only && !isTRUE(e$strict)) next
+        t <- e$values
+        if (e$dense && length(t) != chunk_sz[c]) {   # dense: re-align absent members
+          if (length(t) != chunk_sz[c] - length(empt[[c]]) || !length(empt[[c]]))
+            return(NULL)                             # cannot align -> bail out
+          full <- rep(NA_character_, chunk_sz[c]); full[-empt[[c]]] <- t; t <- full
+        }
         idx <- 256L * (c - 1L) + seq_along(t); ok <- idx <= M
         v[idx[ok]] <- t[ok]
       }
       v
     }
     for (a in seq_len(nattr)) {
-      va <- place(pos);        pos <- pos + G         # run A (G chunks)
-      vbv <- place(pos);       pos <- pos + G         # run B (G chunks)
+      pa <- pos; pb <- pos + G; pos <- pos + 2L * G   # run A then run B (G chunks each)
+      va <- place(pa); vbv <- place(pb)
+      if (is.null(va) || is.null(vbv)) return(NULL)   # unalignable dense block
       col <- if (a == 1L) "geo_label" else stem_col(schema[a - 1L])
       if (is.na(col)) next                            # unmapped field (e.g. TNR_LONG_FORM)
       dd <- which(!is.na(va) & !is.na(vbv) & va != vbv)
@@ -889,13 +1006,26 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
       out[[col]][idx] <- en
       if (a == 1L) out[["geo_label_fr"]][idx] <- fr
       if (col == "geo_name") out[["geo_name_fr"]][idx] <- fr
+      if (col == "dqf_note")                          # per-slot provenance (see below)
+        out[["dqf_note_strict"]][idx] <- place(if (a_en) pa else pb, strict_only = TRUE)
     }
   }
-  ivt_f2_check_geo_count(raw, sum(!is.na(out$dguid)))
-  # DQF_NOTE's long suppression text does not map cleanly to member boundaries; it is
-  # a 1:1 function of DQF_CODE, so recover it by per-key majority vote (as the stride
-  # path does). Every other attribute is exact by position.
-  out$dqf_note <- ivt_f2_derive_text(out$dqf_note, out$dqf_code)
+  # every member must be accounted for by the display name or the DGUID (an absent
+  # member carries neither -- e.g. a derived aggregate -- but then it must be an NA
+  # hole of the plain arrays, which the count below still covers via geo_label)
+  ivt_f2_check_geo_count(raw, sum(!is.na(out$geo_label) | !is.na(out$dguid)))
+  # DQF_NOTE: a slot whose block the STRICT entry parse decoded is positional per
+  # member and taken as read (98-10-0662: all 91 exact incl. its bit-headed dense
+  # arrays). Slots only the run-scanner could read are NOT trusted -- the scanner
+  # fragments the long suppression texts and misaligns them (e.g. the reverse-stored
+  # root chunk) -- and are re-derived from the per-DQF_CODE majority vote over the
+  # strict slots (the note is a 1:1 function of the code). Every other attribute is
+  # exact by position.
+  strictv <- out$dqf_note_strict
+  out$dqf_note <- strictv
+  miss <- is.na(strictv) & !is.na(out$dqf_code)
+  if (any(miss))
+    out$dqf_note[miss] <- ivt_f2_derive_text(strictv, out$dqf_code)[miss]
   tibble::tibble(
     member_id      = seq_len(n_geo),
     geo_label      = out$geo_label,      geo_label_fr   = out$geo_label_fr,
@@ -1144,28 +1274,35 @@ ivt_f2_geo_marker_region <- function(raw) {
 # Positional (directory-driven) reader for the inline-codebook geography. The
 # legacy layout stores, per group of `G` 256-member chunks (group sizes
 # `ivt_f2_geo_group_sizes()`, same 1,1,2,4,... sequence as the modern chunked
-# codebook), four attribute runs of `G` chunk blocks each, in directory order:
+# codebook), a fixed number `R` of attribute runs of `G` chunk blocks each, in
+# directory order. The run roster varies by vintage:
 #
-#   [combined "name (code) flag" x G]  (one language)
-#   [combined "name (code) flag" x G]  (the other language)
-#   [name array x G]                   (accent-stripped search names -- NOT display)
-#   [code array x G]                   (bare GEOUIDs)
+#   1991 / 2011 (R = 4):  [combined "name (code) flag"] x 2 languages,
+#                         [name array] (accent-stripped -- NOT the display name),
+#                         [code array] (bare GEOUIDs)
+#   2006 (R = 3):         [combined] x 2, [name array]      (no code array)
+#   2016 98-400-X (R = 4): an extra leading run before the two combined runs
 #
-# interleaved with framing entries, per-4-chunk index blocks (1024 records) and the
-# ordinal delimiters, all of which are filtered out structurally (record count in
-# [3, 256], non-ordinal). Reading the runs in directory order gives the TRUE member
-# order -- the byte-ascending block scan + first-appearance dedup of the regex
-# fallback scrambles chunks that are stored out of byte order (on 1003011 the last
-# ~2,435 members' codes were misordered; the directory read matches the StatCan
-# Beyond 20/20 viewer's member list 41,859/41,859, names AND codes).
+# so `R` is derived from the candidate-block count (blocks per chunk) and the run
+# ROLES are detected by content: the two combined runs are the ones whose records
+# parse as `IVT_F2_INLINE_PAT`, and a code array is any other run that equals the
+# combined block's parsed codes (used positionally when present; the parsed code
+# is the uid otherwise). Candidates are interleaved with framing entries,
+# per-4-chunk index blocks (1024 records) and ordinal delimiters, all filtered
+# structurally (record count in [3, 256], non-ordinal). Reading the runs in
+# directory order gives the TRUE member order -- the byte-ascending block scan +
+# first-appearance dedup of the regex fallback scrambles chunks stored out of
+# byte order (on 1003011 the last ~2,435 members' codes were misordered; the
+# directory read matches the StatCan Beyond 20/20 viewer's member list
+# 41,859/41,859, names AND codes).
 #
-# Per member: `geo_name`/`dqf_code` are parsed from the combined block (the display
-# name keeps its accents there; the name array is accent-stripped so it is only a
-# cross-check), `geouid` is the code array read positionally -- and is REQUIRED to
-# equal the combined block's parsed code, so a layout whose runs are ordered
-# differently falls back rather than misreads. Returns the `ivt_f2_geo_inline()`
-# tibble, or NULL (schema'd/modern layout, no directory, or any structural gate
-# failing -> the caller falls back to the regex scan).
+# The run-scanner classifies the candidate blocks; where the strict header-driven
+# entry parse (`ivt_f2_dir_entry_members()`) applies, it supplies the VALUES --
+# chunks whose records the scanner fragments (e.g. 98-312-XCB2011033's final
+# 71-member partial, recovered 51/71 by the scanner) parse exactly, with the
+# power-of-two slot padding trimmed back to the chunk size. Every chunk of every
+# run must match its expected size, otherwise the reader bails and the caller
+# falls back to the regex scan. Returns the `ivt_f2_geo_inline()` tibble or NULL.
 ivt_f2_geo_inline_dir <- function(raw) {
   if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern layout: not inline
   d <- ivt_f2_dim_dir(raw, 1L)
@@ -1173,49 +1310,93 @@ ivt_f2_geo_inline_dir <- function(raw) {
   n_geo <- ivt_f2_geo_count(raw)
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
   sizes <- ivt_f2_geo_group_sizes(n_geo)
-  need <- 4L * sum(sizes)
-  # chunk value blocks in directory (logical) order
+  total <- sum(sizes)
+  # chunk value blocks in directory (logical) order; classification by the
+  # run-scanner, values strict-first (see ivt_f2_dir_entry_members). Dense values
+  # are usable as-is: if a dense block skipped absent members its record count
+  # misses the chunk size below and we fall back.
   vb <- vector("list", nrow(d)); k <- 0L
   for (r in seq_len(nrow(d))) {
     t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
     if (length(t) >= 3L && length(t) <= 256L && !ivt_f2_is_ordinal(t)) {
-      k <- k + 1L; vb[[k]] <- t
-      if (k == need) break                             # trailing blocks are not ours
+      e <- ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"])
+      k <- k + 1L
+      vb[[k]] <- if (is.null(e)) t else e$values
     }
   }
-  if (k < need) return(NULL)
-  # walk the groups; every chunk's record count must match its expected size
-  # (256, or the final partial), otherwise the layout is not this one
+  length(vb) <- k
   chunk_of <- function(gi) {                           # expected sizes of group gi's chunks
     first <- sum(sizes[seq_len(gi - 1L)])              # global chunk index of chunk 1 - 1
     vapply(seq_len(sizes[gi]), function(j)
       min(256L, n_geo - (first + j - 1L) * 256L), 1L)
   }
-  comb_a <- character(0); comb_b <- character(0); codes <- character(0)
-  pos <- 1L
-  for (gi in seq_along(sizes)) {
-    G <- sizes[gi]; want <- chunk_of(gi)
-    run <- function() {
-      b <- vb[pos:(pos + G - 1L)]; pos <<- pos + G
-      if (!identical(vapply(b, length, 1L), want)) return(NULL)
-      unlist(b)
-    }
-    a <- run(); b <- run(); nm_run <- run(); cd_run <- run()
-    if (is.null(a) || is.null(b) || is.null(nm_run) || is.null(cd_run)) return(NULL)
-    comb_a <- c(comb_a, a); comb_b <- c(comb_b, b); codes <- c(codes, trimws(cd_run))
+  # assemble the R runs (trailing non-member candidates make k %/% total over-count
+  # on tiny tables, so try R from the division estimate downward until a walk fits).
+  # A run's chunks normally follow member order (partial chunk last), but the 2006
+  # vintage stores the last group's PARTIAL chunk first within each run (sometimes
+  # padded to a full 256 slots) -- accepted as a rotation, with the partial placed
+  # back at its member position.
+  fit <- function(bb, w) {
+    bb <- lapply(seq_along(bb), function(j) {          # trim the empty-slot padding
+      t <- bb[[j]]
+      if (length(t) > w[j] && all(is.na(t[(w[j] + 1L):length(t)])))
+        t[seq_len(w[j])] else t
+    })
+    if (identical(vapply(bb, length, 1L), w)) bb else NULL
   }
+  walk <- function(R) {
+    if (k < R * total) return(NULL)
+    runs <- rep(list(character(0)), R)
+    pos <- 1L
+    for (gi in seq_along(sizes)) {
+      G <- sizes[gi]; want <- chunk_of(gi)
+      for (rr in seq_len(R)) {
+        b0 <- vb[pos:(pos + G - 1L)]; pos <- pos + G
+        b <- fit(b0, want)
+        if (is.null(b) && G > 1L && want[G] != want[1L]) {
+          b <- fit(b0, c(want[G], want[seq_len(G - 1L)]))   # partial stored first
+          if (!is.null(b)) b <- c(b[-1L], b[1L])
+        }
+        if (is.null(b)) return(NULL)
+        runs[[rr]] <- c(runs[[rr]], unlist(b))
+      }
+    }
+    runs
+  }
+  if (k < 2L * total) return(NULL)
+  runs <- NULL
+  for (R in seq.int(min(k %/% total, 6L), 2L, by = -1L)) {
+    runs <- walk(R)
+    if (!is.null(runs)) break
+  }
+  if (is.null(runs)) return(NULL)
+  # run roles by content: the combined runs parse as "name (code) flag"
+  prate <- vapply(runs, function(v) {
+    nn <- v[!is.na(v)]
+    if (!length(nn)) 0 else mean(grepl(IVT_F2_INLINE_PAT, nn))
+  }, 0)
+  cmb <- which(prate >= 0.8)
+  if (!length(cmb)) return(NULL)
   # English combined run by frscore over the members where the two copies differ
-  dd <- which(comb_a != comb_b)
-  comb <- if (ivt_f2_frscore(comb_a[dd]) <= ivt_f2_frscore(comb_b[dd])) comb_a else comb_b
+  comb <- if (length(cmb) == 1L) runs[[cmb[1L]]] else {
+    a <- runs[[cmb[1L]]]; b <- runs[[cmb[2L]]]
+    dd <- which(!is.na(a) & !is.na(b) & a != b)
+    if (ivt_f2_frscore(a[dd]) <= ivt_f2_frscore(b[dd])) a else b
+  }
   m <- regmatches(comb, regexec(IVT_F2_INLINE_PAT, comb))
   okm <- vapply(m, function(gg) length(gg) >= 4L, logical(1))
-  if (mean(okm) < 0.8) return(NULL)                    # run 1 is not a combined block
   nm <- fl <- rep(NA_character_, n_geo); cd <- nm
   nm[okm] <- vapply(m[okm], `[`, "", 2L)
   cd[okm] <- vapply(m[okm], `[`, "", 3L)
   fl[okm] <- vapply(m[okm], `[`, "", 4L)
-  # the positional code array must agree with the combined block's parsed code
-  if (!all(codes[okm] == cd[okm])) return(NULL)
+  # a positional code array (a non-combined run equal to the parsed codes) is
+  # preferred as the uid -- it also cross-validates the run alignment
+  codes <- cd
+  for (rr in setdiff(seq_along(runs), cmb)) {
+    v <- trimws(runs[[rr]])
+    ok <- okm & !is.na(v)
+    if (sum(ok) && all(v[ok] == cd[ok])) { codes <- v; break }
+  }
   g <- tibble::tibble(member_id = seq_len(n_geo), geo_name = trimws(nm),
                       geouid = codes, dqf_code = fl)
   ivt_f2_check_geo_count(raw, nrow(g))

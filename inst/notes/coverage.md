@@ -207,12 +207,19 @@ units) and the directory entries (8-byte entry units).
   is read as **character**: a bare geographic code (2016 `01`/2006 `1001105`), a dotted
   census-tract code (2011 `0010001.00`), never a DGUID here. The type abbreviation admits
   accents (Quebec `MÉ`), and a trailing `(pct%)` non-response rate (the 2016
-  single-census tables) is tolerated. Validated exact on member counts: **1991** 41,859
-  (now **positionally from the block directory** — see the section-pointer table below;
-  the scan+dedup fallback had misordered the last 2,435 members), **2006
-  (97-563-XCB2006072)** 57,523 dissemination areas, **2011 (98-312-XCB2011033)** 5,447
-  census tracts, **2016 (98-400-X2016387)** 174 (single-block; its uid was previously
-  empty — no DGUID array, and the content detector could not recover the bare-code uid).
+  single-census tables) is tolerated. **All four vintages now read positionally from
+  the block directory** (`ivt_f2_geo_inline_dir()` — see the section-pointer table
+  below): the byte-order scan + first-appearance dedup had silently **misordered**
+  members wherever chunks are stored out of byte order — **2,435 of 41,859 on 1991,
+  18,432 of 57,523 on 2006, 1,351 of 5,447 on 2011** — each validated exact against
+  the Beyond 20/20 viewer's geography member list (option order of the `d0` select).
+  The per-group run roster varies by vintage and is detected by content: 1991/2011
+  carry 4 runs `[combined ×2, name array, code array]`, 2006 carries 3 (no code
+  array; the uid is the combined block's parsed code), the 2016 98-400-X an extra
+  leading run; 2006 also stores the last group's **partial chunk first** within each
+  run (accepted as a rotation and placed back at its member position). **2016
+  (98-400-X2016387)** 174 members (single-block; its uid was previously empty — no
+  DGUID array, and the content detector could not recover the bare-code uid).
   The geography count is read from the descriptor with the per-type width tag
   (`0x10`/`0x0d` → u16; 2011's `0x0d` was misread as u8 = 21 before).
   `ivt_f2_geo_light()` resolves every family through one metadata-anchored entry:
@@ -328,12 +335,7 @@ units) and the directory entries (8-byte entry units).
   consumes exactly `G` blocks per language-run and places each chunk at its member
   offset; language per attribute by `ivt_f2_frscore()`. Group chunk-sizes come from
   `ivt_f2_geo_group_sizes(n_geo)` (1,1,2,4,8,… last trimmed), not the DGUID-run
-  segmenter. `DQF_NOTE`'s long suppression text still does not map cleanly to member
-  boundaries, so it keeps the `ivt_f2_derive_text()` majority-vote from `DQF_CODE` (the
-  same post-step the stride path used) — **every other attribute is exact by position.**
-  The "variable-span DQF_NOTE / content-located TNR" blocker is gone: the block *count*
-  is perfectly regular (`5,952 = 24·248` value blocks on 0023), so the positional
-  partition never desyncs.
+  segmenter.
   - **Validated byte-identical to the stride path on 98-10-0023** (all 63,404 members,
     every one of the 15 columns), and slightly faster (~20 s vs ~26 s).
   - **Fixes latent stride bugs on the tables that carry the extra `TNR_LONG_FORM`
@@ -345,12 +347,34 @@ units) and the directory entries (8-byte entry units).
     wrong for 237 members. `geo_label`/`dguid`/`geo_level`/`geo_type`/`geo_type_abbr`/
     `prov_abbr`/`alt_geo_code` stay correct.
   - **Fallback still runs on 98-10-0013 ADA** (its directory drops a trailing partial →
-    irregular block count → stride path with the `ivt_f2_geo_root_dir()` root override).
-  - **Residual (unchanged, pre-existing):** on 0478 the last group's two code-valued
-    attributes (`geo_name`, `alt_geo_code`) lose their trailing 153-member partial — the
-    block scanner fragments that code chunk (and a data-page fragment sits in its
-    directory slot); the display label and every other attribute are complete. Same
-    root as the block-finder-fidelity nicety noted for the big-group long text.
+    irregular block count → stride path with the `ivt_f2_geo_root_dir()` root override);
+    all its attributes validate exact vs the StatCan metadata CSV.
+- [x] **Strict value-entry parse (the two block framings) — DECODED and wired**
+  (`ivt_f2_dir_entry_members()`; see ivt-format.md "Value-entry block framings").
+  Plain arrays are `[01 01][u16 payload][u16 n_slots]` + exactly `n_slots`
+  NUL-terminated records, where `n_slots` is the chunk size **padded to a power of
+  two with explicit empty records** (`00 00`) and an **absent member** is likewise
+  an explicit empty record; dense arrays are `[81 01][u16 nbits][u16-padded
+  bitstream][80|01]` + unterminated records that **skip** absent members (re-aligned
+  from a plain sibling's NA pattern; the bitstream's per-member coding is still
+  undecoded). The run-scanner now only *classifies* directory entries; the strict
+  parse supplies the values. This closed four gaps at once:
+  - **98-10-0662 geography attributes: all 11 attributes exact 91/91** vs the
+    StatCan metadata CSV (was: unreadable — its aggregate member 26, "Canada
+    outside Quebec and New Brunswick", carries **no attributes at all**, and the
+    scanner's split at its empty record silently **shifted every uid after member
+    25 by one** and dropped the count to 90 in the light metadata path).
+  - **DQF_NOTE is now positional-exact**: 63,404/63,404 on 98-10-0023 (was ~99.8%
+    via the majority vote), 91/91 on 0662. The `ivt_f2_derive_text()` vote now only
+    fills slots whose block the strict parse could not decode. The only residual is
+    the **container's own 252-byte record cap** (`0xFC` max length byte): notes
+    longer than 252 chars are stored truncated in the file (2,448 members on
+    98-10-0129, 90 on 0478) — byte-faithful, not a decode gap.
+  - **0478's 153-member code-partial residual is FIXED**: `geo_name` and
+    `alt_geo_code` are now exact 6,297/6,297 (the strict parse does not fragment
+    the code chunk the scanner broke).
+  - A latent **root-group language-pick bug on 98-10-0129** (member 2's `geo_name`
+    read the French copy) is fixed; `GEO_NAME` is exact 63,404/63,404 vs metadata.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
   float64 table or a no-straddle table would confirm / refine it.
 
@@ -448,13 +472,15 @@ directory slot table**:
   and a **bare-GEOUID code array**, interleaved with framing, per-4-chunk index
   blocks (1024 records) and ordinal delimiters. **`ivt_f2_geo_inline_dir()` now
   reads these runs positionally** (record-count-validated per chunk; uid = the
-  code array, required to equal the combined block's parsed code; name/flag from
-  the combined block, which keeps the accents): the byte-ascending scan +
-  first-appearance dedup path had silently **misordered the last 2,435 members'
-  names and uids** (the tail chunks are stored out of byte order) — the positional
-  read matches the StatCan Beyond 20/20 viewer's member list **41,859/41,859**
-  (names and codes). The regex scan survives only as the fallback for layouts
-  whose directory does not resolve.
+  code array when one exists, cross-checked against the combined block's parsed
+  code; name/flag from the combined block, which keeps the accents): the
+  byte-ascending scan + first-appearance dedup path had silently **misordered the
+  last 2,435 members' names and uids** (the tail chunks are stored out of byte
+  order) — the positional read matches the StatCan Beyond 20/20 viewer's member
+  list **41,859/41,859** (names and codes). The same reader covers the 2006 / 2011
+  / 2016 vintages (run rosters differ — see the schema-absent stage above), each
+  viewer-validated. The regex scan survives only as the fallback for layouts whose
+  directory does not resolve.
 - **`@712`** points at the data-quality-flag legend directory (`A…E/R/P` texts, EN
   + FR); a symbol legend directory ("Not available for a specific reference
   period", …) sits nearby (reference slot not yet identified). **`@992`/`@1000`**
