@@ -44,59 +44,25 @@ ivt_f2_is_marker <- function(raw, off) {
     as.integer(raw[off + 4L]) %in% ivt_f2_marker_b3
 }
 
-# Per-page value parameters. The dense value run starts at
-#   vstart = 4 (marker) + presence_len + trailer
-# where `presence_len = rec_bytes * geos_per_page` and `trailer` is a short pad/
-# 0xFF run whose length depends only on the marker's first byte. Storing the
-# trailer (rather than an absolute vstart) makes the offset independent of the
-# table's dimensionality: it reproduces the validated absolute starts for the
-# 256-byte presence section of the 3-dimension tables, and generalises to the
-# n-dimension tables (e.g. 98-10-0129, presence_len = 128*2 = 256) automatically.
-# The marker low nibble is the value-width code (0x8 -> 8-byte float64, 0x4 ->
-# int32, 0x2 -> int16); the high nibble (0x8 vs 0xa) only changes the trailer
-# length. Validated cell-exact against the StatCan CSV for every page type:
-#   0x88 -> float64, trailer 4  (-> off+264 at presence_len 256)
-#   0xa8 -> float64, trailer 10 (-> off+270)
-#   0xa2 -> int16,   trailer 34 (-> off+294)   (98-10-0129)
-#   0xa4 -> int32,   trailer 18 (-> off+278)   (98-10-0129)
-#   0x84 -> int32,   trailer 8  (-> off+268)
-#   0x82 -> int16,   trailer 16 (-> off+276)
-IVT_F2_PAGE_TRAILER <- c(
-  `136` = 4L,   # 0x88 float64
-  `168` = 10L,  # 0xa8 float64
-  `162` = 34L,  # 0xa2 int16
-  `164` = 18L,  # 0xa4 int32
-  `132` = 8L,   # 0x84 int32
-  `130` = 16L   # 0x82 int16
-)
-
-# Resolve a page's value parameters from its marker's first byte and the page's
-# presence-section length. Unknown markers fall back to a minimal (4-byte) trailer
-# with the width implied by the low nibble, and a warning, so a new variant
-# degrades loudly rather than silently.
-ivt_f2_page_params <- function(marker0, presence_len = IVT_F2_PRESENCE_LEN) {
-  w  <- bitwAnd(marker0, 0x0FL)
-  tr <- IVT_F2_PAGE_TRAILER[[as.character(marker0)]]
-  if (is.null(tr)) {
-    cli::cli_warn("Unrecognised family-2 page marker byte {.val {sprintf('0x%02x', marker0)}}; assuming plain layout.")
-    tr <- 4L
-    if (!w %in% c(2L, 4L, 8L)) w <- 8L
-  }
-  list(vstart = 4L + presence_len + tr,
-       width  = if (w %in% c(2L, 4L, 8L)) w else 8L,
-       float  = w == 8L,
-       trailer = tr)
-}
+# The per-page value parameters (value width, trailer, value-run start) are
+# derived structurally from the marker in `ivt_value_trailer()` (decode.R): the
+# low nibble is the width code, the high nibble selects the pad formula. The
+# former hard-coded six-marker trailer table lived here; the formula reproduces
+# it exactly.
 
 # A directory record is valid when both size fields agree, the size is positive,
-# and the offset points at a page marker inside the data region.
+# and the offset points at a page marker past the fixed header region. (The
+# floor used to be a hard-coded 1e5, a content guess from the big census files;
+# it silently truncated the directory of small files -- 98-400-X2016387's pages
+# start at ~7 KB, so the perfectly valid header pointer was rejected and the
+# marker-scan fallback found only the 6 of 22 pages above 100 KB.)
 ivt_f2_entry_valid <- function(raw, o, n) {
   if (o + 8L > n) return(FALSE)
   s1 <- rd_u16(raw, o + 4L)
   s2 <- rd_u16(raw, o + 6L)
   if (s1 != s2 || s1 <= 0L) return(FALSE)
   off <- rd_u32(raw, o)                      # u32 at o
-  if (off < 1e5 || off + 4 > n) return(FALSE)
+  if (off < 1024L || off + 4 > n) return(FALSE)
   ivt_f2_is_marker(raw, off)
 }
 
@@ -138,7 +104,14 @@ ivt_f2_dir_anchor_scan <- function(raw) {
 ivt_f2_find_directory <- function(raw) {
   n <- length(raw)
   anchor <- ivt_f2_dir_anchor_header(raw)
-  if (is.null(anchor)) anchor <- ivt_f2_dir_anchor_scan(raw)
+  if (is.null(anchor)) {
+    anchor <- ivt_f2_dir_anchor_scan(raw)
+    if (!is.null(anchor)) {
+      ivt_fallback(paste(
+        "The header page-directory pointer (@558) did not validate;",
+        "the page directory was located by a marker scan instead."))
+    }
+  }
   if (is.null(anchor)) return(NULL)
 
   lo <- anchor

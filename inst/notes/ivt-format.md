@@ -113,11 +113,20 @@ fully decoded):
   alignment before the page directory; carries no observed information.
 - **The doubled directory size field.** Each 8-byte directory record stores the page
   byte-length **twice** (`[u32 off][u16 size][u16 size]`, the two `size`s identical).
-  Only the first is used; the second's purpose (redundancy/validation?) is unproven.
+  The size is the page's **allocated** length and upper-bounds its content: on every
+  page of every supported table `4 + presence + trailer + n_values*width <= size`,
+  with **equality** on the trailer-less `b2 == 0x00` pages. The decoder enforces
+  this per page (`canivt_page_overrun`), so a misread marker aborts rather than
+  decoding garbage values. The second copy's purpose (redundancy?) is unproven.
 - **Per-page header bytes.** The page marker is `[b0] 01 [b2] [b3]` with the value-
-  width in `b0`'s low nibble and `b3 ∈ {08,09}`; `b2` (e.g. `0x20`, `0x41`, `0x03`)
-  and the exact role of the marker-specific `0xFF` trailer length (264/270/294) are
-  used positionally but not semantically explained.
+  width in `b0`'s low nibble and `b3 ∈ {08,09}`; `b2 == 0x00` means "no trailer"
+  (the value run starts right after the presence section, and the page size fits
+  exactly), any other `b2` selects the formula trailer (see the family-2 page
+  layout) — `b2`'s specific values (e.g. `0x20`, `0x41`, `0x03`) are not otherwise
+  explained. A **`b3 = 0x0a` page variant** exists (369 `a2 01 03 0a` pages on
+  98-400-X2016203; extent-clean under the formula but their int16 values are all
+  -1, presumably suppression sentinels): **undecoded**, and skipped **loudly**
+  (`canivt_skipped_pages`) rather than silently.
 - **Label encoding is Windows-1252.** Labels use the cp1252 `0x80-0x9F` punctuation
   block (e.g. `0x92` = the curly apostrophe in `Tla’amin Lands` / `Sambaa K’e`,
   `0x93/0x94` quotes, `0x96/0x97` dashes). `is_label_byte()` must accept these
@@ -530,11 +539,17 @@ every value, float64 and int16). The complete spec:
   (float64) and `a2` (int16).
 - **Page layout.** `[4-byte marker][256-byte presence section][0xFF trailer][dense
   value run]`. The presence section is 4 × 64-byte records (one per geo, in value
-  order). The trailer length is marker-specific, so the value run starts at
-  `page_offset + 264` (`0x88`), `+ 270` (`0xa8`) or `+ 294` (`0xa2`)
-  (`IVT_F2_PAGE_PARAMS`; established empirically, validated exact). Values are dense
-  in the page's width, one per present cell, in the presence order; the page is then
-  zero-padded up to `size`.
+  order). The trailer is **derived from the marker by formula**
+  (`ivt_value_trailer()`, decode.R): `b2 == 0x00` → no trailer; otherwise `b0`'s
+  high nibble selects the pad — `0x8*` → `32 / width` bytes (`0x88`→4, `0x84`→8,
+  `0x82`→16), `0xa*` → `64 / width + 2` (`0xa8`→10, `0xa4`→18, `0xa2`→34). The
+  formula reproduces the formerly hard-coded per-marker table exactly and holds
+  with zero violations on every page of every supported table in the local corpus
+  (~148,000 pages); an unrecognised width code or high nibble aborts
+  (`canivt_unknown_marker`) instead of decoding with a guessed layout. Values are
+  dense in the page's width, one per present cell, in the presence order; the page
+  is then zero-padded up to `size`, and the computed value run must fit `size`
+  (checked per page, `canivt_page_overrun`).
 - **Presence record (the byte-pair-swap).** Each 64-byte record is **byte-pair
   swapped** (`B0↔B1, B2↔B3, …` — the same principle as family 1's `bitwXor(housing,
   1)`, at byte granularity), after which it is a positional nibble-per-member bitmap:

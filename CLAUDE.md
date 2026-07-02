@@ -55,6 +55,7 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
 | file | role |
 |------|------|
 | `utils-bytes.R` | low-level readers: `rd_u16/rd_u32/rd_int_run/rd_pascal`; latin-1 decode. **All offsets are 0-based** (binary layout); helpers convert to R's 1-based indexing. |
+| `fallback.R`    | **loud fallbacks**: `ivt_fallback(msg, class)` — classed warning (`canivt_fallback` by default) raised whenever a content-heuristic fallback supplies values or pages are skipped; `options(canivt.strict = TRUE)` upgrades to a classed error. `ivt_quietly()` muffles both for speculative probes (family detection). Wire every new fallback path through this. |
 | `container.R`   | page-directory anchor `ivt_idx0()` (reads `u16@558`, validates by checking the first entry points at a page marker — works for any file size) + the legacy 0x1000-stride `ivt_geography_count()` (kept only for the family detector / regression). `IVT_IDX0_DEFAULT=37167` is a fallback. |
 | `decode.R`      | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides. `ivt_decode()` walks the paged-coordinate cartesian, decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`) → cell tibble (`geo` + one slug column per data dimension). Handles geography-paged (former family 1) and geography-in-page/multiple-geos-per-page (former family 2) identically. |
 | `container-f2.R`| family-2 page-directory finder (used by the metadata path) + per-page value params (`IVT_F2_PAGE_TRAILER` per marker); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
@@ -93,11 +94,32 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   power of two of count × inner-block; innermost in the low bits). Records are
   **byte-pair-swapped** then read **MSB-first**. The historical "Age nibble,
   genders Total/Men/Women at bits 3/2/1" is the Age×Gender special case.
-- Value run starts at `4 + presence_len + trailer[marker]`
-  (`presence_len = rec_bytes × geos_per_page`); trailers 4/10/34/18/8/16 for
-  `0x88/0xa8/0xa2/0xa4/0x84/0x82`. The store keeps only **non-zero** cells (the
-  CSV publishes the zeros), so a missing cell = 0; entirely empty geographies
-  (zero presence record) are normal.
+- Value run starts at `4 + presence_len + trailer(marker)`
+  (`presence_len = rec_bytes × geos_per_page`); the trailer is a **formula, not a
+  table** (`ivt_value_trailer()`): `b2 == 0x00` → 0, else `32/width` for `0x8*`
+  markers and `64/width + 2` for `0xa*` (reproducing the former per-marker
+  constants 4/10/34/18/8/16 exactly; zero violations on ~148k corpus pages).
+  Unknown markers **abort** (`canivt_unknown_marker`), and every page is
+  extent-checked against its directory entry's u16 size
+  (`4 + presence + trailer + nv·width ≤ size`, equality when `b2 == 0`;
+  `canivt_page_overrun`). Valid directory entries pointing at unknown markers
+  are skipped **loudly** (`canivt_skipped_pages` — 98-400-X2016203 has 369
+  undecoded `a2 01 03 0a` pages, values all int16 -1, likely suppression). The
+  store keeps only **non-zero** cells (the CSV publishes the zeros), so a
+  missing cell = 0; entirely empty geographies (zero presence record) are normal.
+- **Fallbacks are LOUD** (`ivt_fallback()`, `fallback.R`): every content-heuristic
+  path (stride walk, regex/dedup scans, count-keyed labels, marker-scan directory
+  location, fixed slot orders, tail windows) raises a classed `canivt_fallback`
+  warning when it supplies values; `options(canivt.strict = TRUE)` upgrades these
+  (and skipped pages) to errors. Detection probes stay quiet (`ivt_quietly()`).
+  When adding a new fallback path, wire it through `ivt_fallback()` — never let a
+  heuristic read engage silently.
+- The page-directory entry floor is **1024 (past the header region), not 1e5**:
+  the old 100 KB content guess silently truncated small files' directories
+  (98-400-X2016387: 6 of 22 pages — its pages start at ~7 KB). A **no-straddle**
+  layout (all dims fit one presence record) **aborts** (`canivt_no_straddle`):
+  never validated, and the one file that parses that way (2001 F-series
+  97F0020XCB2001070) decodes to garbage — this abort is what rejects it.
 - Member id columns in `cells` are **1-based**. Data columns are named by a
   **purely generic, name-agnostic slug** (`ivt_dim_slug()`): dimension 1 is
   geography → `geo` (structural), every other dimension takes the lower-cased
@@ -212,8 +234,9 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   98-10-0662's two 6-member language dimensions, which share a count and so
   collapsed under the count-keyed store — `ivt_f2_dimensions()` resolves same-count
   dimensions per dimension **by name**. The 2048-bit presence cap is assumed
-  constant (all six tables use it); a float64 table or a no-straddle table would
-  harden it.
+  constant (all six tables use it); a genuine no-straddle table now **aborts**
+  (`canivt_no_straddle`, decode.R) rather than run the unvalidated branch — the
+  only file that parses that way is the incompatible 2001 F-series variant.
 - **Uniform, content-free geography parsing.** Geography is dimension 1 with the same
   `81 02 02 00` doubled-name marker as every data dim; `ivt_f2_geo_light()` resolves
   every family through **one marker-anchored entry**. There are **two storage
@@ -376,7 +399,12 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   current `ivt_f2_descriptor()` misreads as `n_dim=524`, page marker `82 01 _ 00`
   with `b3=0x00` not `0x08`, header dir-pointer not at `@558`). Same lineage
   (`04 00 20 00`, doubled-name descriptors, presence+value pages) but needs a
-  variant descriptor parser + marker/header detection; rejected cleanly today.
+  variant descriptor parser + marker/header detection; rejected cleanly today
+  (2016019 via `ivt_f2_decodable()`, the 2001 `97F0020X` via the no-straddle
+  abort). Two 98-400-X files DO pass detection: **98-400-X2016387** (geography
+  validated, directory complete after the entry-floor fix) and **98-400-X2016203**
+  (decodes but is only partially supported: 369 `b3=0x0a` pages skipped loudly,
+  labels + inline geography via warned fallbacks, cells never ground-truthed).
 - **Family-2 geography attributes — DONE, positional-exact.** The strict
   value-entry parse (`ivt_f2_dir_entry_members()`, see ivt-format.md "Value-entry
   block framings": plain `[01 01][u16 payload][u16 n_slots]` arrays with explicit

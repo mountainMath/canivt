@@ -376,7 +376,51 @@ units) and the directory entries (8-byte entry units).
   - A latent **root-group language-pick bug on 98-10-0129** (member 2's `geo_name`
     read the French copy) is fixed; `GEO_NAME` is exact 63,404/63,404 vs metadata.
 - [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
-  float64 table or a no-straddle table would confirm / refine it.
+  float64 table or a no-straddle table would confirm / refine it. (The only
+  no-straddle candidate seen so far, the 2001 F-series 97F0020XCB2001070, is a
+  different container whose pages decode to garbage — so the no-straddle branch
+  now aborts, `canivt_no_straddle`, rather than run unvalidated.)
+
+### Note: page geometry is now validated structurally, and gaps are LOUD
+
+Three per-page invariants, verified with zero violations across ~148,000 pages
+of the local corpus, are enforced by the decoder (2026-07-02):
+
+- the **trailer formula**: `b2 == 0x00` → no trailer, else `32 / width` (`0x8*`
+  markers) or `64 / width + 2` (`0xa*`) — replaces the hard-coded six-marker
+  table; unknown width codes / high nibbles abort (`canivt_unknown_marker`);
+- the **extent check**: the directory entry's u16 size is the page's allocated
+  length and `4 + presence + trailer + nv*width <= size` always (with equality
+  on the `b2 == 0` pages); an overrun aborts (`canivt_page_overrun`);
+- **no silent page skips**: a valid directory entry pointing at an unknown
+  marker warns (`canivt_skipped_pages`) — those cells are missing from the
+  decode (see the `b3 = 0x0a` gap below).
+
+More generally, every content-heuristic fallback (the stride walk, regex/dedup
+scans, count-keyed labels, marker-scan directory location, fixed slot orders,
+tail windows) now announces itself with a classed `canivt_fallback` warning
+(`ivt_fallback()`, R/fallback.R), and `options(canivt.strict = TRUE)` turns any
+of them into errors; detection probes (`ivt_family()`) stay quiet
+(`ivt_quietly()`). Two hard-coded content guesses fell out of the same sweep:
+the page-directory entry floor `off >= 1e5` silently truncated
+98-400-X2016387's directory to 6 of 22 pages (its pages start at ~7 KB; the
+floor is now 1024, "past the header region") and the never-validated
+**no-straddle** layout branch now aborts instead of decoding garbage. All
+supported tables remain byte-identical to the pre-change baseline (cells and
+metadata digests, whole corpus).
+
+### [ ] Gap: the `b3 = 0x0a` page variant (98-400-X2016203) — UNDECODED
+
+98-400-X2016203 carries 369 pages with marker `a2 01 03 0a` (`b3 = 0x0a`, not
+the known `0x08/0x09`). They are extent-clean under the trailer formula but
+their int16 values read as all `-1` — presumably suppression sentinels ("x"
+cells), unvalidated against the viewer. The decoder skips them with a
+`canivt_skipped_pages` warning (previously they were dropped silently). To
+close: validate a `0x0a` page against a B2020 viewer slice and either admit
+`0x0a` (mapping `-1` to NA/suppressed) or document it as suppression-only.
+Note this table's cell decode as a whole has never been validated against
+ground truth (its metadata also engages two fallbacks: count-keyed labels and
+the regex inline-geography scan).
 
 ### Note: the `0xa` marker variant and empty geographies
 
@@ -414,9 +458,14 @@ Files in the test corpus that are currently unsupported:
   4063/529) — likely geography-level-dependent characteristic sets — plus the
   Values count/order from the type-`0x01` descriptor. See `unsupported-formats.md` §2.
 - [ ] **Other "F"-series** (`97F0015XCB2001041`, `97F0020XCB2001070`): 2001-era
-  crosstabs. `inline_geo` header flag varies; descriptor layout differs;
-  `97F0020X` has no locatable page directory. Served by StatCan's legacy `www12`
-  dynamic system, not the modern b2020 endpoint.
+  crosstabs. `inline_geo` header flag varies; descriptor layout differs.
+  `97F0020X`'s page directory **is** locatable after the entry-floor fix (header
+  `@558` = 18589; entries in *reverse* offset order, `84 01 00 08` pages of size
+  4756 that do **not** satisfy the `b2 == 0` exact-fit rule), and its descriptor
+  parses into a **no-straddle** layout whose decode is garbage — it is now
+  rejected structurally (`canivt_no_straddle`) rather than by the old accidental
+  `off >= 1e5` floor. Served by StatCan's legacy `www12` dynamic system, not the
+  modern b2020 endpoint.
 - [ ] **1981 census** (`97-570-X1981002`): older still; descriptor undecoded.
 - [ ] **Custom CT / "cro"/"ord" extracts** (`cro0172986_ct.*-2006-*`,
   `ord-08035-…_ct.1-2021-population`): Beyond 20/20 desktop exports (not StatCan

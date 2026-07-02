@@ -26,3 +26,13 @@ Parses a Statistics Canada Beyond 20/20 \code{.ivt} table straight from its byte
 both the data cells and the codebook (dimension members, geographic
 identifiers, footnotes). No companion CSV or metadata download is required.
 }
+\details{
+Every primary read is positional (header pointers, block directories, framed
+value entries). When one does not resolve and a content-heuristic fallback
+supplies values instead -- or when directory entries point at page variants
+that cannot be decoded -- a classed warning (\code{canivt_fallback} /
+\code{canivt_skipped_pages}) is raised naming the affected read. Set
+\code{options(canivt.strict = TRUE)} to turn these into errors: on a file layout
+this package has not been validated against, the fallback paths are the ones
+most likely to misread silently.
+}

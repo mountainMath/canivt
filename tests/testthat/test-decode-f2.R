@@ -306,8 +306,14 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
 
   # the last chunk group ends in a 71-member partial. It was silently dropped by the
   # >=150-record block floor (decoding 5,376 of 5,447); the trailing-partial rescue
-  # must recover every geography, DGUID and all, in member order.
-  ga <- ivt_f2_geo_attributes(raw)
+  # must recover every geography, DGUID and all, in member order. On this table the
+  # block directory lists the codebook irregularly, so the read goes through the
+  # legacy stride path, and the schema names only 8 of the 11 attributes, so the
+  # slot map falls back to the fixed order -- both must announce themselves.
+  ws <- testthat::capture_warnings(ga <- ivt_f2_geo_attributes(raw))
+  expect_length(ws, 2L)
+  expect_true(any(grepl("stride", ws)))
+  expect_true(any(grepl("slot order", ws)))
   expect_equal(nrow(ga), 5447L)
   expect_equal(sum(!is.na(ga$dguid)), 5447L)
   expect_equal(length(unique(ga$dguid)), 5447L)
@@ -706,4 +712,42 @@ test_that("the page directory is located from the header pointer (no marker scan
     expect_false(is.null(hdr))
     expect_equal(ivt_f2_find_directory(raw)$lo, hdr)
   }
+})
+
+test_that("small files' page directories are not truncated by an offset floor", {
+  # 98-400-X2016387's pages start at ~7 KB; the old hard-coded `off >= 1e5` entry
+  # floor rejected the (valid) header pointer and the marker-scan fallback then
+  # found only the 6 of 22 pages above 100 KB.
+  p <- locate_sample_ivt("", "98-400-X2016387", "98-400-X2016387.IVT")
+  skip_if(p == "", "no 98-400-X2016387 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_false(is.null(ivt_f2_dir_anchor_header(raw)))   # header pointer validates
+  d <- ivt_f2_find_directory(raw)
+  expect_equal(d$n_pages, 22L)                           # ceiling(174 geos / 8 per page)
+  expect_equal(d$lo, ivt_idx0(raw))
+})
+
+test_that("directory entries with unrecognised page markers are skipped LOUDLY", {
+  # 98-400-X2016203 carries 369 `a2 01 03 0a` pages (marker b3 = 0x0a, not the
+  # known 0x08/0x09); their cells cannot be decoded yet, and dropping them must
+  # warn -- silently missing cells read as zeros downstream.
+  p <- locate_sample_ivt("", "98-400-X2016203", "98-400-X2016203.IVT")
+  skip_if(p == "", "no 98-400-X2016203 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_warning(cells <- ivt_decode(raw), class = "canivt_skipped_pages")
+  expect_gt(nrow(cells), 0L)
+  withr::local_options(canivt.strict = TRUE)
+  expect_error(ivt_decode(raw), class = "canivt_skipped_pages_error")
+})
+
+test_that("no-straddle layouts are rejected, not decoded as garbage", {
+  # The 2001 "F"-series variant (97F0020XCB2001070) parses to a descriptor whose
+  # whole table fits one presence record -- a layout never validated -- and its
+  # pages then decode to garbage. ivt_layout() must abort (classed) and the file
+  # must stay unsupported.
+  p <- locate_sample_ivt("", "97F0020XCB2001070", "97F0020XCB2001070.IVT")
+  skip_if(p == "", "no 97F0020XCB2001070 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_error(ivt_layout(raw), class = "canivt_no_straddle")
+  expect_false(ivt_is_supported(raw))
 })

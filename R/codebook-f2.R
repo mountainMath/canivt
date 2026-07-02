@@ -304,10 +304,15 @@ ivt_f2_geo_block_dir <- function(raw) {
   for (slot in IVT_F2_DIR_SLOTS) {
     ptr <- rd_u32(raw, slot)
     if (is.na(ptr) || ptr < 1L) next
-    d <- ivt_f2_read_dir_at(raw, ptr)                  # flat: slot -> directory
-    if (ivt_f2_dir_has_geo(raw, d)) return(d)
-    d <- ivt_f2_read_dir_at(raw, rd_u32(raw, ptr))     # indirect: slot -> struct -> dir
-    if (ivt_f2_dir_has_geo(raw, d)) return(d)
+    d2 <- ivt_f2_read_dir_at(raw, ptr)                 # flat: slot -> directory
+    if (!ivt_f2_dir_has_geo(raw, d2))                  # indirect: slot -> struct -> dir
+      d2 <- ivt_f2_read_dir_at(raw, rd_u32(raw, ptr))
+    if (ivt_f2_dir_has_geo(raw, d2)) {
+      ivt_fallback(paste(
+        "The per-dimension header slot table did not resolve the geography",
+        "block directory; it was found by probing the legacy header slots."))
+      return(d2)
+    }
   }
   NULL
 }
@@ -556,6 +561,10 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
   if (!is.null(sd)) return(sd)
   ga <- ivt_geo_arrays(blocks, n_geo)
   if (is.null(ga$names)) return(NULL)
+  ivt_fallback(paste(
+    "Geography names were located by content (clean length-{n_geo} member",
+    "blocks in the codebook tail), not read positionally from a directory or",
+    "schema."))
   list(name = ga$names$texts,
        dguid = if (!is.null(ga$dguids)) ga$dguids$texts else NULL)
 }
@@ -646,13 +655,24 @@ IVT_F2_ATTR_FIELD <- c(
 # exactly on 98-10-0023, 98-10-0129 and 98-10-0241.
 ivt_f2_geo_slot_map <- function(raw) {
   schema <- ivt_f2_geo_schema(raw)
-  if (is.null(schema) || !length(schema)) return(IVT_F2_ATTR_SLOTS)
+  if (is.null(schema) || !length(schema)) {
+    ivt_fallback(paste(
+      "No geography attribute schema (field list) was found; using the fixed",
+      "2021-census attribute slot order."))
+    return(IVT_F2_ATTR_SLOTS)
+  }
   slots <- vapply(IVT_F2_ATTR_FIELD, function(field) {
     hit <- which(startsWith(schema, field) | startsWith(field, schema))
     if (length(hit)) hit[1L] - 1L else NA_integer_
   }, integer(1))
   names(slots) <- names(IVT_F2_ATTR_FIELD)
-  if (anyNA(slots)) return(IVT_F2_ATTR_SLOTS)   # unexpected schema shape -> fallback
+  if (anyNA(slots)) {                           # unexpected schema shape -> fallback
+    ivt_fallback(paste(
+      "The geography attribute schema does not name every expected attribute",
+      "({.val {names(slots)[is.na(slots)]}}); using the fixed 2021-census",
+      "attribute slot order."))
+    return(IVT_F2_ATTR_SLOTS)
+  }
   slots
 }
 
@@ -1067,6 +1087,10 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
 ivt_f2_geo_attributes <- function(raw) {
   dir_tbl <- ivt_f2_geo_attrs_dir(raw)
   if (!is.null(dir_tbl)) return(dir_tbl)
+  ivt_fallback(paste(
+    "The geography block directory is absent or lists the codebook",
+    "irregularly; reading the geography attributes via the legacy stride walk",
+    "over content-scanned blocks."))
   n_geo <- ivt_f2_geo_count(raw)
   blocks <- ivt_f2_codebook_blocks(raw)
   groups <- ivt_f2_geo_groups_chunked(blocks)
@@ -1442,6 +1466,14 @@ ivt_f2_geo_inline <- function(raw) {
     }
   }
   if (!length(cd)) return(NULL)
+  # This path found real geographies that the positional directory read could
+  # not: the regex + first-appearance-dedup scan is exactly the reader that
+  # silently misordered thousands of members on 1991/2006/2011 before the
+  # positional read replaced it, so its member ORDER cannot be trusted blindly.
+  ivt_fallback(paste(
+    "The inline geography codebook was parsed by the marker-region regex scan,",
+    "not read positionally from the block directory; the member order of",
+    "byte-order + dedup scans has been wrong before on chunked codebooks."))
   g <- tibble::tibble(member_id = seq_along(cd), geo_name = trimws(nm),
                       geouid = cd, dqf_code = fl)
   ivt_f2_check_geo_count(raw, nrow(g))
@@ -1640,5 +1672,9 @@ ivt_f2_decodable <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || is.na(d$n_dim) || d$n_dim < 2L || d$n_dim > 32L) return(FALSE)
   dd <- ivt_f2_data_dims(raw)
-  length(dd$counts) >= 1L && all(!is.na(dd$counts) & dd$counts >= 1L)
+  if (!(length(dd$counts) >= 1L && all(!is.na(dd$counts) & dd$counts >= 1L)))
+    return(FALSE)
+  # the layout itself must resolve (e.g. it aborts on the never-observed
+  # no-straddle case, which the incompatible 2001 "F"-series variant hits)
+  !is.null(tryCatch(ivt_layout(raw), error = function(e) NULL))
 }

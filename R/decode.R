@@ -39,16 +39,32 @@ NULL
 IVT_PRES_BITS  <- 2048L
 IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 
-# Bytes between the end of the presence record and the dense value run. The
-# marker's third byte (`b2`) gates it: 0x00 -> value run starts immediately;
-# otherwise the per-marker family-2 constant keyed on the marker's first byte
-# (0x88->4, 0xa8->10, 0xa2->34, 0xa4->18, 0x84->8, 0x82->16). Some tables realise
-# the high-nibble-A trailers as a 0xFF run, others as fixed padding -- all land at
-# the same offset. Validated across every marker the reference tables use.
+# Bytes between the end of the presence record and the dense value run, derived
+# structurally from the marker rather than a per-marker lookup. The marker's
+# third byte (`b2`) gates it: 0x00 -> the value run starts immediately (the
+# directory's page size is then exactly `4 + rec_bytes + nv*width`). Otherwise
+# the first byte's high nibble selects the pad size in value-slot units:
+#
+#   0x8*  ->  32 / width      (0x88 -> 4, 0x84 -> 8, 0x82 -> 16)
+#   0xa*  ->  64 / width + 2  (0xa8 -> 10, 0xa4 -> 18, 0xa2 -> 34)
+#
+# i.e. the 0x8 pages reserve 4 value slots of pad, the 0xa pages 8 slots plus
+# 2 bytes (some tables realise it as a 0xFF run, others as fixed padding -- all
+# land at the same offset). The formula reproduces the formerly hard-coded
+# six-marker table exactly and holds with zero violations on every page of every
+# supported table in the local corpus (~148,000 pages). An unrecognised width
+# code or high nibble aborts: decoding with a guessed trailer would silently
+# yield garbage values.
 ivt_value_trailer <- function(b0, b2) {
   if (b2 == 0x00L) return(0L)
-  tr <- IVT_F2_PAGE_TRAILER[[as.character(b0)]]
-  if (is.null(tr)) 4L else tr
+  w <- bitwAnd(b0, 0x0FL)
+  hi <- bitwAnd(b0, 0xF0L)
+  if (!w %in% c(2L, 4L, 8L) || !hi %in% c(0x80L, 0xa0L)) {
+    cli::cli_abort(
+      "Unrecognised IVT page marker byte {.val {sprintf('0x%02x', b0)}}: cannot derive the value-run start.",
+      class = "canivt_unknown_marker")
+  }
+  if (hi == 0x80L) 32L %/% w else 64L %/% w + 2L
 }
 
 # Derive the full layout from the header descriptor: how the dimensions split into
@@ -71,12 +87,20 @@ ivt_layout <- function(raw) {
     if (need > IVT_PRES_BITS) { straddle <- j; inner_block <- blk; break }
     blk <- need
   }
-  if (is.na(straddle)) {                            # whole table fits one record
-    straddle <- 1L; ipc_straddle <- cnt[1L]; win <- 1L
-  } else {
-    ipc_straddle <- IVT_PRES_BITS %/% inner_block
-    win <- as.integer(ceiling(cnt[straddle] / ipc_straddle))
+  if (is.na(straddle)) {
+    # The whole table fits one presence record ("no-straddle"). Every validated
+    # table has exactly one straddling dimension; the only corpus file reaching
+    # this branch is the incompatible 2001 "F"-series variant (97F0020XCB2001070,
+    # 14 geographies x 32 data bits), whose pages then decode to garbage
+    # (reverse-ordered directory, b2 == 0x00 pages that do not fit their
+    # directory size). Until a genuine no-straddle table validates this layout,
+    # abort rather than risk silently wrong values.
+    cli::cli_abort(
+      "No dimension straddles the {IVT_PRES_BITS}-bit page record; this layout is unvalidated.",
+      class = "canivt_no_straddle")
   }
+  ipc_straddle <- IVT_PRES_BITS %/% inner_block
+  win <- as.integer(ceiling(cnt[straddle] / ipc_straddle))
   inpage_idx <- straddle:m
   ipc <- cnt[inpage_idx]; ipc[1L] <- ipc_straddle   # cap the straddle dimension
   lay  <- ivt_f2_bit_layout(ipc)
@@ -101,18 +125,35 @@ ivt_layout <- function(raw) {
 
 # Decode one page at 0-based byte offset `off`: returns the present cells' in-page
 # tuples (1-based member ids, one column per in-page dimension in descriptor
-# order) and their values, or NULL if the page is empty.
-ivt_decode_page <- function(raw, off, lay) {
+# order) and their values, or NULL if the page is empty. `size` is the page's
+# allocated byte length from its directory entry (the two agreeing u16 fields):
+# the computed value run must fit inside it -- across the whole local corpus
+# `4 + rec_bytes + trailer + nv*width <= size` holds on every page (and exactly,
+# with equality, on the trailer-less b2 == 0x00 pages), so an overrun means the
+# marker was misread (wrong width or trailer) and the values would be garbage.
+ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
   w <- bitwAnd(b0, 0x0FL)
-  width <- if (w == 2L) 2L else if (w == 4L) 4L else 8L
+  if (!w %in% c(2L, 4L, 8L)) {
+    cli::cli_abort(
+      "Unrecognised IVT page marker byte {.val {sprintf('0x%02x', b0)}}: unknown value-width code.",
+      class = "canivt_unknown_marker")
+  }
+  width <- w
   is_float <- w == 8L
   vstart <- 4L + lay$rec_bytes + ivt_value_trailer(b0, b2)
 
   pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
   nv <- sum(pres)
   if (nv == 0L) return(NULL)
-  bytes <- raw[(off + vstart + 1L):(off + vstart + nv * width)]
+  vend <- vstart + nv * width
+  if ((!is.na(size) && vend > size) || off + vend > length(raw)) {
+    cli::cli_abort(c(
+      "IVT page at byte {off}: the computed value run ends at page byte {vend} but the directory allocates {size} bytes.",
+      i = "The page marker ({sprintf('%02x %02x %02x %02x', as.integer(raw[off + 1L]), as.integer(raw[off + 2L]), as.integer(raw[off + 3L]), as.integer(raw[off + 4L]))}) was likely misread (wrong value width or trailer)."
+    ), class = "canivt_page_overrun")
+  }
+  bytes <- raw[(off + vstart + 1L):(off + vend)]
   vals <- if (is_float) {
     readBin(bytes, "double", n = nv, size = 8L, endian = "little")
   } else {
@@ -146,13 +187,24 @@ ivt_decode <- function(raw, lay = NULL) {
   inpage_dim   <- lay$inpage_idx
 
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
+  skipped <- 0L; skipped_ex <- character()
   for (r in seq_len(nrow(coord))) {
     o <- idx0 + eidx[r] * 8L
     if (o + 8L > n) next
     off <- rd_u32(raw, o); s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
     if (s1 != s2 || s1 <= 0L || off < 1L || off + 4L > n) next
-    if (!ivt_f2_is_marker(raw, off)) next            # skip empty/padding slots
-    pg <- ivt_decode_page(raw, off, lay)
+    if (!ivt_f2_is_marker(raw, off)) {
+      # A valid directory entry (agreeing sizes, in-range offset) that does not
+      # point at a known page marker is a page variant we cannot decode -- on
+      # every validated table this never happens (0 entries corpus-wide except
+      # the 98-400-X2016203 `a2 01 03 0a` pages), so it must not pass silently:
+      # each skipped entry is a block of cells missing from the output.
+      skipped <- skipped + 1L
+      ex <- paste(sprintf("%02x", as.integer(raw[off + 1:4])), collapse = " ")
+      if (!ex %in% skipped_ex) skipped_ex <- c(skipped_ex, ex)
+      next
+    }
+    pg <- ivt_decode_page(raw, off, lay, size = s1)
     if (is.null(pg)) next
     np <- length(pg$vals)
     md <- matrix(0L, np, m)
@@ -167,6 +219,12 @@ ivt_decode <- function(raw, lay = NULL) {
     if (!all(keep)) { md <- md[keep, , drop = FALSE]; pg$vals <- pg$vals[keep] }
     if (!nrow(md)) next
     ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- pg$vals
+  }
+  if (skipped > 0L) {
+    ivt_fallback(paste(
+      "{skipped} page-directory entr{?y/ies} point{?s/} at unrecognised page",
+      "markers ({.val {skipped_ex}}); the cells of {skipped} page{?s} are",
+      "MISSING from the decode."), class = "canivt_skipped_pages")
   }
 
   if (ci == 0L) {

@@ -71,11 +71,17 @@ ivt_f2_dimensions <- function(raw) {
   # e.g. 98-10-0662's 6-member "French used at work" / "English used at work" --
   # get their own labels rather than collapsing onto one count key), then the
   # count-keyed block heuristics.
-  unresolved <- length(d$dims) > 1L &&
-    any(vapply(2:length(d$dims), function(i)
-      is.null(dirlab) || is.null(dirlab[[i]]), logical(1)))
+  miss <- if (length(d$dims) > 1L)
+    which(vapply(2:length(d$dims), function(i)
+      is.null(dirlab) || is.null(dirlab[[i]]), logical(1))) + 1L
+  else integer(0)
   labels <- list(); name_lut <- list()
-  if (unresolved) {
+  if (length(miss)) {
+    miss_names <- vapply(d$dims[miss], `[[`, "", "name")
+    ivt_fallback(paste(
+      "Member labels for {length(miss_names)} dimension{?s} ({.val {miss_names}})",
+      "did not resolve from the header slot directories; falling back to the",
+      "codebook marker / count-keyed label scans."))
     want <- vapply(d$dims[-1L], `[[`, 1L, "count")
     labels <- ivt_f2_dim_member_labels(raw, want = want)      # count-keyed fallback
     by_name <- ivt_f2_marker_labels(raw)
@@ -134,11 +140,28 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
   span <- NULL
   md <- ivt_f2_master_dir(raw)
   en <- rd_u32(raw, IVT_HDR_TITLE_EN_PTR)
-  if (!is.null(md) && !is.na(en) && en > 0) {
-    r <- which(md[, "off"] == en)
-    if (length(r) == 1L)
-      span <- c(md[r, "off"] + 1L, min(length(raw), md[r, "off"] + md[r, "len"]))
+  if (!is.null(md)) {
+    if (!is.na(en) && en > 0) {
+      r <- which(md[, "off"] == en)
+      if (length(r) == 1L)
+        span <- c(md[r, "off"] + 1L, min(length(raw), md[r, "off"] + md[r, "len"]))
+    }
+    if (is.null(span)) {
+      # In the legacy layout the `@48` pointer targets the small out-of-line
+      # TITLE block, not the notes blob (1003011: en = 1458, no entry matches),
+      # so locate the notes entry within the master directory by its
+      # "Footnotes" section header, largest entries first (the two big entries
+      # are the EN/FR identity/notes blobs). Still directory-bounded: only the
+      # directory's own entries are searched, never a raw byte window.
+      for (r in order(md[, "len"], decreasing = TRUE)) {
+        off <- md[r, "off"]; ln <- md[r, "len"]
+        if (ln < 64L || off + ln > length(raw)) next
+        txt <- raw_to_latin1(raw[(off + 1L):(off + ln)])
+        if (grepl("(^|\r\n)Footnotes\r\n", txt)) { span <- c(off + 1L, off + ln); break }
+      }
+    }
   }
+  fellback <- is.null(span)
   if (is.null(span)) span <- c(max(1L, length(raw) - tail_bytes + 1L), length(raw))
   lines <- strsplit(raw_to_latin1(raw[span[1]:span[2]]), "\r\n", fixed = TRUE)[[1]]
   lines <- trimws(lines)
@@ -152,6 +175,11 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
     if (length(m) != 3L) break             # reached the next section header
     out[[length(out) + 1L]] <- list(language = "en",
                                     number = as.integer(m[2]), text = trimws(m[3]))
+  }
+  if (fellback && length(out)) {
+    ivt_fallback(paste(
+      "The master directory did not resolve the notes blob; the legacy",
+      "footnotes were parsed from a trailing {tail_bytes}-byte window."))
   }
   out
 }
@@ -212,7 +240,14 @@ ivt_f2_footnotes <- function(raw, dims = NULL) {
   dim_names <- if (length(dims)) vapply(dims, `[[`, "", "name") else NULL
   fn <- ivt_f2_dir_footnotes(raw, dim_names = dim_names)
   if (length(fn)) return(fn)
-  ivt_footnotes(raw, max(0L, length(raw) - 200000L))
+  sc <- ivt_footnotes(raw, max(0L, length(raw) - 200000L))
+  if (length(sc)) {
+    ivt_fallback(paste(
+      "The per-dimension slot directories list no footnotes but the tail text",
+      "scan found {length(sc)}; using the scanned footnotes (no dimension",
+      "attribution)."))
+  }
+  sc
 }
 
 # Label a decoded cell table (any family): geography by name and/or uid, each data

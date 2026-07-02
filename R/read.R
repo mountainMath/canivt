@@ -22,7 +22,10 @@ ivt_family <- function(raw) {
   if (length(raw) >= IVT_IDX0_DEFAULT + 16L && ivt_geography_count(raw) > 0L) return(1L)
   # family 2 requires both a page directory and a descriptor the decoder can use;
   # other `04 00 20 00` products expose a directory but an undecoded descriptor.
-  if (!is.null(ivt_f2_find_directory(raw)) && ivt_f2_decodable(raw)) return(2L)
+  # The probe runs quietly: a fallback engaging during detection of a file that
+  # is then rejected anyway is noise, not a read.
+  if (!is.null(ivt_quietly(ivt_f2_find_directory(raw))) && ivt_f2_decodable(raw))
+    return(2L)
   NA_integer_
 }
 
@@ -34,6 +37,15 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' Parses a Statistics Canada Beyond 20/20 `.ivt` table straight from its bytes:
 #' both the data cells and the codebook (dimension members, geographic
 #' identifiers, footnotes). No companion CSV or metadata download is required.
+#'
+#' Every primary read is positional (header pointers, block directories, framed
+#' value entries). When one does not resolve and a content-heuristic fallback
+#' supplies values instead -- or when directory entries point at page variants
+#' that cannot be decoded -- a classed warning (`canivt_fallback` /
+#' `canivt_skipped_pages`) is raised naming the affected read. Set
+#' `options(canivt.strict = TRUE)` to turn these into errors: on a file layout
+#' this package has not been validated against, the fallback paths are the ones
+#' most likely to misread silently.
 #'
 #' @param path Path to an `.ivt` file.
 #' @param geo_attributes For family-2 tables only: if `TRUE`, decode the full
