@@ -490,11 +490,14 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
 }
 
 # Light geography labels (name + uid) for the metadata path, family-agnostic and
-# located from the metadata, not the content. Three layouts, in priority order:
-#   1. a single clean block per attribute (schema- or content-addressed) -> the
-#      small modern single-block tables (98-10-0241/0077); names + DGUIDs;
-#   2. the marker-anchored inline "name (code) flag" codebook -> the pre-DGUID
-#      tables (1991, 2006, 2011); bilingual names + character GEOUIDs;
+# located from the metadata, not the content. Layouts, in priority order:
+#   1. the inline "name (code) flag" codebook -> the pre-DGUID tables (1991, 2006,
+#      2011, 2016); positional from the dim-1 block directory, else marker-anchored;
+#      bilingual names + character GEOUIDs;
+#   2. single-chunk schema'd tables (98-10-0241/0077) -> the directory-driven
+#      positional attribute read (`ivt_f2_geo_attrs_dir()`, untrimmed), with the
+#      single-block schema/content readers (`ivt_f2_geo_simple()`) as fallback;
+#      names + DGUIDs;
 #   3. the fast DGUID scan -> the large chunked modern tables (98-10-0023/0129):
 #      uid only (names need the slower read_ivt(geo_attributes = TRUE) path).
 # Returns list(geo_name, geo_uid) where either element may be NULL.
@@ -508,7 +511,17 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   inl <- ivt_f2_geo_inline(raw)
   if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo))
     return(list(geo_name = inl$geo_name, geo_uid = inl$geouid))
-  # 1./3. schema-named single block (2021 DGUID) or the content-based array detector
+  # 1. single-chunk schema'd tables (98-10-0241/0077): the directory-driven
+  #    positional attribute read is cheap here (one group of one chunk) and fully
+  #    metadata-addressed; trim = FALSE keeps the hierarchy indentation the
+  #    single-block reader preserves. Larger tables skip this (the full read costs
+  #    ~20 s on a 63k-geography codebook; the DGUID scan below is 3x faster).
+  if (!is.na(n_geo) && n_geo <= 256L) {
+    at <- ivt_f2_geo_attrs_dir(raw, trim = FALSE)
+    if (!is.null(at) && nrow(at) == n_geo && !anyNA(at$geo_name))
+      return(list(geo_name = at$geo_name, geo_uid = at$dguid))
+  }
+  # 1b. schema-named single block (2021 DGUID) or the content-based array detector
   simple <- ivt_f2_geo_simple(raw, n_geo)
   if (!is.null(simple)) {
     geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
@@ -823,8 +836,10 @@ ivt_f2_is_ordinal <- function(t) {
 # `ivt_f2_geo_attributes()`, or NULL to signal the caller to fall back to the stride
 # path (no block directory, no schema, or a value-block total that does not match
 # the regular `2*(nfield+1)*sum(sizes)` count -- e.g. a layout whose directory drops
-# a trailing partial, which the stride path handles).
-ivt_f2_geo_attrs_dir <- function(raw) {
+# a trailing partial, which the stride path handles). `trim = FALSE` keeps the
+# stored label whitespace (the single-block tables indent `geo_name` by hierarchy
+# depth, which `ivt_label_depth()` reads; the metadata light path relies on it).
+ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
   schema <- ivt_f2_geo_schema(raw); if (is.null(schema) || !length(schema)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw); if (is.na(n_geo) || n_geo < 1L) return(NULL)
@@ -832,7 +847,9 @@ ivt_f2_geo_attrs_dir <- function(raw) {
   vb <- vector("list", nrow(d)); k <- 0L
   for (r in seq_len(nrow(d))) {
     t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
-    if (length(t) >= 3L && !ivt_f2_is_ordinal(t)) { k <- k + 1L; vb[[k]] <- trimws(t) }
+    if (length(t) >= 3L && !ivt_f2_is_ordinal(t)) {
+      k <- k + 1L; vb[[k]] <- if (trim) trimws(t) else t
+    }
   }
   length(vb) <- k
   sizes <- ivt_f2_geo_group_sizes(n_geo)
@@ -1088,45 +1105,141 @@ IVT_F2_INLINE_PAT <- paste0(
 
 # Byte range [start, end) of the geography dimension's codebook region, anchored on
 # its `81 02 02 00` doubled-name marker (the same anchor used for every data
-# dimension) and bounded by the next dimension marker (or EOF). Geography is dim 1,
-# so its marker is the first; we match it by name to be safe. Searching from the
-# header's codebook pointer (@572) keeps this correct for the large files whose
-# geography codebook sits far from EOF (e.g. the 2006 table's marker at ~32 MB).
-# Returns c(start, end) or NULL when the descriptor or the marker is absent.
+# dimension). Preferred bound: the geography block directory's own byte span
+# (`ivt_f2_geo_dir_span()`, dimdir.R) -- the marker is searched only inside it and
+# the region ends at the span end, so the bound comes from the file's metadata.
+# Fallback (no directory): scan from the header's codebook pointer (@572) -- which
+# keeps this correct for the large files whose geography codebook sits far from EOF
+# (e.g. the 2006 table's marker at ~32 MB) -- and end at the next dimension marker
+# (or EOF). Returns c(start, end) or NULL when the descriptor or marker is absent.
 ivt_f2_geo_marker_region <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(NULL)
   geo <- ivt_f2_geo_dim(d$dims)
   if (is.null(geo) || is.null(geo$name) || is.na(geo$name)) return(NULL)
+  is_geo_mk <- function(nm) {
+    if (is.na(nm)) return(FALSE)
+    k <- min(nchar(nm), nchar(geo$name))
+    k >= 4L && substr(nm, 1L, k) == substr(geo$name, 1L, k)
+  }
+  span <- ivt_f2_geo_dir_span(raw)
+  if (!is.null(span) && span[2] > span[1]) {
+    win <- raw[(span[1] + 1L):span[2]]
+    markers <- ivt_f2_codebook_dim_markers(win, 0L)
+    hit <- which(vapply(markers$name, is_geo_mk, logical(1)))
+    if (length(hit)) return(c(span[1] + markers$offset[hit[1]], span[2]))
+    # marker not inside the directory span -> fall through to the unbounded scan
+  }
   cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
   start <- if (is.na(cb) || cb < 1) 0L else max(0L, as.integer(cb) - 8000L)
   markers <- ivt_f2_codebook_dim_markers(raw, start)
   if (!nrow(markers)) return(NULL)
-  geo_mk <- vapply(markers$name, function(nm) {
-    if (is.na(nm)) return(FALSE)
-    k <- min(nchar(nm), nchar(geo$name))
-    k >= 4L && substr(nm, 1L, k) == substr(geo$name, 1L, k)
-  }, logical(1))
-  hit <- which(geo_mk)
+  hit <- which(vapply(markers$name, is_geo_mk, logical(1)))
   if (!length(hit)) return(NULL)
   geomk <- markers$offset[hit[1]]
   others <- markers$offset[markers$offset > geomk]
   c(geomk, if (length(others)) min(others) else length(raw))
 }
 
+# Positional (directory-driven) reader for the inline-codebook geography. The
+# legacy layout stores, per group of `G` 256-member chunks (group sizes
+# `ivt_f2_geo_group_sizes()`, same 1,1,2,4,... sequence as the modern chunked
+# codebook), four attribute runs of `G` chunk blocks each, in directory order:
+#
+#   [combined "name (code) flag" x G]  (one language)
+#   [combined "name (code) flag" x G]  (the other language)
+#   [name array x G]                   (accent-stripped search names -- NOT display)
+#   [code array x G]                   (bare GEOUIDs)
+#
+# interleaved with framing entries, per-4-chunk index blocks (1024 records) and the
+# ordinal delimiters, all of which are filtered out structurally (record count in
+# [3, 256], non-ordinal). Reading the runs in directory order gives the TRUE member
+# order -- the byte-ascending block scan + first-appearance dedup of the regex
+# fallback scrambles chunks that are stored out of byte order (on 1003011 the last
+# ~2,435 members' codes were misordered; the directory read matches the StatCan
+# Beyond 20/20 viewer's member list 41,859/41,859, names AND codes).
+#
+# Per member: `geo_name`/`dqf_code` are parsed from the combined block (the display
+# name keeps its accents there; the name array is accent-stripped so it is only a
+# cross-check), `geouid` is the code array read positionally -- and is REQUIRED to
+# equal the combined block's parsed code, so a layout whose runs are ordered
+# differently falls back rather than misreads. Returns the `ivt_f2_geo_inline()`
+# tibble, or NULL (schema'd/modern layout, no directory, or any structural gate
+# failing -> the caller falls back to the regex scan).
+ivt_f2_geo_inline_dir <- function(raw) {
+  if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern layout: not inline
+  d <- ivt_f2_dim_dir(raw, 1L)
+  if (is.null(d)) return(NULL)
+  n_geo <- ivt_f2_geo_count(raw)
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  sizes <- ivt_f2_geo_group_sizes(n_geo)
+  need <- 4L * sum(sizes)
+  # chunk value blocks in directory (logical) order
+  vb <- vector("list", nrow(d)); k <- 0L
+  for (r in seq_len(nrow(d))) {
+    t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
+    if (length(t) >= 3L && length(t) <= 256L && !ivt_f2_is_ordinal(t)) {
+      k <- k + 1L; vb[[k]] <- t
+      if (k == need) break                             # trailing blocks are not ours
+    }
+  }
+  if (k < need) return(NULL)
+  # walk the groups; every chunk's record count must match its expected size
+  # (256, or the final partial), otherwise the layout is not this one
+  chunk_of <- function(gi) {                           # expected sizes of group gi's chunks
+    first <- sum(sizes[seq_len(gi - 1L)])              # global chunk index of chunk 1 - 1
+    vapply(seq_len(sizes[gi]), function(j)
+      min(256L, n_geo - (first + j - 1L) * 256L), 1L)
+  }
+  comb_a <- character(0); comb_b <- character(0); codes <- character(0)
+  pos <- 1L
+  for (gi in seq_along(sizes)) {
+    G <- sizes[gi]; want <- chunk_of(gi)
+    run <- function() {
+      b <- vb[pos:(pos + G - 1L)]; pos <<- pos + G
+      if (!identical(vapply(b, length, 1L), want)) return(NULL)
+      unlist(b)
+    }
+    a <- run(); b <- run(); nm_run <- run(); cd_run <- run()
+    if (is.null(a) || is.null(b) || is.null(nm_run) || is.null(cd_run)) return(NULL)
+    comb_a <- c(comb_a, a); comb_b <- c(comb_b, b); codes <- c(codes, trimws(cd_run))
+  }
+  # English combined run by frscore over the members where the two copies differ
+  dd <- which(comb_a != comb_b)
+  comb <- if (ivt_f2_frscore(comb_a[dd]) <= ivt_f2_frscore(comb_b[dd])) comb_a else comb_b
+  m <- regmatches(comb, regexec(IVT_F2_INLINE_PAT, comb))
+  okm <- vapply(m, function(gg) length(gg) >= 4L, logical(1))
+  if (mean(okm) < 0.8) return(NULL)                    # run 1 is not a combined block
+  nm <- fl <- rep(NA_character_, n_geo); cd <- nm
+  nm[okm] <- vapply(m[okm], `[`, "", 2L)
+  cd[okm] <- vapply(m[okm], `[`, "", 3L)
+  fl[okm] <- vapply(m[okm], `[`, "", 4L)
+  # the positional code array must agree with the combined block's parsed code
+  if (!all(codes[okm] == cd[okm])) return(NULL)
+  g <- tibble::tibble(member_id = seq_len(n_geo), geo_name = trimws(nm),
+                      geouid = codes, dqf_code = fl)
+  ivt_f2_check_geo_count(raw, nrow(g))
+  g
+}
+
 #' Geography table for an inline-codebook (pre-DGUID) family-2 IVT.
 #'
 #' Returns a tibble with one row per geography (member order) and columns
 #' `geo_name` (often a bilingual "EN | FR" label), `geouid` (bare geographic code,
-#' character) and `dqf_code` (data-quality flag). The blocks scanned are restricted
-#' to the geography dimension's marker region, so geography is located from the
-#' metadata rather than by content. Returns NULL when there is no geography marker
-#' region (modern DGUID layouts). Validated exact vs the StatCan member metadata for
-#' 1003011 (1991), 98-312-XCB2011033 (2011) and 97-563-XCB2006072 (2006).
+#' character) and `dqf_code` (data-quality flag). Primary read: positionally from
+#' the geography dimension's block directory (`ivt_f2_geo_inline_dir()` -- true
+#' member order, no dedup). Fallback: the marker-region block scan + regex parse
+#' with first-appearance dedup (which can misorder chunks stored out of byte
+#' order). Returns NULL when there is no geography marker region (modern DGUID
+#' layouts). Validated vs the StatCan member metadata for 1003011 (1991, all
+#' 41,859 members exact incl. the tail the dedup path misordered),
+#' 98-312-XCB2011033 (2011) and 97-563-XCB2006072 (2006).
 #'
 #' @keywords internal
 #' @noRd
 ivt_f2_geo_inline <- function(raw) {
+  g <- ivt_f2_geo_inline_dir(raw)
+  if (!is.null(g)) return(g)
   region <- ivt_f2_geo_marker_region(raw)
   if (is.null(region)) return(NULL)
   blocks <- ivt_find_member_blocks(raw, max(0L, region[1] - 50L), min_records = 3L)

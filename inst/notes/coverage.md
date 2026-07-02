@@ -208,15 +208,22 @@ units) and the directory entries (8-byte entry units).
   census-tract code (2011 `0010001.00`), never a DGUID here. The type abbreviation admits
   accents (Quebec `MÉ`), and a trailing `(pct%)` non-response rate (the 2016
   single-census tables) is tolerated. Validated exact on member counts: **1991** 41,859
-  (byte-identical to the former whole-file scan), **2006 (97-563-XCB2006072)** 57,523
-  dissemination areas, **2011 (98-312-XCB2011033)** 5,447 census tracts, **2016
-  (98-400-X2016387)** 174 (single-block; its uid was previously empty — no DGUID array,
-  and the content detector could not recover the bare-code uid). The geography count is
-  read from the descriptor with the per-type width tag (`0x10`/`0x0d` → u16; 2011's `0x0d`
-  was misread as u8 = 21 before). `ivt_f2_geo_light()` resolves every family through one
-  marker-anchored entry: **combined-block reader** (schema-absent) → **schema/content
-  single-block** (2021 small) → **DGUID scan** (2021 chunked). 1991's default tidy now
-  labels geography by name + GEOUID (was member-id only).
+  (now **positionally from the block directory** — see the section-pointer table below;
+  the scan+dedup fallback had misordered the last 2,435 members), **2006
+  (97-563-XCB2006072)** 57,523 dissemination areas, **2011 (98-312-XCB2011033)** 5,447
+  census tracts, **2016 (98-400-X2016387)** 174 (single-block; its uid was previously
+  empty — no DGUID array, and the content detector could not recover the bare-code uid).
+  The geography count is read from the descriptor with the per-type width tag
+  (`0x10`/`0x0d` → u16; 2011's `0x0d` was misread as u8 = 21 before).
+  `ivt_f2_geo_light()` resolves every family through one metadata-anchored entry:
+  **combined-block reader** (schema-absent; directory-positional first) →
+  **directory-driven positional attribute read** (single-chunk schema'd tables,
+  `ivt_f2_geo_attrs_dir(trim = FALSE)`, byte-identical to the single-block readers,
+  which remain the fallback) → **DGUID scan** (2021 chunked). The marker region that
+  bounds the scans is itself now **bounded by the geography directory's byte span**
+  (`ivt_f2_geo_dir_span()`) when the slot table resolves, with the codebook-pointer
+  marker walk as fallback. 1991's default tidy now labels geography by name + GEOUID
+  (was member-id only).
   **Stage 3 (the last split): done.** The **2021 chunked DGUID** tables (98-10-0023
   / 0129) are now folded under the marker+schema view too, **byte-identical on all
   63,404 DGUIDs and every attribute** for both files. Nothing on the chunked read is
@@ -433,11 +440,21 @@ directory slot table**:
   text-scan cannot provide. 98-10-0241's 20 footnote entries = the known 10 EN +
   10 FR, now attributed to Age/Household type/Period/Housing/Tenure.
 - **The 1991 legacy file has the same table** (`@824` → 1,097-entry geography
-  directory; `@838` Age; `@852` Sex). Its geography directory exposes, per
-  256-member chunk, the combined `"name (code) flag"` block (EN row, FR row) plus
-  **separate clean bilingual-name and bare-GEOUID array blocks** — so the inline
-  regex parse (`IVT_F2_INLINE_PAT`) and the first-appearance code dedup can be
-  replaced by positional reads with deterministic member ids.
+  directory; `@838` Age; `@852` Sex). Its geography directory exposes, per group
+  of `G` 256-member chunks (the same `1,1,2,4,…` group sizes as the modern chunked
+  codebook), four attribute runs of `G` chunk blocks: the combined
+  `"name (code) flag"` block (one run per language), a **separate clean name
+  array** (accent-stripped search names — `Malpeque`, not the display `Malpèque`)
+  and a **bare-GEOUID code array**, interleaved with framing, per-4-chunk index
+  blocks (1024 records) and ordinal delimiters. **`ivt_f2_geo_inline_dir()` now
+  reads these runs positionally** (record-count-validated per chunk; uid = the
+  code array, required to equal the combined block's parsed code; name/flag from
+  the combined block, which keeps the accents): the byte-ascending scan +
+  first-appearance dedup path had silently **misordered the last 2,435 members'
+  names and uids** (the tail chunks are stored out of byte order) — the positional
+  read matches the StatCan Beyond 20/20 viewer's member list **41,859/41,859**
+  (names and codes). The regex scan survives only as the fallback for layouts
+  whose directory does not resolve.
 - **`@712`** points at the data-quality-flag legend directory (`A…E/R/P` texts, EN
   + FR); a symbol legend directory ("Not available for a specific reference
   period", …) sits nearby (reference slot not yet identified). **`@992`/`@1000`**

@@ -151,6 +151,18 @@ ivt_f2_dim_dir_labels <- function(raw) {
   out
 }
 
+# Byte span [start, end) covered by the geography dimension's block directory --
+# the metadata-declared bound of the whole geography codebook (dictionary, member
+# ids, ordinals, marker, label/attribute blocks, footnotes). Used to bound the
+# content scans (`ivt_f2_geo_marker_region()`, and through it the DGUID byte scan)
+# by the file's own metadata instead of a marker-to-marker window. Returns
+# c(start, end) or NULL when dimension 1's directory does not resolve.
+ivt_f2_geo_dir_span <- function(raw) {
+  d <- ivt_f2_dim_dir(raw, 1L)
+  if (is.null(d)) return(NULL)
+  c(min(d[, "off"]), min(length(raw), max(d[, "off"] + d[, "len"])))
+}
+
 # Footnotes read from the per-dimension slot directories, each attributed to its
 # owning dimension (`dimension` = the full display name when `dim_names` is
 # given, else the descriptor name). Every footnote is stored as an entry of the

@@ -60,7 +60,7 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
 | `container-f2.R`| family-2 page-directory finder (used by the metadata path) + per-page value params (`IVT_F2_PAGE_TRAILER` per marker); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
 | `decode-f2.R`   | shared presence-bitmap primitives used by `ivt_layout()`/`ivt_decode()` for **every** table (the `ivt_f2_` prefix is historical): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()` (power-of-two-nested strides), `ivt_f2_cell_grid()` (cells in dense value order), `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read). |
 | `dimdir.R`      | **the header per-dimension directory slot table** — the primary, purely metadata-driven anchor for the whole codebook. Header `@824 + 14·(k−1)` holds a 14-byte record per descriptor dimension `k` (`[u32 dir_ptr][u32 ?][u32 n_entries][2B]`); `ivt_f2_dim_slots()` reads the table, `ivt_f2_dim_dir(raw, k)` resolves dimension `k`'s **block directory** (`[u32 off][u16 len][u16 len]` entries; two indirection depths — the big chunked geo dirs route slot → struct → directory), self-validated against the slot's `n_entries`. Each directory lists that dimension's codebook in logical order: dictionary/schema, member-id table, ordinals, the `81 02 02 00` doubled-name marker, the EN then FR member blocks, then **that dimension's footnotes**. `ivt_f2_dim_dir_labels()` reads every data dimension's labels positionally (marker entry matched to the descriptor name, then the first two member-array entries after it, trailing `count` records, EN via `ivt_f2_frscore()`) — byte-identical to the marker-scan on all 17 data dims of 0241/0077/0023/0129/1991, no tail window; `ivt_f2_dir_footnotes()` reads footnotes **with dimension attribution** (a `dimension` field; sets equal to the tail scan on all five tables). The 1991 legacy format carries the same table. |
-| `codebook-f2.R` | **the unified codebook** (the `ivt_f2_` prefix is historical — used for every family): member-ordered geography DGUIDs (fast vectorised DGUID-shape Pascal-string scan, first-appearance dedup); `ivt_f2_geo_simple()` (cheap single-block geography names+DGUIDs for small/family-1 tables, NULL for the chunked large tables) — **schema-driven and content-free**: geography is dimension 1, located by its own `81 02 02 00` doubled-name marker (like every data dim), and its attribute arrays are named by the file's **geography attribute schema** `ivt_f2_geo_schema()` (the stored `GEO_NAME·GEO_TYPE_DESC·…·DGUID·…` field list), so `GEO_NAME`/`DGUID` are addressed **by slot/name**, not by sniffing a `"Canada"` first entry or a `"2021…"` prefix (DGUIDs byte-identical to the legacy scan on 0241/0077; `GEO_NAME` is the canonical short name). Falls back to the content-based `ivt_geo_arrays()` for layouts whose attribute arrays aren't clean `n_geo`-blocks (e.g. 0662); data-dimension member labels `ivt_f2_dim_member_labels(raw, want)` (anchored on the codebook **doubled-name marker** `81 02 02 00` via `ivt_f2_codebook_dim_markers()` + `ivt_f2_marker_labels()`: each dimension's `81 02 02 00`+name header sits right after its EN block, so labels are matched **by name** and taken as that block's trailing `count` records — robust to leading framing records, e.g. 0077 Ages, and to ordinal-less short dims, e.g. the 2-member reference period Year=`2020`/`2015`; the old ordinal-anchored + FR/EN-pair scans remain as fallback); the geography block directory `ivt_f2_geo_block_dir()` is now **dimension 1's slot directory** (`ivt_f2_dim_dir(raw, 1)`, `dimdir.R`), with the old `IVT_F2_DIR_SLOTS` guess loop as fallback; the full **geography attribute table** `ivt_f2_geo_attributes()` — **directory-driven**: `ivt_f2_geo_attrs_dir()` reads every attribute **positionally** from the file's own metadata block directory (blocks in logical order, per group `[display + schema fields]` × EN-then-FR runs of `G` chunks; group sizes `ivt_f2_geo_group_sizes()`, ordinals dropped `ivt_f2_is_ordinal()`), **no strides / no reverse-root override / no content-located TNR**; gated on the regular block count and falling back to the legacy **stride** path (attribute-major growing groups via the DGUID anchor `group_lo = d0 − dguid_slot·2G`; per-attribute EN-then-FR slots; `ivt_f2_geo_root_dir()` root override) only when the directory lists the codebook irregularly (e.g. 98-10-0013 ADA). `DQF_NOTE` keeps the `ivt_f2_derive_text()` majority-vote from `DQF_CODE`; `ivt_f2_geo_inline()` the **combined-block reader** for every **schema-absent** layout (1991/2006/2011/2016: `"name (code) [type_abbr] flag [(pct%)]"` blocks; bilingual names; character GEOUIDs incl. dotted census-tract codes and bare 2016 codes) — **marker-anchored**: parses only the geography dimension's `81 02 02 00` marker region (`ivt_f2_geo_marker_region()`), not the whole file; returns NULL for schema'd tables (they have no combined block). `ivt_f2_geo_light()` resolves all families through one entry (combined-block → schema/content single-block → DGUID scan). Metadata-driven entry point `ivt_f2_geographies()` prefers the combined-block reader, else the DGUID attribute table, returns a unified `member_id/geo_name/geo_uid/…` table, validated against the header (`ivt_f2_check_geo_count()`). |
+| `codebook-f2.R` | **the unified codebook** (the `ivt_f2_` prefix is historical — used for every family): member-ordered geography DGUIDs (fast vectorised DGUID-shape Pascal-string scan, first-appearance dedup); `ivt_f2_geo_simple()` (cheap single-block geography names+DGUIDs for small/family-1 tables, NULL for the chunked large tables) — **schema-driven and content-free**: geography is dimension 1, located by its own `81 02 02 00` doubled-name marker (like every data dim), and its attribute arrays are named by the file's **geography attribute schema** `ivt_f2_geo_schema()` (the stored `GEO_NAME·GEO_TYPE_DESC·…·DGUID·…` field list), so `GEO_NAME`/`DGUID` are addressed **by slot/name**, not by sniffing a `"Canada"` first entry or a `"2021…"` prefix (DGUIDs byte-identical to the legacy scan on 0241/0077; `GEO_NAME` is the canonical short name). Falls back to the content-based `ivt_geo_arrays()` for layouts whose attribute arrays aren't clean `n_geo`-blocks (e.g. 0662); data-dimension member labels `ivt_f2_dim_member_labels(raw, want)` (anchored on the codebook **doubled-name marker** `81 02 02 00` via `ivt_f2_codebook_dim_markers()` + `ivt_f2_marker_labels()`: each dimension's `81 02 02 00`+name header sits right after its EN block, so labels are matched **by name** and taken as that block's trailing `count` records — robust to leading framing records, e.g. 0077 Ages, and to ordinal-less short dims, e.g. the 2-member reference period Year=`2020`/`2015`; the old ordinal-anchored + FR/EN-pair scans remain as fallback); the geography block directory `ivt_f2_geo_block_dir()` is now **dimension 1's slot directory** (`ivt_f2_dim_dir(raw, 1)`, `dimdir.R`), with the old `IVT_F2_DIR_SLOTS` guess loop as fallback; the full **geography attribute table** `ivt_f2_geo_attributes()` — **directory-driven**: `ivt_f2_geo_attrs_dir()` reads every attribute **positionally** from the file's own metadata block directory (blocks in logical order, per group `[display + schema fields]` × EN-then-FR runs of `G` chunks; group sizes `ivt_f2_geo_group_sizes()`, ordinals dropped `ivt_f2_is_ordinal()`), **no strides / no reverse-root override / no content-located TNR**; gated on the regular block count and falling back to the legacy **stride** path (attribute-major growing groups via the DGUID anchor `group_lo = d0 − dguid_slot·2G`; per-attribute EN-then-FR slots; `ivt_f2_geo_root_dir()` root override) only when the directory lists the codebook irregularly (e.g. 98-10-0013 ADA). `DQF_NOTE` keeps the `ivt_f2_derive_text()` majority-vote from `DQF_CODE`; `ivt_f2_geo_inline()` the **combined-block reader** for every **schema-absent** layout (1991/2006/2011/2016: `"name (code) [type_abbr] flag [(pct%)]"` blocks; bilingual names; character GEOUIDs incl. dotted census-tract codes and bare 2016 codes) — **positional first** (`ivt_f2_geo_inline_dir()`: per group of `G` chunks four directory-ordered runs [combined ×2 languages, accent-stripped name array, bare-code array], chunk record counts validated, uid = code array cross-checked against the combined block's parsed code — fixes the 2,435-member tail misorder of the dedup scan on 1991, validated 41,859/41,859 vs the B2020 viewer), falling back to the marker-region block scan (`ivt_f2_geo_marker_region()`, itself bounded by the geography directory's byte span `ivt_f2_geo_dir_span()` when the slot table resolves); returns NULL for schema'd tables (they have no combined block). `ivt_f2_geo_light()` resolves all families through one entry (combined-block → directory-positional attrs read for single-chunk schema'd tables (`ivt_f2_geo_attrs_dir(trim = FALSE)`, byte-identical to `ivt_f2_geo_simple()`, which stays as fallback) → DGUID scan). Metadata-driven entry point `ivt_f2_geographies()` prefers the combined-block reader, else the DGUID attribute table, returns a unified `member_id/geo_name/geo_uid/…` table, validated against the header (`ivt_f2_check_geo_count()`). |
 | `read-f2.R`     | **the unified metadata + tidy**: `ivt_f2_metadata()` (descriptor dimensions + member labels + geography names/uids + footnotes, for every family); `ivt_f2_vl_pairs()` + `ivt_f2_dim_name()` (full dimension names from the header Variable List, matched to the descriptor **by count** since display order ≠ storage order); `ivt_f2_dimensions()` (uniform per-dim `name/count/type/is_geography/members`; labels **slot-directory-first** via `ivt_f2_dim_dir_labels()`, marker/count scans only for dims the directories miss); `ivt_f2_footnotes()` (slot-directory footnotes with `dimension` attribution, tail-scan fallback); `ivt_f2_tidy()` (label geography by name/uid + data dims by member names). |
 | `codebook.R`    | shared codebook primitives (used by `codebook-f2.R`/`dimdir.R`): `ivt_find_member_blocks()` Pascal-run scanner, `ivt_header_text()` / `ivt_table_info()` identity, `ivt_geo_arrays()` (clean name/DGUID blocks), `ivt_footnote_texts()` text-run extraction inside a byte window (used per directory entry and by the `ivt_footnotes()` tail-scan fallback). (The old hard-coded family-1 `IVT_DIMS` / `ivt_read_codebook()` are gone — metadata is now fully descriptor-driven.) |
 | `read.R`        | public `read_ivt()`, `ivt_metadata()`, `ivt_tidy()`, `print.ivt` — **one path for all families** (decode via `ivt_decode()`, metadata via `ivt_f2_metadata()`; `family` now only tags provenance and gates the `geo_attributes` option); `ivt_family()` detector + `ivt_is_supported()` gate. |
@@ -234,7 +234,8 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     from the block's **structural format**. The uid is **character** — a bare code
     (2016 `01`, 2006 `1001105`), a dotted census-tract code (2011 `0010001.00`), never
     a DGUID here. Admits accented type abbrevs (`MÉ`) and the 2016 trailing `(pct%)`.
-    Exact member counts: 1991 41,859 (byte-identical to the former scan), 2006 57,523,
+    Exact member counts: 1991 41,859 (positional; the former scan misordered the
+    last 2,435 members), 2006 57,523,
     2011 5,447, 2016 (98-400-X2016387) 174 (single-block; its uid was previously empty).
   - Geography **count** from the descriptor per-type width tag (`0x10`/`0x0d`→u16, else
     u8; 2011's `0x0d` was misread as u8 = 21). 1991's default tidy now labels geography
@@ -358,9 +359,13 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     `tnr_short_form` is exact (stride root-override was wrong for 237). Residual (unchanged,
     pre-existing): 0478's last-group code partials (`geo_name`/`alt_geo_code`, 153 members)
     stay NA — the block scanner fragments that code chunk.
-- **Family-2 geography DGUID member-ordering** has a few tail artifacts
-  (`ivt_f2_geo_dguids()` first-appearance dedup) — the *cell* decode by member id is
-  complete and exact, but a handful of DGUID *labels* near the end can be misordered.
+- **Geography member-ordering tail artifacts — FIXED.** The byte-ascending scans
+  with first-appearance dedup misorder chunks stored out of byte order: on 1991
+  the last **2,435** members' names/uids were silently wrong — the positional
+  directory read (`ivt_f2_geo_inline_dir()`) matches the B2020 viewer's member
+  list 41,859/41,859. The modern `ivt_f2_geo_dguids()` scan is validated equal to
+  the positional `ivt_f2_geo_attrs_dir()` DGUIDs on 0023 and 0129 (0 mismatches),
+  and its marker-region bound is now the geography directory's byte span.
 - The older **2016-census `98-400-X` / 2001-2006 "F"-series** products are a
   **different container variant** (e.g. `98-400-X2016019`: descriptor framing the
   current `ivt_f2_descriptor()` misreads as `n_dim=524`, page marker `82 01 _ 00`
@@ -377,27 +382,31 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   block-scan if it becomes a bottleneck.
 - **1991 `1003011` — DONE.** Fully wired into `read_ivt()` via the unified decoder
   (geography straddles, 4 geos/page, int16/int32 pages) + the pre-DGUID inline
-  geography codebook (`ivt_f2_geo_inline()`, all 41,859 geographies exact) and
-  bilingual Age(110)/Sex(3) labels.
+  geography codebook (`ivt_f2_geo_inline()`, now positional via
+  `ivt_f2_geo_inline_dir()`; all 41,859 geographies exact vs the B2020 viewer's
+  member list, names and codes) and bilingual Age(110)/Sex(3) labels.
 - **Footnotes — dimension-attributed (via `dimdir.R`).** Each footnote is stored
   as an entry of its owning dimension's slot directory, so `ivt_f2_footnotes()`
   emits a `dimension` field (texts set-equal to the old tail scan on all five
   local reference tables; the scan survives as fallback). Remaining nicety:
   per-*member* attribution — the small records preceding each footnote pair in
   the directory look like member references (unverified).
-- **Metadata-driven consolidation follow-ups** (the slot table makes these
-  possible; not yet done): (a) bound the DGUID scan / `ivt_f2_geo_marker_region()`
-  by the geography directory's byte span (would also fix the DGUID
-  first-appearance tail-ordering artifacts — but beware directories that drop
-  trailing partials, e.g. 0013); (b) read the 1991-style inline geography's
-  separate clean name/GEOUID array blocks positionally from its directory
-  (rows per chunk: combined EN, combined FR, bilingual names, bare codes)
-  instead of regex-parsing the combined block; (c) fold `ivt_f2_geo_simple()`
-  into `ivt_f2_geo_attrs_dir()` (already byte-identical on 0241 in 0.09 s) —
-  blocked only on trimming semantics (`geo_simple` preserves label indentation,
-  `attrs_dir` trims); (d) the master directory at offset 992 (slots `@544`,
-  `@12`-indirect) covers whole-file sections incl. the legacy title/notes blobs
-  and the `@712` DQF legend, none of which are read from it yet.
+- **Metadata-driven consolidation follow-ups.** DONE: (a) the DGUID scan /
+  `ivt_f2_geo_marker_region()` are bounded by the geography directory's byte
+  span (`ivt_f2_geo_dir_span()`, dimdir.R; codebook-pointer marker walk kept as
+  fallback); (b) the 1991-style inline geography is read **positionally** from
+  its directory (`ivt_f2_geo_inline_dir()`: per group of `G` chunks four runs
+  [combined lang A, combined lang B, name array, code array], record counts
+  validated per chunk, uid = code array cross-checked against the combined
+  block's parsed code; the separate name array is **accent-stripped**, so the
+  display name still comes from the combined block) — this fixed a 2,435-member
+  tail misorder the regex+dedup fallback silently produced; (c)
+  `ivt_f2_geo_light()` reads single-chunk schema'd tables (0241/0077) via
+  `ivt_f2_geo_attrs_dir(trim = FALSE)` (byte-identical; `ivt_f2_geo_simple()`
+  stays as the fallback for irregular layouts, e.g. 0662). NOT yet done: (d) the
+  master directory at offset 992 (slots `@544`, `@12`-indirect) covers
+  whole-file sections incl. the legacy title/notes blobs and the `@712` DQF
+  legend, none of which are read from it yet.
 - Optional: expose the per-dimension `depth` directly on `ivt_tidy()` output.
 - Consider an `Rcpp` fast path only if pure-R decode becomes a bottleneck (it is
   fine at ~5 s for the reference table).

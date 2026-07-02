@@ -462,6 +462,31 @@ test_that("1991 inline geography codebook decodes GEOUIDs and bilingual names", 
   expect_equal(sex, c("Total - Sex", "Male", "Female"))
 })
 
+test_that("1991 inline geography is read positionally from the block directory", {
+  p <- sample_ivt_1991()
+  skip_if(p == "", "no 1991 sample (set CANIVT_SAMPLE_IVT_1991)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+
+  # the directory-driven read resolves (schema-absent layout + dim-1 directory)
+  g <- ivt_f2_geo_inline_dir(raw)
+  expect_false(is.null(g))
+  expect_equal(nrow(g), 41859L)
+  expect_identical(g, ivt_f2_geo_inline(raw))          # and is the primary path
+
+  # the tail chunks are stored out of byte order; the old byte-ascending scan +
+  # first-appearance dedup misordered members 39425..41859. The directory order
+  # matches the StatCan Beyond 20/20 viewer's member list (all 41,859 validated).
+  expect_equal(g$geouid[39425], "59020114")
+  expect_equal(g$geouid[39432], "59020151")
+  expect_equal(g$geouid[41859], "61002216")
+  # display names keep their accents (parsed from the combined block, not the
+  # accent-stripped search-name array)
+  expect_equal(g$geo_name[904],
+               "Prince Edward Island | Île-du-Prince-Édouard")
+  expect_equal(g$dqf_code[1], "00000")
+  expect_false(anyNA(g$geo_name))
+})
+
 test_that("1991 cell decode is exact (int32 dense and int16 sparse pages)", {
   p <- sample_ivt_1991()
   skip_if(p == "", "no 1991 sample (set CANIVT_SAMPLE_IVT_1991)")
