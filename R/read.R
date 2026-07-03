@@ -10,22 +10,20 @@ ivt_family <- function(raw) {
   # boundary: when the data dimensions alone overflow it a data dimension
   # straddles and geography is paged per-geography (the "family 1" metadata:
   # geography names via the inline codebook); when they fit, geography itself
-  # straddles and packs several geographies per page (the "family 2" metadata:
-  # DGUIDs + descriptor-driven members). `geo_in_page` (straddle == geography)
-  # discriminates cleanly and, unlike the legacy 0x1000-stride probe, also handles
-  # small tables (e.g. 98-10-0662) whose per-geography directory stride is not 0x1000.
+  # straddles (`geo_in_page`, possibly trivially -- ipc can exceed the geography
+  # count, e.g. the one-page 98-10-0044) and packs several geographies per page
+  # (the "family 2" metadata: DGUIDs + descriptor-driven members).
+  # `ivt_f2_decodable()` is the whole gate: a plausible descriptor, a resolvable
+  # layout AND the structural page pre-flight (`ivt_page_preflight()`), which
+  # rejects same-signature containers whose pages are inconsistent with the
+  # layout (the 2001 "F"-series, the 98-400-X2016203 variant). The legacy
+  # 0x1000-stride probe is gone from detection -- it granted family 1 to any
+  # file with marker-shaped bytes at the 98-10-0241 offsets, bypassing every
+  # validation.
   if (ivt_f2_decodable(raw)) {
     lay <- tryCatch(ivt_layout(raw), error = function(e) NULL)
-    if (!is.null(lay) && !lay$geo_in_page && ivt_idx0(raw) != IVT_IDX0_DEFAULT)
-      return(1L)
+    if (!is.null(lay)) return(if (lay$geo_in_page) 2L else 1L)
   }
-  if (length(raw) >= IVT_IDX0_DEFAULT + 16L && ivt_geography_count(raw) > 0L) return(1L)
-  # family 2 requires both a page directory and a descriptor the decoder can use;
-  # other `04 00 20 00` products expose a directory but an undecoded descriptor.
-  # The probe runs quietly: a fallback engaging during detection of a file that
-  # is then rejected anyway is noise, not a read.
-  if (!is.null(ivt_quietly(ivt_f2_find_directory(raw))) && ivt_f2_decodable(raw))
-    return(2L)
   NA_integer_
 }
 

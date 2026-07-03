@@ -40,21 +40,23 @@ IVT_PRES_BITS  <- 2048L
 IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 
 # Bytes between the end of the presence record and the dense value run, derived
-# structurally from the marker rather than a per-marker lookup. The marker's
-# third byte (`b2`) gates it: 0x00 -> the value run starts immediately (the
-# directory's page size is then exactly `4 + rec_bytes + nv*width`). Otherwise
-# the first byte's high nibble selects the pad size in value-slot units:
+# structurally from the marker's third byte (`b2`), which ENCODES the trailer:
 #
-#   0x8*  ->  32 / width      (0x88 -> 4, 0x84 -> 8, 0x82 -> 16)
-#   0xa*  ->  64 / width + 2  (0xa8 -> 10, 0xa4 -> 18, 0xa2 -> 34)
+#   trailer = 0                                        when b2 == 0x00
+#           = 2*(b2 >> 4) + 2*(low nibble(b2) > 0)     otherwise
+#             (+ 32 on the 0xa2 int16 pages, which carry a fixed 32-byte
+#              auxiliary block before the run)
 #
-# i.e. the 0x8 pages reserve 4 value slots of pad, the 0xa pages 8 slots plus
-# 2 bytes (some tables realise it as a 0xFF run, others as fixed padding -- all
-# land at the same offset). The formula reproduces the formerly hard-coded
-# six-marker table exactly and holds with zero violations on every page of every
-# supported table in the local corpus (~148,000 pages). An unrecognised width
-# code or high nibble aborts: decoding with a guessed trailer would silently
-# yield garbage values.
+# i.e. b2's high nibble counts 2-byte pad units (realised as a 0xFF run) and a
+# non-zero low nibble appends one further 2-byte field. Derived from 98-10-0013,
+# whose 22 pages carry 18 distinct b2 values (0x2a..0x63, trailers 6..14, each
+# anchored byte-exact against the StatCan CSV); it reproduces the formerly
+# hard-coded six-marker constants exactly (88/20 -> 4, a8/41 -> 10, 84/40 -> 8,
+# 82/80 -> 16, a4/82 -> 18, a2/03 -> 34 -- the old "32/width | 64/width + 2"
+# width formula only coincided because b2 was constant per marker family) and
+# holds with zero violations on every page of every supported table in the
+# local corpus. An unrecognised width code or high nibble aborts: decoding with
+# a guessed trailer would silently yield garbage values.
 ivt_value_trailer <- function(b0, b2) {
   if (b2 == 0x00L) return(0L)
   w <- bitwAnd(b0, 0x0FL)
@@ -64,7 +66,8 @@ ivt_value_trailer <- function(b0, b2) {
       "Unrecognised IVT page marker byte {.val {sprintf('0x%02x', b0)}}: cannot derive the value-run start.",
       class = "canivt_unknown_marker")
   }
-  if (hi == 0x80L) 32L %/% w else 64L %/% w + 2L
+  2L * (b2 %/% 16L) + 2L * as.integer(bitwAnd(b2, 0x0FL) > 0L) +
+    if (b0 == 0xa2L) 32L else 0L
 }
 
 # Derive the full layout from the header descriptor: how the dimensions split into
@@ -81,23 +84,19 @@ ivt_layout <- function(raw) {
   slugs <- c("geo", dd$slugs)                       # dim 1 = geography (structural)
 
   # Nest innermost (dim m) outward; find the dimension that overflows the record.
+  # Dimension 1 (geography) ALWAYS takes the straddle role when nothing inner
+  # overflows: the page presence record is a fixed IVT_PRES_BITS regardless of
+  # how little of it the table needs, so a table whose dimensions all fit one
+  # record (98-10-0044: 14 geographies x 32 data bits = 512 bits) is simply the
+  # trivial case of the geography-straddle layout -- ipc = 2048/inner exceeds
+  # the geography count and there is a single directory window. (Validated
+  # cell-exact vs the B2020 viewer on 98-10-0044; decoding it with a record
+  # sized to the used bits, 64 bytes, misaligns the value run.)
   blk <- 1L; straddle <- NA_integer_; inner_block <- 1L
   for (j in m:1L) {
     need <- ivt_f2_nextpow2(cnt[j] * blk)
-    if (need > IVT_PRES_BITS) { straddle <- j; inner_block <- blk; break }
+    if (need > IVT_PRES_BITS || j == 1L) { straddle <- j; inner_block <- blk; break }
     blk <- need
-  }
-  if (is.na(straddle)) {
-    # The whole table fits one presence record ("no-straddle"). Every validated
-    # table has exactly one straddling dimension; the only corpus file reaching
-    # this branch is the incompatible 2001 "F"-series variant (97F0020XCB2001070,
-    # 14 geographies x 32 data bits), whose pages then decode to garbage
-    # (reverse-ordered directory, b2 == 0x00 pages that do not fit their
-    # directory size). Until a genuine no-straddle table validates this layout,
-    # abort rather than risk silently wrong values.
-    cli::cli_abort(
-      "No dimension straddles the {IVT_PRES_BITS}-bit page record; this layout is unvalidated.",
-      class = "canivt_no_straddle")
   }
   ipc_straddle <- IVT_PRES_BITS %/% inner_block
   win <- as.integer(ceiling(cnt[straddle] / ipc_straddle))
@@ -160,6 +159,75 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
     as.numeric(readBin(bytes, "integer", n = nv, size = width, signed = TRUE, endian = "little"))
   }
   list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals)
+}
+
+# Cheap structural pre-flight for the decodability gate: the first few
+# non-empty data pages must be geometry-consistent under the derived layout.
+# Three per-page rules, each holding on every page of every validated table:
+#
+# - the presence count, trailer and value width must fit the page's
+#   directory-allocated size (`4 + rec_bytes + trailer + nv*width <= size`);
+# - a trailer-less page (marker b2 == 0x00) must fit it EXACTLY;
+# - the presence count must not exceed the page's REAL cell capacity
+#   (`min(ipc1, straddle count) * prod(inner counts)`): a set bit at a padding
+#   position -- a straddle slot beyond the dimension's member count -- can
+#   correspond to no real cell, so any excess means the nesting is wrong.
+#
+# A wrong layout, or an incompatible container that happens to parse, fails
+# here and the file is rejected as unsupported instead of decoding unvalidated
+# values: the 2001 "F"-series 97F0020XCB2001070 fits its pages exactly but
+# carries 1124 presence bits against a 448-cell capacity (its data must be
+# nested differently), and the 98-400-X2016203 variant carries non-exact
+# b2 == 0 pages. Checks up to `max_pages` non-empty pages.
+ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
+  if (is.null(lay)) lay <- tryCatch(ivt_layout(raw), error = function(e) NULL)
+  if (is.null(lay)) return(FALSE)
+  n <- length(raw); idx0 <- ivt_idx0(raw)
+  cap <- min(lay$ipc[1L], lay$counts[lay$straddle]) * prod(lay$ipc[-1L])
+  seen <- 0L; valid <- 0L
+  for (k in 0:4095) {
+    o <- idx0 + 8L * k
+    if (o + 8L > n) break
+    off <- rd_u32(raw, o); s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
+    if (s1 != s2 || s1 <= 0L || off < 1L || off + 4L > n) next
+    if (!ivt_f2_is_marker(raw, off)) next
+    valid <- valid + 1L
+    b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
+    w <- bitwAnd(b0, 0x0FL)
+    tr <- tryCatch(ivt_value_trailer(b0, b2), error = function(e) NULL)
+    if (is.null(tr) || !w %in% c(2L, 4L, 8L)) return(FALSE)
+    nv <- sum(ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit))
+    if (nv == 0L) next
+    end <- 4L + lay$rec_bytes + tr + nv * w
+    if (end > s1 || off + end > n || nv > cap) return(FALSE)
+    if (b2 == 0x00L && end != s1) return(FALSE)
+    seen <- seen + 1L
+    if (seen >= max_pages) break
+  }
+  # no counterexample is not enough: at least one real page must have validated,
+  # else a wrong directory base (e.g. the historical idx0 fallback constant on a
+  # file it does not fit) would pass vacuously.
+  if (valid == 0L) return(FALSE)
+  # the directory must SPAN the layout's entry cartesian: walking backward from
+  # the end of the outer dimension's entry range, the highest valid entry must
+  # fall in the outer dimension's UPPER HALF. Wholly-empty trailing members are
+  # normal in moderation (98-10-0174's last ~4% of geography windows carry no
+  # entries), but a directory confined to the first outer member means the
+  # nesting is wrong: the 1981 profile variant (97-570-X1981004) parses into a
+  # geography-first layout whose directory covers only outer member 1 of 32 --
+  # its data is actually nested geography-LAST, and decoding it would silently
+  # return 1/32 of the table with geography mislabelled.
+  ne <- length(lay$ent_counts)
+  ostride <- lay$estride[ne]; ocount <- lay$ent_counts[ne]
+  hi_k <- -1L
+  for (k in (ocount * ostride - 1L):max(0L, ocount * ostride - 65536L)) {
+    o <- idx0 + 8L * k
+    if (o + 8L > n) next
+    off <- rd_u32(raw, o); s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
+    if (s1 == s2 && s1 > 0L && off >= 1L && off + 4L <= n &&
+        ivt_f2_is_marker(raw, off)) { hi_k <- k; break }
+  }
+  hi_k >= 0L && (hi_k %/% ostride + 1L) * 2L > ocount
 }
 
 #' Decode every cell of an IVT into a tibble of one value per row.

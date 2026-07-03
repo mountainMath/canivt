@@ -73,7 +73,12 @@ u32 @48   → English title block, OUT OF LINE ┘ both set in the legacy format
             ⇒ the format VERSION indicator: modern (2016+/DGUID, inline identity)
               vs legacy (pre-DGUID, out-of-line "<id>\r\n<title>" blocks)
 u32 @552  → geography field/attribute count (11 modern / 12 legacy)
-u16 @558  → page directory start (35,950 / 2,019); u32 @558 = value-pages start − 16
+u16 @558  → page directory start, LOW 16 BITS ONLY (35,950 / 2,019): the true
+            start is `u16 + k·65536` for the smallest k whose entry validates
+            (k=0 when the directory sits below 64 KiB — every early reference
+            table — but 98-10-0013 needs k=1 and 95F0250XDB96001 k=2; under the
+            plain u16 read 0013's cell decode was silently EMPTY).
+            u32 @558 = value-pages start − 16 on the reference tables.
 u32 @572  → codebook region start (~124.31M / 22.75M)
 ```
 
@@ -119,14 +124,18 @@ fully decoded):
   this per page (`canivt_page_overrun`), so a misread marker aborts rather than
   decoding garbage values. The second copy's purpose (redundancy?) is unproven.
 - **Per-page header bytes.** The page marker is `[b0] 01 [b2] [b3]` with the value-
-  width in `b0`'s low nibble and `b3 ∈ {08,09}`; `b2 == 0x00` means "no trailer"
-  (the value run starts right after the presence section, and the page size fits
-  exactly), any other `b2` selects the formula trailer (see the family-2 page
-  layout) — `b2`'s specific values (e.g. `0x20`, `0x41`, `0x03`) are not otherwise
-  explained. A **`b3 = 0x0a` page variant** exists (369 `a2 01 03 0a` pages on
-  98-400-X2016203; extent-clean under the formula but their int16 values are all
-  -1, presumably suppression sentinels): **undecoded**, and skipped **loudly**
-  (`canivt_skipped_pages`) rather than silently.
+  width in `b0`'s low nibble and `b3 ∈ {08,09}`; **`b2` encodes the trailer**:
+  `b2 == 0x00` means "no trailer" (the value run starts right after the presence
+  section, and the page size fits exactly), otherwise
+  `trailer = 2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes (plus a fixed 32-byte
+  auxiliary block on `0xa2` int16 pages). Derived from 98-10-0013, whose 22
+  pages carry 18 distinct `b2` values (`0x2a`..`0x63`, trailers 6–14, each
+  anchored byte-exact against the StatCan CSV); on the tables where `b2` never
+  varies it reproduces the historical per-marker constants. What the trailing
+  2-byte field (low-nibble flag) holds is unknown (`00 e0` on 0013's first
+  page). A **`b3 = 0x0a` page variant** exists (369 `a2 01 03 0a` pages on
+  98-400-X2016203; int16 values all -1, presumably suppression sentinels):
+  **undecoded**, skipped **loudly** (`canivt_skipped_pages`).
 - **Label encoding is Windows-1252.** Labels use the cp1252 `0x80-0x9F` punctuation
   block (e.g. `0x92` = the curly apostrophe in `Tla’amin Lands` / `Sambaa K’e`,
   `0x93/0x94` quotes, `0x96/0x97` dashes). `is_label_byte()` must accept these
@@ -539,17 +548,18 @@ every value, float64 and int16). The complete spec:
   (float64) and `a2` (int16).
 - **Page layout.** `[4-byte marker][256-byte presence section][0xFF trailer][dense
   value run]`. The presence section is 4 × 64-byte records (one per geo, in value
-  order). The trailer is **derived from the marker by formula**
-  (`ivt_value_trailer()`, decode.R): `b2 == 0x00` → no trailer; otherwise `b0`'s
-  high nibble selects the pad — `0x8*` → `32 / width` bytes (`0x88`→4, `0x84`→8,
-  `0x82`→16), `0xa*` → `64 / width + 2` (`0xa8`→10, `0xa4`→18, `0xa2`→34). The
-  formula reproduces the formerly hard-coded per-marker table exactly and holds
-  with zero violations on every page of every supported table in the local corpus
-  (~148,000 pages); an unrecognised width code or high nibble aborts
-  (`canivt_unknown_marker`) instead of decoding with a guessed layout. Values are
-  dense in the page's width, one per present cell, in the presence order; the page
-  is then zero-padded up to `size`, and the computed value run must fit `size`
-  (checked per page, `canivt_page_overrun`).
+  order). The trailer is **encoded in the marker's `b2` byte**
+  (`ivt_value_trailer()`, decode.R): `b2 == 0x00` → no trailer; otherwise
+  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes, plus a fixed 32-byte auxiliary
+  block on `0xa2` int16 pages. This reproduces the six historically constant
+  pairs (`88/20`→4, `a8/41`→10, `84/40`→8, `82/80`→16, `a4/82`→18, `a2/03`→34 —
+  which had made the trailer look like a per-width constant) and the 18 varying
+  `b2` values of 98-10-0013 (each anchored byte-exact vs the StatCan CSV); an
+  unrecognised width code or high nibble aborts (`canivt_unknown_marker`)
+  instead of decoding with a guessed layout. Values are dense in the page's
+  width, one per present cell, in the presence order; the page is then
+  zero-padded up to `size`, and the computed value run must fit `size` (checked
+  per page, `canivt_page_overrun`).
 - **Presence record (the byte-pair-swap).** Each 64-byte record is **byte-pair
   swapped** (`B0↔B1, B2↔B3, …` — the same principle as family 1's `bitwXor(housing,
   1)`, at byte granularity), after which it is a positional nibble-per-member bitmap:

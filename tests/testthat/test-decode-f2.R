@@ -730,24 +730,122 @@ test_that("small files' page directories are not truncated by an offset floor", 
 test_that("directory entries with unrecognised page markers are skipped LOUDLY", {
   # 98-400-X2016203 carries 369 `a2 01 03 0a` pages (marker b3 = 0x0a, not the
   # known 0x08/0x09); their cells cannot be decoded yet, and dropping them must
-  # warn -- silently missing cells read as zeros downstream.
+  # warn -- silently missing cells read as zeros downstream. The file as a whole
+  # is REJECTED (its b2 == 0 pages do not fit their directory sizes exactly, so
+  # the pre-flight fails); the direct ivt_decode() path still exercises the
+  # loud skip.
   p <- locate_sample_ivt("", "98-400-X2016203", "98-400-X2016203.IVT")
   skip_if(p == "", "no 98-400-X2016203 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_false(ivt_is_supported(raw))
   expect_warning(cells <- ivt_decode(raw), class = "canivt_skipped_pages")
   expect_gt(nrow(cells), 0L)
   withr::local_options(canivt.strict = TRUE)
   expect_error(ivt_decode(raw), class = "canivt_skipped_pages_error")
 })
 
-test_that("no-straddle layouts are rejected, not decoded as garbage", {
-  # The 2001 "F"-series variant (97F0020XCB2001070) parses to a descriptor whose
-  # whole table fits one presence record -- a layout never validated -- and its
-  # pages then decode to garbage. ivt_layout() must abort (classed) and the file
-  # must stay unsupported.
+test_that("incompatible same-signature containers fail the page pre-flight", {
+  # The 2001 "F"-series variant (97F0020XCB2001070) parses to a resolvable
+  # layout (all dimensions fit one presence record) and its pages even fit
+  # their directory sizes EXACTLY -- but they carry 1124 presence bits against
+  # a 448-real-cell capacity (the data is nested differently), so the
+  # pre-flight rejects the file instead of decoding garbage.
   p <- locate_sample_ivt("", "97F0020XCB2001070", "97F0020XCB2001070.IVT")
   skip_if(p == "", "no 97F0020XCB2001070 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
-  expect_error(ivt_layout(raw), class = "canivt_no_straddle")
+  expect_false(is.null(ivt_layout(raw)))
+  expect_false(ivt_page_preflight(raw))
   expect_false(ivt_is_supported(raw))
+})
+
+test_that("the geography-last 1981 profile variant is rejected by the span rule", {
+  # 97-570-X1981004 parses into a geography-first layout whose directory covers
+  # only the first outer member (its data is nested geography-LAST); decoding
+  # would return a fraction of the table with geography mislabelled.
+  p <- locate_sample_ivt("", "97-570-X1981004", "97-570-X1981004.ivt")
+  skip_if(p == "", "no 97-570-X1981004 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_false(ivt_page_preflight(raw))
+  expect_false(ivt_is_supported(raw))
+})
+
+test_that("the header directory pointer unwraps past 64 KiB (98-10-0013 cells)", {
+  # @558 stores the directory offset's LOW 16 BITS; 98-10-0013's directory sits
+  # at 44761 + 65536. Under the plain u16 read idx0 fell back to the 98-10-0241
+  # constant and the cell decode was silently EMPTY (0 pages). All 22 pages now
+  # decode -- including 18 distinct marker b2 values whose trailers the b2
+  # formula must reproduce (validated cell-exact vs the StatCan CSV, 37,587
+  # comparable cells).
+  p <- sample_ivt_ada()
+  skip_if(p == "", "no ADA sample (set CANIVT_SAMPLE_IVT_ADA)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_equal(ivt_idx0(raw), 44761L + 65536L)
+  cells <- ivt_decode(raw)
+  expect_equal(nrow(cells), 36491L)
+  expect_equal(cells$value[cells$geo == 1L & cells[[2]] == 1L], 36991981)
+})
+
+test_that("a table that fits one presence record decodes (98-10-0044 no-straddle)", {
+  # 14 geographies x 32 data bits = 512 bits: nothing overflows the 2048-bit
+  # record, geography takes the straddle role trivially (ipc 64 > 14, one
+  # window). Validated cell-exact vs the official StatCan CSV (448/448).
+  p <- locate_sample_ivt("", "98-10-0044", "98100044.ivt")
+  skip_if(p == "", "no 98-10-0044 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_equal(ivt_family(raw), 2L)
+  lay <- ivt_layout(raw)
+  expect_true(lay$geo_in_page)
+  expect_equal(lay$window_count, 1L)
+  expect_equal(lay$ipc[1L], 64L)
+  cells <- ivt_decode(raw)
+  expect_equal(nrow(cells), 399L)
+  expect_equal(cells$value[cells$geo == 1L & cells[[2]] == 1L], c(24140, 657920))
+})
+
+test_that("the 1996 census tables decode (viewer-validated)", {
+  # 94F0009XDB96078: 13 geographies, 5 dims incl. a Years(2) facet -- 572/572
+  # cells exact vs the B2020 viewer across all geographies. 95F0250XDB96001:
+  # its "1995 Household Income (3)" dimension name starts with a DIGIT, which
+  # the uppercase-only descriptor anchor dropped (the resulting 2-dim layout
+  # decoded misindexed cells); 72/72 viewer-exact with 3 dims. 95F0223XDB96001:
+  # 5,007 geographies, duplicate member labels under two parents (1134/1134).
+  p <- locate_sample_ivt("", "94F0009XDB96078", "94F0009XDB96078.ivt")
+  if (p != "") {
+    raw <- readBin(p, "raw", n = file.info(p)$size)
+    expect_equal(ivt_family(raw), 1L)
+    d <- ivt_f2_descriptor(raw)
+    expect_equal(vapply(d$dims, `[[`, 1L, "count"), c(13L, 4L, 9L, 22L, 2L))
+    expect_equal(nrow(ivt_decode(raw)), 16004L)
+  }
+  p <- locate_sample_ivt("", "95F0250XDB96001", "95F0250XDB96001.ivt")
+  if (p != "") {
+    raw <- readBin(p, "raw", n = file.info(p)$size)
+    d <- ivt_f2_descriptor(raw)
+    expect_equal(length(d$dims), 3L)
+    expect_equal(d$dims[[2L]]$name, "1995 Household")   # digit-led, stored truncated
+    expect_equal(vapply(d$dims, `[[`, 1L, "count"), c(5544L, 3L, 3L))
+    expect_equal(ivt_idx0(raw), 22330L + 2L * 65536L)   # unwrapped pointer
+    cells <- ivt_decode(raw)
+    expect_equal(nrow(cells), 41081L)
+    m <- suppressWarnings(ivt_f2_metadata(raw))
+    expect_equal(m$geographies$geo_name[1], "Canada")
+    expect_equal(length(m$geographies$geo_uid), 5544L)
+  }
+  p <- locate_sample_ivt("", "95F0223XDB96001", "95F0223XDB96001.ivt")
+  if (p != "") {
+    raw <- readBin(p, "raw", n = file.info(p)$size)
+    cells <- ivt_decode(raw)
+    expect_equal(nrow(cells), 643900L)
+    # Canada x Total age x Total sex, immigrant members 6 (Immigrants > US) and
+    # 22 (Non-permanent residents > US) -- the duplicate-label pair
+    can <- cells[cells$geo == 1L & cells$age == 1L & cells$sex == 1L, ]
+    expect_equal(can$value[can$immigrant == 6L], 244695)
+    expect_equal(can$value[can$immigrant == 22L], 16375)
+  }
+  p <- locate_sample_ivt("", "95F0200XDB96003", "95F0200XDB96003.IVT")
+  if (p != "") {
+    raw <- readBin(p, "raw", n = file.info(p)$size)
+    expect_equal(ivt_family(raw), 2L)                   # 43,234 EAs, geo straddles
+    expect_equal(ivt_f2_geo_count(raw), 43234L)
+  }
 })

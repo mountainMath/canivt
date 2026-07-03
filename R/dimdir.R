@@ -42,11 +42,14 @@ IVT_HDR_DIM_STRIDE <- 14L   # 14-byte slot records
 ivt_f2_dim_slots <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   # the 32-dim cap mirrors ivt_f2_decodable(): unsupported container variants
-  # misread the descriptor as hundreds of dimensions.
-  if (is.null(d) || is.na(d$n_dim) || d$n_dim < 1L || d$n_dim > 32L) return(NULL)
+  # misread the descriptor as hundreds of dimensions. Judge by the recovered
+  # dimension records, not the header count field (unreliable on some vintages,
+  # e.g. 95F0200XDB96003 reads 1026 with 4 clean dimensions).
+  m <- if (is.null(d)) 0L else length(d$dims)
+  if (m < 1L || m > 32L) return(NULL)
   n <- length(raw)
-  out <- vector("list", d$n_dim)
-  for (k in seq_len(d$n_dim)) {
+  out <- vector("list", m)
+  for (k in seq_len(m)) {
     s <- IVT_HDR_DIM_SLOT0 + (k - 1L) * IVT_HDR_DIM_STRIDE
     if (s + 12L > n) return(NULL)
     out[[k]] <- list(dim = k, slot = s, ptr = rd_u32(raw, s),

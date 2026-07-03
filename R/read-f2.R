@@ -73,7 +73,8 @@ ivt_f2_dimensions <- function(raw) {
   # count-keyed block heuristics.
   miss <- if (length(d$dims) > 1L)
     which(vapply(2:length(d$dims), function(i)
-      is.null(dirlab) || is.null(dirlab[[i]]), logical(1))) + 1L
+      is.null(dirlab) || length(dirlab) < i || is.null(dirlab[[i]]),
+      logical(1))) + 1L
   else integer(0)
   labels <- list(); name_lut <- list()
   if (length(miss)) {
@@ -93,7 +94,7 @@ ivt_f2_dimensions <- function(raw) {
     dim <- d$dims[[i]]
     is_geo <- i == 1L                       # geography is the first dimension
     members <- if (is_geo) NULL else {
-      m <- if (!is.null(dirlab)) dirlab[[i]] else NULL
+      m <- if (!is.null(dirlab) && length(dirlab) >= i) dirlab[[i]] else NULL
       if (is.null(m)) m <- name_lut[[dim$name]]
       if (is.null(m)) labels[[as.character(dim$count)]] else m
     }

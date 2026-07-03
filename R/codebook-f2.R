@@ -1568,11 +1568,18 @@ ivt_f2_descriptor <- function(raw) {
   Lend <- if (facet > 0) facet - 1L else length(v)
 
   # Walk the bounded region; a dimension record is a 0x01 whose following printable
-  # run is a doubled string. Read count/type from the bytes just before the 0x01.
+  # run is a doubled string (the first copy may be truncated -- the longest
+  # matching prefix wins). Read count/type from the bytes just before the 0x01.
+  # The name may start with an uppercase letter OR a digit ("1995 Household
+  # Income (3)" in the 1996 table 95F0250XDB96001 -- the uppercase-only anchor
+  # silently dropped that dimension, and the 2-dimension layout then decoded
+  # misindexed cells that even passed the page pre-flight).
   dims <- list()
   k <- 4L
   while (k <= Lend - 1L && length(dims) < ndim) {
-    if (v[k] == 0x01L && v[k + 1L] >= 65L && v[k + 1L] <= 90L) {
+    if (v[k] == 0x01L &&
+        ((v[k + 1L] >= 65L && v[k + 1L] <= 90L) ||
+         (v[k + 1L] >= 48L && v[k + 1L] <= 57L))) {
       e <- k + 1L
       while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
       run <- v[(k + 1L):(e - 1L)]; rl <- length(run); half <- NA_integer_
@@ -1670,11 +1677,16 @@ ivt_dim_slug <- function(name, i) {
 # decoder on an empty dimension list.
 ivt_f2_decodable <- function(raw) {
   d <- ivt_f2_descriptor(raw)
-  if (is.null(d) || is.na(d$n_dim) || d$n_dim < 2L || d$n_dim > 32L) return(FALSE)
+  # judge by the RECOVERED doubled-name dimension records, not the header count
+  # field: the count misreads on some vintages whose dimensions parse fine (the
+  # 1996 EA table 95F0200XDB96003 reads n_dim = 1026 with 4 clean dimensions),
+  # and the truly incompatible variants recover no data dimensions at all.
+  if (is.null(d) || length(d$dims) < 2L || length(d$dims) > 32L) return(FALSE)
   dd <- ivt_f2_data_dims(raw)
   if (!(length(dd$counts) >= 1L && all(!is.na(dd$counts) & dd$counts >= 1L)))
     return(FALSE)
-  # the layout itself must resolve (e.g. it aborts on the never-observed
-  # no-straddle case, which the incompatible 2001 "F"-series variant hits)
-  !is.null(tryCatch(ivt_layout(raw), error = function(e) NULL))
+  # the layout must resolve AND the first pages must decode consistently under
+  # it (extent pre-flight) -- this is what rejects the incompatible 2001
+  # "F"-series variant, whose descriptor parses but whose pages overrun.
+  ivt_page_preflight(raw)
 }

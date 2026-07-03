@@ -375,52 +375,79 @@ units) and the directory entries (8-byte entry units).
     the code chunk the scanner broke).
   - A latent **root-group language-pick bug on 98-10-0129** (member 2's `geo_name`
     read the French copy) is fixed; `GEO_NAME` is exact 63,404/63,404 vs metadata.
-- [ ] The **2048-bit presence cap is assumed constant** (all six tables use it). A
-  float64 table or a no-straddle table would confirm / refine it. (The only
-  no-straddle candidate seen so far, the 2001 F-series 97F0020XCB2001070, is a
-  different container whose pages decode to garbage — so the no-straddle branch
-  now aborts, `canivt_no_straddle`, rather than run unvalidated.)
+- [x] The **2048-bit presence record is universal — geography always takes the
+  straddle role.** When nothing overflows the record, `ipc = 2048/inner` simply
+  exceeds the geography count and there is a single directory window: the
+  "no-straddle" case is the trivial geography-straddle, validated cell-exact on
+  98-10-0044 (448/448 vs the StatCan CSV). Sizing the record to the used bits
+  (512 for 0044) instead misaligns the value run.
 
 ### Note: page geometry is now validated structurally, and gaps are LOUD
 
-Three per-page invariants, verified with zero violations across ~148,000 pages
-of the local corpus, are enforced by the decoder (2026-07-02):
+Per-page invariants, verified across every page of every supported table in the
+corpus, are enforced by the decoder (2026-07-02):
 
-- the **trailer formula**: `b2 == 0x00` → no trailer, else `32 / width` (`0x8*`
-  markers) or `64 / width + 2` (`0xa*`) — replaces the hard-coded six-marker
-  table; unknown width codes / high nibbles abort (`canivt_unknown_marker`);
+- the **b2 trailer formula**: `b2 == 0x00` → no trailer, else
+  `2*(b2 >> 4) + 2*(low nibble(b2) > 0)`, plus a fixed 32-byte auxiliary block
+  on `0xa2` int16 pages. Derived from 98-10-0013 (22 pages, 18 distinct b2
+  values, trailers 6–14, each anchored byte-exact vs the StatCan CSV); it
+  reproduces the formerly hard-coded six-marker constants, which had made the
+  trailer look like a per-width constant (`32/width` / `64/width + 2`) only
+  because b2 never varied within a marker family before 0013. Unknown width
+  codes / high nibbles abort (`canivt_unknown_marker`);
 - the **extent check**: the directory entry's u16 size is the page's allocated
   length and `4 + presence + trailer + nv*width <= size` always (with equality
   on the `b2 == 0` pages); an overrun aborts (`canivt_page_overrun`);
 - **no silent page skips**: a valid directory entry pointing at an unknown
-  marker warns (`canivt_skipped_pages`) — those cells are missing from the
-  decode (see the `b3 = 0x0a` gap below).
+  marker warns (`canivt_skipped_pages`);
+- the **pre-flight** (`ivt_page_preflight()`) applies these to the first pages
+  plus a **capacity rule** (presence bits ≤ the page's real cell count) and a
+  **span rule** (the highest valid directory entry must sit in the outer
+  dimension's upper half), and is part of `ivt_f2_decodable()` — so
+  same-signature containers whose pages are inconsistent with the layout are
+  rejected as unsupported instead of decoding unvalidated values. The legacy
+  0x1000-stride probe is gone from `ivt_family()`.
 
-More generally, every content-heuristic fallback (the stride walk, regex/dedup
-scans, count-keyed labels, marker-scan directory location, fixed slot orders,
-tail windows) now announces itself with a classed `canivt_fallback` warning
+Every content-heuristic fallback (the stride walk, regex/dedup scans,
+count-keyed labels, marker-scan directory location, fixed slot orders, tail
+windows) announces itself with a classed `canivt_fallback` warning
 (`ivt_fallback()`, R/fallback.R), and `options(canivt.strict = TRUE)` turns any
 of them into errors; detection probes (`ivt_family()`) stay quiet
-(`ivt_quietly()`). Two hard-coded content guesses fell out of the same sweep:
-the page-directory entry floor `off >= 1e5` silently truncated
-98-400-X2016387's directory to 6 of 22 pages (its pages start at ~7 KB; the
-floor is now 1024, "past the header region") and the never-validated
-**no-straddle** layout branch now aborts instead of decoding garbage. All
-supported tables remain byte-identical to the pre-change baseline (cells and
-metadata digests, whole corpus).
+(`ivt_quietly()`).
 
-### [ ] Gap: the `b3 = 0x0a` page variant (98-400-X2016203) — UNDECODED
+Hard-coded content guesses closed by the same sweep, each exposed by a new
+corpus table:
 
-98-400-X2016203 carries 369 pages with marker `a2 01 03 0a` (`b3 = 0x0a`, not
-the known `0x08/0x09`). They are extent-clean under the trailer formula but
-their int16 values read as all `-1` — presumably suppression sentinels ("x"
-cells), unvalidated against the viewer. The decoder skips them with a
-`canivt_skipped_pages` warning (previously they were dropped silently). To
-close: validate a `0x0a` page against a B2020 viewer slice and either admit
-`0x0a` (mapping `-1` to NA/suppressed) or document it as suppression-only.
-Note this table's cell decode as a whole has never been validated against
-ground truth (its metadata also engages two fallbacks: count-keyed labels and
-the regex inline-geography scan).
+- the header dir pointer **`@558` stores only the low 16 bits** of the
+  directory offset (`ivt_idx0()` unwraps by `+ k·65536`): 98-10-0013's
+  directory is at `44761 + 65536` — its **cell decode had been silently EMPTY**
+  (0 pages; only its metadata was ever validated); now 37,587/37,587 cells
+  exact vs the StatCan CSV. 95F0250XDB96001 needs `k = 2`;
+- the page-directory entry floor `off >= 1e5` silently truncated
+  98-400-X2016387's directory to 6 of 22 pages (its pages start at ~7 KB; the
+  floor is now 1024, past the header region);
+- the descriptor's doubled-name anchor required an uppercase first letter:
+  95F0250XDB96001's "1995 Household Income (3)" dimension was silently dropped
+  and the 2-dim layout decoded misindexed cells **that passed the pre-flight**
+  — only viewer validation caught it (now 72/72). Digits are admitted; the
+  header `n_dim` count field is unreliable (95F0200XDB96003 reads 1026 with 4
+  clean dimensions) — every gate now uses `length(d$dims)`.
+
+### Rejected same-signature variants (all structural, no allow/deny lists)
+
+- **97F0020XCB2001070** (2001 F-series): layout resolves and its pages fit
+  their directory sizes exactly, but they carry 1124 presence bits against a
+  448-real-cell capacity — the data is nested differently. Capacity rule.
+- **97-570-X1981004** (1981 profile): parses into a geography-first layout
+  whose directory covers only outer member 1 of 32 — the data is nested
+  geography-LAST (the profile-table variant). Span rule.
+- **98-400-X2016203**: non-exact `b2 == 0` pages (exactness holds on every
+  validated table) plus **369 undecoded `a2 01 03 0a` pages** (`b3 = 0x0a`;
+  int16 values all `-1`, presumably suppression sentinels). A direct
+  `ivt_decode()` still runs with a loud `canivt_skipped_pages` warning, but the
+  file is unsupported: its cells were never ground-truthed and its metadata
+  needs two heuristic fallbacks. To revisit: validate a `0x0a` page against a
+  B2020 viewer slice.
 
 ### Note: the `0xa` marker variant and empty geographies
 
@@ -461,12 +488,22 @@ Files in the test corpus that are currently unsupported:
   crosstabs. `inline_geo` header flag varies; descriptor layout differs.
   `97F0020X`'s page directory **is** locatable after the entry-floor fix (header
   `@558` = 18589; entries in *reverse* offset order, `84 01 00 08` pages of size
-  4756 that do **not** satisfy the `b2 == 0` exact-fit rule), and its descriptor
-  parses into a **no-straddle** layout whose decode is garbage — it is now
-  rejected structurally (`canivt_no_straddle`) rather than by the old accidental
-  `off >= 1e5` floor. Served by StatCan's legacy `www12` dynamic system, not the
-  modern b2020 endpoint.
-- [ ] **1981 census** (`97-570-X1981002`): older still; descriptor undecoded.
+  4756 that fit **exactly** under the b2-trailer arithmetic) — but its pages
+  carry 1124 presence bits against the layout's 448-real-cell capacity, so the
+  data is nested differently and the pre-flight **capacity rule** rejects it.
+  Served by StatCan's legacy `www12` dynamic system, not the modern b2020
+  endpoint.
+- [ ] **2006 census DA crosstab** (`97-563-XCB2006072`): geography fully
+  validated (57,523 members, positional inline reader) but its **page directory
+  has not been located** — no `@558` unwrap candidate validates, so the file
+  stays unsupported. Open: find where this vintage stores its directory pointer
+  (or whether its directory starts with entry shapes the validator rejects).
+- [ ] **1981 census** (`97-570-X1981002` profile, descriptor undecoded;
+  `97-570-X1981004` parses — Values(32) × Profile(79) × Geography(5989),
+  geography stored LAST — but its directory covers only the first outer member
+  under the geography-first layout, so the pre-flight **span rule** rejects it;
+  decoding this lineage means supporting geography-last nesting, i.e. the
+  profile-table variant).
 - [ ] **Custom CT / "cro"/"ord" extracts** (`cro0172986_ct.*-2006-*`,
   `ord-08035-…_ct.1-2021-population`): Beyond 20/20 desktop exports (not StatCan
   table downloads); single-page-ish directories, descriptor undecoded.
@@ -579,7 +616,14 @@ footnote↔*member* linkage (dimension linkage is decoded) and structured member
 hierarchy that may be absent from the binary. The master directory at 992 and
 the `@712` DQF legend are now read (see the header section-pointer table above).
 
-The family-2 decoder now handles **arbitrary-dimension** tables (validated on the
-4-dim 98-10-0129, cell-exact) in addition to the 3-dim and legacy tables. The
-remaining open item is the **2001/2006 "F"-series** products (97F0015X, 98F0172X),
-not yet decoded — possibly an older B2020 variant; see the section above.
+The unified decoder handles **arbitrary-dimension** tables (validated on the
+4-dim 98-10-0129, cell-exact) and, as of 2026-07-02, spans **1991–2021 census
+vintages**: the 1996 tables 94F0009XDB96078 / 95F0250XDB96001 / 95F0223XDB96001 /
+95F0200XDB96003 (13 → 43,234 geographies, all B2020-viewer-validated), the tiny
+one-page 98-10-0044 (the trivial geography-straddle, StatCan-CSV-exact) and
+98-10-0013 (whose cell decode had been silently empty; now CSV-exact — the
+source of the b2 trailer formula and the `@558` pointer unwrap). Remaining open
+items: the **2006 crosstab 97-563-XCB2006072** (geography validated, page
+directory not located), the **profile-table lineage** (98F0172X, 95F0170X, 1981
+`97-570-X`: geography-last / `Values`-dimension layout) and the other 2001
+"F"-series products; see the section above.
