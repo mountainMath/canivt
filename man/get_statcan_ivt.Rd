@@ -8,7 +8,7 @@ get_statcan_ivt(
   catalogue,
   geo_attributes = FALSE,
   labels = TRUE,
-  dim_names = c("label", "slug"),
+  dim_names = c("slug", "label"),
   language = "en",
   refresh = FALSE,
   quiet = FALSE

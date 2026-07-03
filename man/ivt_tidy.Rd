@@ -8,7 +8,7 @@ ivt_tidy(
   x,
   labels = TRUE,
   trim_labels = TRUE,
-  dim_names = c("label", "slug"),
+  dim_names = c("slug", "label"),
   language = "en"
 )
 }
@@ -21,11 +21,12 @@ labels; if \code{FALSE} return the compact integer-id table (member ids).}
 \item{trim_labels}{If \code{TRUE} (default) strip the hierarchy-indentation spaces
 from member labels.}
 
-\item{dim_names}{How to name the data-dimension columns: \code{"label"} (default)
-uses the full dimension name (e.g. \verb{Age of primary household maintainer}, or
-its French equivalent when \code{language = "fr"}); \code{"slug"} uses the terse
-structural slug (e.g. \code{age}), which is language-neutral. The choice applies
-to both \code{labels} values.}
+\item{dim_names}{How to name the data-dimension columns: \code{"slug"} (default)
+uses the terse structural slug (e.g. \code{age}), which is compact and
+language-neutral; \code{"label"} uses the full dimension name (e.g.
+\verb{Age of primary household maintainer}, or its French equivalent when
+\code{language = "fr"}). Slug output can be labelled afterwards with
+\code{\link[=label_ivt_columns]{label_ivt_columns()}}. The choice applies to both \code{labels} values.}
 
 \item{language}{Output language for labels and label-derived column names:
 \code{"en"} (default) or \code{"fr"}. Also accepts \code{"eng"}/\code{"fra"} and any case (it is

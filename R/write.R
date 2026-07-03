@@ -10,8 +10,9 @@
 #'   `<name>_members.parquet` sidecar next to `path` (`TRUE`, default), so
 #'   [collect_ivt()] can convert dimension columns to full-level factors.
 #' @param dim_names How to name the data-dimension columns (passed to
-#'   [ivt_tidy()] and the member sidecar): `"label"` (default, the full dimension
-#'   name) or `"slug"` (the terse structural slug).
+#'   [ivt_tidy()] and the member sidecar): `"slug"` (default, the terse
+#'   structural slug) or `"label"` (the full dimension name). Slug columns can be
+#'   labelled on read with [label_ivt_columns()].
 #' @param language Output language for labels and label-derived column names
 #'   (passed to [ivt_tidy()]): `"en"` (default) or `"fr"`. The member sidecar
 #'   carries both languages regardless.
@@ -19,14 +20,16 @@
 #' @return `path`, invisibly.
 #' @export
 ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
-                              dim_names = c("label", "slug"), language = "en",
+                              dim_names = c("slug", "label"), language = "en",
                               ...) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to write Parquet.")
   }
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
-  if (is.null(path)) path <- ivt_data_cache_file(x, ".parquet")
+  # the default cache path carries the language marker so the English and French
+  # Parquets of one table coexist (`<pid>_en.parquet` / `<pid>_fr.parquet`).
+  if (is.null(path)) path <- ivt_data_cache_file(x, paste0("_", language, ".parquet"))
   arrow::write_parquet(
     ivt_tidy(x, labels = labels, dim_names = dim_names, language = language),
     path, ...)
@@ -47,10 +50,10 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
 #' @return `path`, invisibly.
 #' @export
 ivt_write_csv <- function(x, path = NULL, labels = TRUE,
-                          dim_names = c("label", "slug"), language = "en", ...) {
+                          dim_names = c("slug", "label"), language = "en", ...) {
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
-  if (is.null(path)) path <- ivt_data_cache_file(x, ".csv")
+  if (is.null(path)) path <- ivt_data_cache_file(x, paste0("_", language, ".csv"))
   df <- ivt_tidy(x, labels = labels, dim_names = dim_names, language = language)
   if (requireNamespace("readr", quietly = TRUE)) {
     readr::write_csv(df, path, ...)

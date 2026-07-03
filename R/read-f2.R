@@ -285,7 +285,7 @@ ivt_f2_footnotes <- function(raw, dims = NULL) {
 # word (slug) or a display name (label) stay distinct. `language` picks the label:
 # "fr" uses each dimension's French name (`name_fr`), falling back to the English
 # name when the file carries none (e.g. the Statistics dimension).
-ivt_data_colnames <- function(datacols, meta, dim_names = c("label", "slug"),
+ivt_data_colnames <- function(datacols, meta, dim_names = c("slug", "label"),
                               language = "en") {
   dim_names <- match.arg(dim_names)
   if (dim_names == "slug" || !length(datacols)) return(datacols)
@@ -320,7 +320,7 @@ ivt_norm_lang <- function(language = "en") {
 # ("fr") labels throughout -- geography names, member labels and the data column
 # names -- falling back to English wherever the file carries no French copy (the
 # language-neutral `geo_uid` is unaffected).
-ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
+ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
                         language = "en") {
   dim_names <- match.arg(dim_names)
   cells <- x$cells

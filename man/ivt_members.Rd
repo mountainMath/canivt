@@ -7,7 +7,7 @@
 ivt_members(
   x,
   trim_labels = TRUE,
-  dim_names = c("label", "slug"),
+  dim_names = c("slug", "label"),
   language = "en"
 )
 }
@@ -18,8 +18,8 @@ ivt_members(
 the same way \code{\link[=ivt_tidy]{ivt_tidy()}} does by default (\code{TRUE}).}
 
 \item{dim_names}{How the data-dimension \code{column} names are formed, matching
-\code{\link[=ivt_tidy]{ivt_tidy()}}: \code{"label"} (default, the full dimension name) or \code{"slug"} (the
-terse structural slug). Must match the tidy output the levels will be joined
+\code{\link[=ivt_tidy]{ivt_tidy()}}: \code{"slug"} (default, the terse structural slug) or \code{"label"} (the
+full dimension name). Must match the tidy output the levels will be joined
 to.}
 
 \item{language}{Language for the \code{column} names (label mode), matching
@@ -29,8 +29,10 @@ languages; only the label-derived \code{column} names follow \code{language}.}
 }
 \value{
 A tibble with columns \code{column} (the tidy column name), \code{dimension}
-(the full dimension name; \code{"Geography"} for the geography columns),
-\code{member_id} (1-based StatCan member id), \code{ordinal} (the codebook
+(the full English dimension name; \code{"Geography"} for the geography columns),
+\code{dimension_fr} (the French dimension name, \code{NA} when none — used by
+\code{\link[=label_ivt_columns]{label_ivt_columns()}}), \code{member_id} (1-based StatCan member id), \code{ordinal}
+(the codebook
 member-ordinal; equals \code{member_id} when the file stores no ordinal block),
 \code{label} (the stored label, untrimmed), \code{level} (the label as it appears in
 the tidy output), \code{level_fr} (the French label, \code{NA} when the file carries

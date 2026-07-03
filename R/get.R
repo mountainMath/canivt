@@ -43,7 +43,7 @@
 #' @seealso [statcan_ivt_catalogue()], [read_ivt()]
 #' @export
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
-                            dim_names = c("label", "slug"), language = "en",
+                            dim_names = c("slug", "label"), language = "en",
                             refresh = FALSE, quiet = FALSE) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to open the parsed Parquet.")
@@ -52,7 +52,9 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   language <- ivt_norm_lang(language)
   catalogue <- as.character(catalogue)
   key <- ivt_catalogue_key(catalogue)
-  parquet <- file.path(ivt_cache_dir("data"), paste0(key, ".parquet"))
+  # the language marker lets the English and French Parquets of one table coexist
+  parquet <- file.path(ivt_cache_dir("data"),
+                       paste0(key, "_", language, ".parquet"))
 
   if (!refresh && file.exists(parquet)) {
     return(ivt_parquet_connection(parquet, NULL))

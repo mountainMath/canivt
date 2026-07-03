@@ -8,8 +8,8 @@ collect_ivt(
   x,
   members = NULL,
   geography = FALSE,
-  dim_names = c("label", "slug"),
-  language = "en",
+  dim_names = c("slug", "label"),
+  language = NULL,
   ...
 )
 }
@@ -27,15 +27,16 @@ tables carry tens of thousands of geographies, which makes for unwieldy
 factor levels.}
 
 \item{dim_names}{For \code{ivt} objects, how to name the data-dimension columns
-(passed to \code{\link[=ivt_tidy]{ivt_tidy()}} and \code{\link[=ivt_members]{ivt_members()}}): \code{"label"} (default) or
-\code{"slug"}. Ignored for the Arrow / Parquet forms, where the column names are
+(passed to \code{\link[=ivt_tidy]{ivt_tidy()}} and \code{\link[=ivt_members]{ivt_members()}}): \code{"slug"} (default) or
+\code{"label"}. Ignored for the Arrow / Parquet forms, where the column names are
 already fixed by how the Parquet was written.}
 
-\item{language}{Factor-level language: \code{"en"} (default) or \code{"fr"}. For \code{ivt}
-objects it is passed to \code{\link[=ivt_tidy]{ivt_tidy()}}/\code{\link[=ivt_members]{ivt_members()}} (French labels and
-column names); for the Arrow / Parquet forms it selects the French \code{level_fr}
-from the sidecar as the factor levels and must match the language the Parquet
-was written in.}
+\item{language}{Factor-level language: \code{"en"} or \code{"fr"}. \code{NULL} (default)
+auto-detects — \code{"en"} for \code{ivt} objects, and for the Arrow / Parquet forms
+the language marker in the file name (see \code{\link[=ivt_parquet_language]{ivt_parquet_language()}}). For
+\code{ivt} objects it is passed to \code{\link[=ivt_tidy]{ivt_tidy()}}/\code{\link[=ivt_members]{ivt_members()}}; for the Arrow /
+Parquet forms it selects the French \code{level_fr} from the sidecar as the factor
+levels.}
 
 \item{...}{For \code{ivt} objects, passed to \code{\link[=ivt_tidy]{ivt_tidy()}}.}
 }

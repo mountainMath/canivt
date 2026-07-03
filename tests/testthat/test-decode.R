@@ -173,24 +173,24 @@ test_that("Canada decodes to the published tenure totals", {
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
   tab <- read_ivt(p)
   expect_equal(nrow(tab$cells), 7489464L)
-  # by default data columns are named by the full English dimension label
+  # by default data columns are named by the terse structural slug (descriptor order)
   td <- ivt_tidy(tab)
   expect_equal(setdiff(names(td), c("geo_name", "geo_uid", "value")),
+               c("age", "household", "period", "statistics", "housing", "tenure"))
+  # dim_names = "label" uses the full English dimension labels
+  expect_equal(setdiff(names(ivt_tidy(tab, dim_names = "label")),
+                       c("geo_name", "geo_uid", "value")),
                c("Age of primary household maintainer",
                  "Household type including census family structure",
                  "Period of construction", "Statistics", "Housing indicators",
                  "Tenure including presence of mortgage payments and subsidized housing"))
-  # dim_names = "slug" keeps the terse structural slugs (descriptor order)
-  tds <- ivt_tidy(tab, dim_names = "slug")
-  expect_equal(setdiff(names(tds), c("geo_name", "geo_uid", "value")),
-               c("age", "household", "period", "statistics", "housing", "tenure"))
-  row <- tds[tds$geo_uid == "2021A000011124" &
-    tds$age == "Total - Age of primary household maintainer" &
-    tds$household ==
+  row <- td[td$geo_uid == "2021A000011124" &
+    td$age == "Total - Age of primary household maintainer" &
+    td$household ==
       "Total - Household type including census family structure" &
-    tds$period == "Total - Period of construction" &
-    tds$statistics == "Number of private households" &
-    tds$housing == "Total - Housing indicators", ]
+    td$period == "Total - Period of construction" &
+    td$statistics == "Number of private households" &
+    td$housing == "Total - Housing indicators", ]
   expect_equal(row$value,
                c(14687350L, 9787420L, 5870875L, 3916550L, 4899925L,
                  576625L, 4323300L))
@@ -217,20 +217,19 @@ test_that("ivt_tidy language = 'fr' emits French labels and column names", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
   tab <- read_ivt(p)
-  fr <- ivt_tidy(tab, language = "Fra")            # mixed case normalises
-  # data columns are the French dimension names
+  # default slug columns, but French member values (mixed-case language normalises)
+  fr <- ivt_tidy(tab, language = "Fra")
+  expect_true(all(c("age", "tenure") %in% names(fr)))
+  expect_true(all(c("Propriétaire", "Avec hypothèque") %in% fr$tenure))
+  expect_true("Total - Âge du principal soutien du ménage" %in% fr$age)
+  # dim_names = "label" + fr names the columns by the French dimension names
+  frl <- ivt_tidy(tab, dim_names = "label", language = "fr")
   ten_fr <- "Mode d'occupation incluant la présence de paiements hypothécaires et le logement subventionné"
-  expect_true(ten_fr %in% names(fr))
+  expect_true(ten_fr %in% names(frl))
   expect_false("Tenure including presence of mortgage payments and subsidized housing" %in%
-                 names(fr))
-  # French member labels, joined to the same rows as the English tidy
-  row <- fr[fr$geo_uid == "2021A000011124" &
-    fr[["Âge du principal soutien du ménage"]] == "Total - Âge du principal soutien du ménage" &
-    fr[[ten_fr]] == "Propriétaire", ]
-  expect_true(all(c("Avec hypothèque") %in% fr[[ten_fr]]))
-  expect_gt(nrow(row), 0L)
+                 names(frl))
   # the Statistics dimension has no French name -> English column name fallback
-  expect_true("Statistics" %in% names(fr))
+  expect_true("Statistics" %in% names(frl))
   expect_error(ivt_tidy(tab, language = "de"), "language")
 })
 

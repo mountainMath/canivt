@@ -129,11 +129,12 @@ ivt_metadata <- function(path) {
 #'   labels; if `FALSE` return the compact integer-id table (member ids).
 #' @param trim_labels If `TRUE` (default) strip the hierarchy-indentation spaces
 #'   from member labels.
-#' @param dim_names How to name the data-dimension columns: `"label"` (default)
-#'   uses the full dimension name (e.g. `Age of primary household maintainer`, or
-#'   its French equivalent when `language = "fr"`); `"slug"` uses the terse
-#'   structural slug (e.g. `age`), which is language-neutral. The choice applies
-#'   to both `labels` values.
+#' @param dim_names How to name the data-dimension columns: `"slug"` (default)
+#'   uses the terse structural slug (e.g. `age`), which is compact and
+#'   language-neutral; `"label"` uses the full dimension name (e.g.
+#'   `Age of primary household maintainer`, or its French equivalent when
+#'   `language = "fr"`). Slug output can be labelled afterwards with
+#'   [label_ivt_columns()]. The choice applies to both `labels` values.
 #' @param language Output language for labels and label-derived column names:
 #'   `"en"` (default) or `"fr"`. Also accepts `"eng"`/`"fra"` and any case (it is
 #'   lower-cased). French falls back to English wherever the file carries no
@@ -142,7 +143,7 @@ ivt_metadata <- function(path) {
 #' @return A tibble.
 #' @export
 ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
-                     dim_names = c("label", "slug"), language = "en") {
+                     dim_names = c("slug", "label"), language = "en") {
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)

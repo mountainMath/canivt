@@ -130,13 +130,13 @@ test_that("family-2 ivt_tidy labels geography by DGUID and ages/genders", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
   x <- read_ivt(p)
-  # default: data columns named by the full English dimension label
-  expect_equal(names(ivt_tidy(x)),
+  # default: data columns named by the terse structural slug
+  td <- ivt_tidy(x)
+  expect_equal(names(td), c("geo_uid", "age", "gender", "value"))
+  # dim_names = "label" uses the full English dimension labels
+  expect_equal(names(ivt_tidy(x, dim_names = "label")),
                c("geo_uid", "Age (in single years), average age and median age",
                  "Gender", "value"))
-  # slug mode for the value checks below
-  td <- ivt_tidy(x, dim_names = "slug")
-  expect_equal(names(td), c("geo_uid", "age", "gender", "value"))
 
   can <- td[x$cells$geo == 1L, ]
   expect_equal(unique(can$geo_uid), "2021A000011124")
@@ -356,11 +356,10 @@ test_that("family-2 ivt_tidy labels geography by name when requested", {
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
   x <- read_ivt(p, geo_attributes = TRUE)
   expect_false(is.null(x$metadata$geographies$geo_name))
-  td <- ivt_tidy(x)
+  td <- ivt_tidy(x)                                # slug data columns by default
   expect_equal(names(td),
                c("geo_label", "geo_name", "geo_uid", "geo_level",
-                 "Age (in single years), average age and median age",
-                 "Gender", "value"))
+                 "age", "gender", "value"))
   can <- td[x$cells$geo == 1L, ]
   expect_equal(unique(can$geo_label), "Canada")
   expect_equal(unique(can$geo_name), "Canada")

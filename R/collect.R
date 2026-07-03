@@ -17,16 +17,18 @@
 #' @param trim_labels Trim the hierarchy-indentation whitespace from `level`
 #'   the same way [ivt_tidy()] does by default (`TRUE`).
 #' @param dim_names How the data-dimension `column` names are formed, matching
-#'   [ivt_tidy()]: `"label"` (default, the full dimension name) or `"slug"` (the
-#'   terse structural slug). Must match the tidy output the levels will be joined
+#'   [ivt_tidy()]: `"slug"` (default, the terse structural slug) or `"label"` (the
+#'   full dimension name). Must match the tidy output the levels will be joined
 #'   to.
 #' @param language Language for the `column` names (label mode), matching
 #'   [ivt_tidy()]: `"en"` (default) or `"fr"`. The table always carries both the
 #'   English `level` and the French `level_fr`, so a single sidecar serves both
 #'   languages; only the label-derived `column` names follow `language`.
 #' @return A tibble with columns `column` (the tidy column name), `dimension`
-#'   (the full dimension name; `"Geography"` for the geography columns),
-#'   `member_id` (1-based StatCan member id), `ordinal` (the codebook
+#'   (the full English dimension name; `"Geography"` for the geography columns),
+#'   `dimension_fr` (the French dimension name, `NA` when none — used by
+#'   [label_ivt_columns()]), `member_id` (1-based StatCan member id), `ordinal`
+#'   (the codebook
 #'   member-ordinal; equals `member_id` when the file stores no ordinal block),
 #'   `label` (the stored label, untrimmed), `level` (the label as it appears in
 #'   the tidy output), `level_fr` (the French label, `NA` when the file carries
@@ -34,7 +36,7 @@
 #'   indentation).
 #' @seealso [collect_ivt()]
 #' @export
-ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
+ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
                         language = "en") {
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
@@ -61,6 +63,7 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
       ord <- seq_along(d$members)
     out[[length(out) + 1L]] <- tibble::tibble(
       column = colnm[j], dimension = d$name,
+      dimension_fr = if (is.null(d$name_fr)) NA_character_ else d$name_fr,
       member_id = seq_along(d$members), ordinal = as.integer(ord),
       label = d$members, level = fix(d$members),
       level_fr = fr_level(d$members, d$members_fr),
@@ -73,7 +76,7 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
     v <- geo[[col]]
     if (is.null(v)) next
     out[[length(out) + 1L]] <- tibble::tibble(
-      column = col, dimension = "Geography",
+      column = col, dimension = "Geography", dimension_fr = NA_character_,
       member_id = as.integer(seq_along(v)), ordinal = as.integer(seq_along(v)),
       label = v, level = if (col == "geo_uid") v else fix(v),
       level_fr = if (col %in% names(geo_fr)) fr_level(v, geo[[geo_fr[[col]]]])
@@ -81,9 +84,9 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
       depth = ivt_label_depth(v))
   }
   if (!length(out)) return(tibble::tibble(
-    column = character(0), dimension = character(0), member_id = integer(0),
-    ordinal = integer(0), label = character(0), level = character(0),
-    level_fr = character(0), depth = integer(0)))
+    column = character(0), dimension = character(0), dimension_fr = character(0),
+    member_id = integer(0), ordinal = integer(0), label = character(0),
+    level = character(0), level_fr = character(0), depth = integer(0)))
   do.call(rbind, out)
 }
 
@@ -114,20 +117,24 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
 #'   tables carry tens of thousands of geographies, which makes for unwieldy
 #'   factor levels.
 #' @param dim_names For `ivt` objects, how to name the data-dimension columns
-#'   (passed to [ivt_tidy()] and [ivt_members()]): `"label"` (default) or
-#'   `"slug"`. Ignored for the Arrow / Parquet forms, where the column names are
+#'   (passed to [ivt_tidy()] and [ivt_members()]): `"slug"` (default) or
+#'   `"label"`. Ignored for the Arrow / Parquet forms, where the column names are
 #'   already fixed by how the Parquet was written.
-#' @param language Factor-level language: `"en"` (default) or `"fr"`. For `ivt`
-#'   objects it is passed to [ivt_tidy()]/[ivt_members()] (French labels and
-#'   column names); for the Arrow / Parquet forms it selects the French `level_fr`
-#'   from the sidecar as the factor levels and must match the language the Parquet
-#'   was written in.
+#' @param language Factor-level language: `"en"` or `"fr"`. `NULL` (default)
+#'   auto-detects — `"en"` for `ivt` objects, and for the Arrow / Parquet forms
+#'   the language marker in the file name (see [ivt_parquet_language()]). For
+#'   `ivt` objects it is passed to [ivt_tidy()]/[ivt_members()]; for the Arrow /
+#'   Parquet forms it selects the French `level_fr` from the sidecar as the factor
+#'   levels.
 #' @param ... For `ivt` objects, passed to [ivt_tidy()].
 #' @return A tibble with the dimension columns converted to factors.
 #' @export
 collect_ivt <- function(x, members = NULL, geography = FALSE,
-                        dim_names = c("label", "slug"), language = "en", ...) {
+                        dim_names = c("slug", "label"), language = NULL, ...) {
   dim_names <- match.arg(dim_names)
+  # auto-detect the language: "en" for ivt objects, else the file-name marker.
+  if (is.null(language))
+    language <- if (inherits(x, "ivt")) "en" else ivt_parquet_language(x)
   language <- ivt_norm_lang(language)
   if (inherits(x, "ivt")) {
     if (is.null(members)) {
@@ -160,9 +167,51 @@ collect_ivt <- function(x, members = NULL, geography = FALSE,
   ivt_factorize(df, members, geography = geography, language = language)
 }
 
-# The sidecar path for a data Parquet: <name>_members.parquet next to it.
+# The sidecar path for a data Parquet: <name>_members.parquet next to it. A
+# trailing language marker (`_en`/`_fr`) is stripped first, so the English and
+# French Parquets of one table (`<key>_en.parquet` / `<key>_fr.parquet`) share a
+# single language-neutral sidecar (it carries both `level` and `level_fr`).
 ivt_members_path <- function(path) {
-  sub("\\.parquet$", "_members.parquet", path, ignore.case = TRUE)
+  stem <- sub("\\.parquet$", "", path, ignore.case = TRUE)
+  stem <- sub("_(en|fr)$", "", stem, ignore.case = TRUE)
+  paste0(stem, "_members.parquet")
+}
+
+#' Detect the language of an IVT Parquet
+#'
+#' Reads the language marker (`_en` / `_fr` before `.parquet`) that
+#' [ivt_write_parquet()] / [get_statcan_ivt()] put in the file name, so
+#' [collect_ivt()] and [label_ivt_columns()] can pick the matching language
+#' without being told. Falls back to `"en"` when there is no marker.
+#'
+#' @param x A `.parquet` path, an Arrow dataset, or a dplyr-on-Arrow query (the
+#'   path is taken from the `path` attribute / source file list).
+#' @return `"en"` or `"fr"`.
+#' @export
+ivt_parquet_language <- function(x) {
+  path <- ivt_data_path(x)
+  if (is.na(path)) return("en")
+  fn <- basename(path)
+  if (grepl("_fr\\.parquet$", fn, ignore.case = TRUE)) return("fr")
+  "en"
+}
+
+# Best-effort data-file path for x: the string itself when a path, else the
+# `path` attribute (set by get_statcan_ivt()) or the source dataset's single
+# file, walking `$.data` down a dplyr-on-Arrow query. NA when none is found.
+ivt_data_path <- function(x) {
+  if (is.character(x) && length(x) == 1L && !is.na(x)) return(x)
+  src <- x
+  for (i in seq_len(32L)) {
+    p <- attr(src, "path", exact = TRUE)
+    if (is.character(p) && length(p) == 1L) return(p)
+    files <- tryCatch(src$files, error = function(e) NULL)
+    if (is.character(files) && length(files) == 1L) return(files)
+    nxt <- tryCatch(src$.data, error = function(e) NULL)
+    if (is.null(nxt)) break
+    src <- nxt
+  }
+  NA_character_
 }
 
 # Read a member-level sidecar; NULL when it is absent/unreadable.
@@ -197,6 +246,67 @@ ivt_locate_members <- function(x) {
     return(ivt_read_members(ivt_members_path(files)))
   }
   NULL
+}
+
+#' Relabel slug data columns with their full dimension names
+#'
+#' The Parquet written by [ivt_write_parquet()] / [get_statcan_ivt()] names its
+#' data-dimension columns by their compact structural slug (`age`, `tenure`, …).
+#' This renames those columns to the full dimension label — English or French —
+#' on an Arrow dataset / dplyr-on-Arrow query (lazily, no data read) or a
+#' collected data frame. Geography columns (`geo_name`, `geo_uid`, …) are left as
+#' is; a column whose slug is not found is skipped.
+#'
+#' The slug → label map comes from the `<name>_members.parquet` sidecar (or an
+#' explicit `members` table, e.g. from [ivt_members()]). The language is taken
+#' from the file name marker via [ivt_parquet_language()] unless given, so the
+#' labels match the language the Parquet was written in.
+#'
+#' @param x An Arrow dataset, a dplyr-on-Arrow query, or a data frame.
+#' @param members A level table from [ivt_members()]; when `NULL` it is located
+#'   from `x` (attached `members` attribute or the `_members.parquet` sidecar).
+#' @param language `"en"` or `"fr"`; `NULL` (default) auto-detects from the file
+#'   name (see [ivt_parquet_language()]).
+#' @return `x` with its data-dimension columns renamed (an Arrow query when `x`
+#'   is an Arrow object, else a data frame).
+#' @seealso [collect_ivt()], [ivt_parquet_language()]
+#' @export
+label_ivt_columns <- function(x, members = NULL, language = NULL) {
+  if (!requireNamespace("dplyr", quietly = TRUE)) {
+    cli::cli_abort("Package {.pkg dplyr} is required to rename columns.")
+  }
+  if (is.null(language)) language <- ivt_parquet_language(x)
+  language <- ivt_norm_lang(language)
+  if (is.null(members)) {
+    members <- if (is.character(x) && length(x) == 1L)
+      ivt_read_members(ivt_members_path(x)) else ivt_locate_members(x)
+  }
+  if (is.null(members)) {
+    cli::cli_abort(c(
+      "No member-level table found for {.arg x}.",
+      i = "Pass {.arg members} (see {.fn ivt_members}), or write the Parquet with
+           its {.file _members.parquet} sidecar (the default)."))
+  }
+  # slug -> full label, one row per data-dimension column
+  md <- members[members$dimension != "Geography" & !is.na(members$column), ,
+                drop = FALSE]
+  md <- md[!duplicated(md$column), , drop = FALSE]
+  lab <- if (language == "fr" && "dimension_fr" %in% names(md))
+    ifelse(!is.na(md$dimension_fr) & nzchar(md$dimension_fr),
+           md$dimension_fr, md$dimension)
+  else md$dimension
+  cols <- ivt_colnames(x)
+  keep <- md$column %in% cols & md$column != lab & !is.na(lab) & nzchar(lab)
+  if (!any(keep)) return(x)
+  nv <- stats::setNames(md$column[keep], make.unique(lab[keep]))   # new = old
+  dplyr::rename(x, !!!nv)
+}
+
+# Column names of x (Arrow dataset / query / data frame), or character(0).
+ivt_colnames <- function(x) {
+  n <- tryCatch(names(x), error = function(e) NULL)
+  if (is.null(n)) n <- tryCatch(colnames(x), error = function(e) NULL)
+  if (is.null(n)) character(0) else n
 }
 
 # Convert the columns listed in `members` into factors. Levels are the full
