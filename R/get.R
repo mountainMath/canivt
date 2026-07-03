@@ -82,6 +82,102 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   ivt_parquet_connection(parquet, row)
 }
 
+#' List the canivt cache contents
+#'
+#' Lists the raw `.ivt` inputs (in the ivt cache) and the parsed data Parquets
+#' (in the data cache), one row per file, enriched with catalogue metadata
+#' (matched product number, title, census year, topic) when the file's cache key
+#' matches a product in the [statcan_ivt_catalogue()]. The member sidecars
+#' (`_members.parquet`) and the catalogue cache itself are infrastructure and are
+#' not listed.
+#'
+#' @param catalogue A catalogue tibble (from [statcan_ivt_catalogue()]) used to
+#'   enrich the listing. `NULL` (default) reads the **cached** catalogue if one
+#'   exists and skips enrichment otherwise — it never triggers a scrape, so this
+#'   function works offline.
+#' @return A tibble with one row per cached file: `kind` (`"ivt"` or
+#'   `"parquet"`), `key` (the cache key — the catalogue number for downloaded
+#'   tables, the folder/file name otherwise), `language` (`"en"`/`"fr"` for a
+#'   language-marked Parquet, `NA` for `.ivt` files and old unmarked Parquets),
+#'   `path`, `bytes`, `modified`, and the catalogue columns `catalogue`, `title`,
+#'   `census_year`, `topic` (`NA` when the key matches no product).
+#' @seealso [get_statcan_ivt()], [statcan_ivt_catalogue()]
+#' @export
+list_ivt_cache <- function(catalogue = NULL) {
+  ivt_dir  <- ivt_cache_dir("ivt",  create = FALSE)
+  data_dir <- ivt_cache_dir("data", create = FALSE)
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+
+  # raw .ivt inputs: <ivt_dir>/<key>/<file>.ivt, or a flat <key>.ivt. The key is
+  # the per-table folder name (the .ivt inside can be named differently), or the
+  # file stem when it sits directly in the cache root.
+  ivt_files <- list.files(ivt_dir, pattern = "\\.ivt$", full.names = TRUE,
+                          recursive = TRUE, ignore.case = TRUE)
+  ivt_key <- vapply(ivt_files, function(f)
+    if (norm(dirname(f)) == norm(ivt_dir)) tools::file_path_sans_ext(basename(f))
+    else basename(dirname(f)), "")
+
+  # parsed data Parquets: <data_dir>/<key>[_en|_fr].parquet. Drop the member
+  # sidecars and the catalogue cache (not data tables).
+  pq <- list.files(data_dir, pattern = "\\.parquet$", full.names = TRUE,
+                   ignore.case = TRUE)
+  pq <- pq[!grepl("_members\\.parquet$", pq, ignore.case = TRUE)]
+  pq <- pq[basename(pq) != "statcan_ivt_catalogue.parquet"]
+  pq_stem <- tools::file_path_sans_ext(basename(pq))
+  pq_lang <- rep(NA_character_, length(pq)); pq_key <- pq_stem
+  m <- regmatches(pq_stem, regexec("^(.*)_(en|fr)$", pq_stem, ignore.case = TRUE))
+  for (i in seq_along(pq)) if (length(m[[i]]) == 3L) {
+    pq_key[i] <- m[[i]][2]; pq_lang[i] <- tolower(m[[i]][3])
+  }
+
+  df <- data.frame(
+    kind     = c(rep("ivt", length(ivt_files)), rep("parquet", length(pq))),
+    key      = c(unname(ivt_key), pq_key),
+    language = c(rep(NA_character_, length(ivt_files)), pq_lang),
+    path     = c(ivt_files, pq),
+    stringsAsFactors = FALSE)
+
+  # file stats + catalogue enrichment columns, typed and 0-row-safe (rep(., n))
+  n <- nrow(df)
+  info <- file.info(df$path)
+  df$bytes       <- if (n) info$size  else numeric(0)
+  df$modified    <- if (n) info$mtime else as.POSIXct(character(0))
+  df$catalogue   <- rep(NA_character_, n)
+  df$title       <- rep(NA_character_, n)
+  df$census_year <- rep(NA_integer_, n)
+  df$topic       <- rep(NA_character_, n)
+
+  if (n) {
+    if (is.null(catalogue)) catalogue <- ivt_cached_catalogue(data_dir)
+    if (!is.null(catalogue) && nrow(catalogue) &&
+        "catalogue" %in% names(catalogue)) {
+      cat_norm <- ivt_catalogue_norm(catalogue$catalogue)
+      key_norm <- ivt_catalogue_norm(df$key)
+      idx <- match(key_norm, cat_norm)                       # exact first
+      for (i in which(is.na(idx))) {                         # then prefix
+        h <- which(startsWith(cat_norm, key_norm[i]))
+        if (length(h)) idx[i] <- h[1L]
+      }
+      df$catalogue   <- catalogue$catalogue[idx]
+      df$title       <- catalogue$title[idx]
+      df$census_year <- catalogue$census_year[idx]
+      df$topic       <- catalogue$topic[idx]
+    }
+  }
+
+  df <- df[order(df$key, df$kind, df$language), , drop = FALSE]
+  tibble::as_tibble(df[c("kind", "key", "language", "catalogue", "title",
+                         "census_year", "topic", "bytes", "modified", "path")])
+}
+
+# The cached catalogue tibble read directly from the data cache (no scrape), or
+# NULL when there is no cache / arrow is unavailable.
+ivt_cached_catalogue <- function(data_dir = ivt_cache_dir("data", create = FALSE)) {
+  cf <- file.path(data_dir, "statcan_ivt_catalogue.parquet")
+  if (!file.exists(cf) || !requireNamespace("arrow", quietly = TRUE)) return(NULL)
+  tryCatch(tibble::as_tibble(arrow::read_parquet(cf)), error = function(e) NULL)
+}
+
 # Open the Parquet and attach provenance attributes (plus the member-level
 # sidecar, when one was written, so collect_ivt() finds it on the connection
 # and on any dplyr query built from it).
