@@ -6,15 +6,22 @@
 #'   `canivt.data_cache` or [tempdir()] when unset).
 #' @param labels Passed to [ivt_tidy()]: write labelled columns (`TRUE`,
 #'   default) or the compact integer-id table (`FALSE`).
+#' @param members Also write the member-level table ([ivt_members()]) as a
+#'   `<name>_members.parquet` sidecar next to `path` (`TRUE`, default), so
+#'   [collect_ivt()] can convert dimension columns to full-level factors.
 #' @param ... Passed to [arrow::write_parquet()].
 #' @return `path`, invisibly.
 #' @export
-ivt_write_parquet <- function(x, path = NULL, labels = TRUE, ...) {
+ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE, ...) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to write Parquet.")
   }
   if (is.null(path)) path <- ivt_data_cache_file(x, ".parquet")
   arrow::write_parquet(ivt_tidy(x, labels = labels), path, ...)
+  if (isTRUE(members)) {
+    mem <- ivt_members(x)
+    if (nrow(mem)) arrow::write_parquet(mem, ivt_members_path(path))
+  }
   invisible(path)
 }
 
@@ -60,8 +67,11 @@ ivt_write_metadata <- function(x, dir = NULL) {
 
   members <- do.call(rbind, lapply(meta$dimensions, function(d) {
     if (!length(d$members)) return(NULL)
+    ord <- d$ordinal
+    if (is.null(ord) || length(ord) != length(d$members))
+      ord <- seq_along(d$members)
     data.frame(dimension = d$name, member_id = seq_along(d$members),
-               label = trimws(d$members),
+               ordinal = as.integer(ord), label = trimws(d$members),
                depth = ivt_label_depth(d$members))
   }))
   wr(members, "dimension_members.csv")

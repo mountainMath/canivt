@@ -31,7 +31,10 @@ geography attribute table (slower) so geographies can be labelled by name.}
 \value{
 An \code{\link[arrow:open_dataset]{arrow::open_dataset()}} connection to the Parquet file. The Parquet
 path is attached as \code{attr(., "path")}; the resolved catalogue row (if any)
-as \code{attr(., "catalogue_row")}.
+as \code{attr(., "catalogue_row")}; the member-level table (\code{\link[=ivt_members]{ivt_members()}},
+read from the \verb{_members.parquet} sidecar when present) as
+\code{attr(., "members")} -- \code{\link[=collect_ivt]{collect_ivt()}} uses it to convert dimension
+columns into full-level factors.
 }
 \description{
 One-stop accessor: given a Beyond 20/20 catalogue number, this looks the

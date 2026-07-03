@@ -4,7 +4,7 @@
 \alias{ivt_write_parquet}
 \title{Write an IVT table to Parquet}
 \usage{
-ivt_write_parquet(x, path = NULL, labels = TRUE, ...)
+ivt_write_parquet(x, path = NULL, labels = TRUE, members = TRUE, ...)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
@@ -15,6 +15,10 @@ data cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}, i.e. option
 
 \item{labels}{Passed to \code{\link[=ivt_tidy]{ivt_tidy()}}: write labelled columns (\code{TRUE},
 default) or the compact integer-id table (\code{FALSE}).}
+
+\item{members}{Also write the member-level table (\code{\link[=ivt_members]{ivt_members()}}) as a
+\verb{<name>_members.parquet} sidecar next to \code{path} (\code{TRUE}, default), so
+\code{\link[=collect_ivt]{collect_ivt()}} can convert dimension columns to full-level factors.}
 
 \item{...}{Passed to \code{\link[arrow:write_parquet]{arrow::write_parquet()}}.}
 }

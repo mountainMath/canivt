@@ -963,7 +963,7 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   sizes <- ivt_f2_geo_group_sizes(n_geo)
   nattr <- length(schema) + 1L                       # display Member Name + schema fields
   if (k != 2L * nattr * sum(sizes)) return(NULL)     # irregular layout -> fall back
-  starts <- cumsum(c(1L, head(sizes, -1L) * 256L))   # member start per group
+  starts <- cumsum(c(1L, utils::head(sizes, -1L) * 256L))   # member start per group
   stem_col <- function(stem) {
     hit <- which(startsWith(stem, IVT_F2_ATTR_FIELD) | startsWith(IVT_F2_ATTR_FIELD, stem))
     if (length(hit)) names(IVT_F2_ATTR_FIELD)[hit[1L]] else NA_character_
@@ -971,7 +971,7 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr", "dguid",
             "geo_level", "geo_type", "geo_type_abbr", "prov_abbr", "alt_geo_code",
             "pr_code", "dqf_code", "dqf_note", "dqf_note_strict", "tnr_short_form")
-  out <- setNames(rep(list(rep(NA_character_, n_geo)), length(cols)), cols)
+  out <- stats::setNames(rep(list(rep(NA_character_, n_geo)), length(cols)), cols)
   pos <- 1L
   for (gi in seq_along(sizes)) {
     G <- sizes[gi]; s <- starts[gi]

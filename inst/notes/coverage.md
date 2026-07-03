@@ -42,7 +42,20 @@ copy of each attribute and parse past the rest.
 
 - [~] **French copies of every label** — names, levels, types, footnotes, and the
   Age/Gender member labels (~half the codebook volume). Discarded (EN-only).
-- [~] Per-chunk **member-ordinal arrays** (`1..n`) — used only as anchors.
+- [x] **Member-ordinal arrays** (`1..n`) — now PARSED and SURFACED (2026-07-02),
+  no longer just anchors: `ivt_f2_dim_dir_ordinals()` (dimdir.R) reads each data
+  dimension's ordinal block positionally from its slot directory (a candidate
+  must be a permutation of `1..count`, which rejects numeric label blocks like
+  the reference-period years; dimensions without an ordinal block — e.g. the
+  2-member Year — are ordered by member id). Exposed as `ordinal` on each
+  dimension of `ivt_metadata()`, in `ivt_members()` (the per-column level table,
+  written as a `_members.parquet` sidecar by `ivt_write_parquet()`), and consumed
+  by `collect_ivt()`, which converts dimension columns of collected tidy/Parquet
+  data into factors whose levels are the FULL member list in ordinal order — so
+  filtered-out members stay visible as levels. On every validated table the
+  stored ordinals are the identity (member order), verified on 98-10-0241 and
+  the 1991 legacy 1003011 (Age 1..110, Sex 1..3). The geography chunks' running
+  ordinal delimiters (1..256, 2049.., …) remain anchors only.
 - [~] Block-framing **`<u16>` length prefixes** — we scan instead of using them.
 - [~] The **doubled directory size field** (second copy ignored).
 

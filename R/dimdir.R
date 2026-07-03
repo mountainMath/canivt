@@ -135,6 +135,59 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
     cand[[1L]] else cand[[2L]]
 }
 
+# The member-ordinal block for one data dimension, read positionally from its
+# slot directory. Each dimension's directory lists (before the doubled-name
+# marker and the EN/FR label blocks) a member-ordinal block: a Pascal member
+# array whose records are the members' 1-based ordinals as text. It is the block
+# `ivt_f2_dim_dir_label1()` explicitly skips; here it is the payload. A candidate
+# must be a permutation of 1..count (this rejects label blocks that happen to be
+# numeric, e.g. a reference-period dimension's "2020"/"2015" years); the LAST
+# such entry wins (the member-id table can precede the ordinals with the same
+# shape -- on every validated table both are the identity, so the choice is
+# moot). Returns the integer ordinal of members 1..count, or NULL when the
+# directory stores no ordinal block (e.g. the 2-member reference periods).
+ivt_f2_dim_dir_ordinal1 <- function(raw, dim, dir) {
+  cnt <- as.integer(dim$count)
+  if (is.na(cnt) || cnt < 1L) return(NULL)
+  cand <- NULL
+  for (r in seq_len(nrow(dir))) {
+    len <- dir[r, "len"]
+    if (len <= 8L || len < cnt + 4L) next          # separators / tiny framing
+    win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
+    b <- ivt_find_member_blocks(win, 0L, min_records = 1L)
+    if (!length(b)) next
+    sz <- vapply(b, function(x) length(x$texts), 1L)
+    bi <- which(sz >= cnt & sz <= cnt + 8L)
+    if (!length(bi)) next
+    t <- b[[bi[length(bi)]]]$texts
+    t <- t[(length(t) - cnt + 1L):length(t)]       # trailing `count` records
+    iv <- suppressWarnings(as.integer(t))
+    if (anyNA(iv) || !identical(sort(iv), seq_len(cnt))) next
+    cand <- iv
+  }
+  cand
+}
+
+# Member ordinals for every dimension, read from the header slot table. Returns
+# a list parallel to the descriptor dimensions (element k = dimension k's
+# integer ordinal vector; geography and dimensions without an ordinal block are
+# NULL), or NULL when the slot table itself is absent. A NULL element means the
+# member order IS the stored order (ordinal = member id) -- the consumer
+# defaults to `seq_along(members)`.
+ivt_f2_dim_dir_ordinals <- function(raw) {
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || length(d$dims) < 2L) return(NULL)
+  slots <- ivt_f2_dim_slots(raw)
+  if (is.null(slots)) return(NULL)
+  out <- vector("list", length(d$dims))
+  for (k in 2:length(d$dims)) {
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (is.null(dir)) next
+    out[[k]] <- ivt_f2_dim_dir_ordinal1(raw, d$dims[[k]], dir)
+  }
+  out
+}
+
 # Member labels for every dimension, read from the header slot table. Returns a
 # list parallel to the descriptor dimensions (element k = dimension k's label
 # vector; geography and unresolved dimensions are NULL), or NULL when the slot

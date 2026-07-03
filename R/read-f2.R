@@ -58,7 +58,9 @@ ivt_f2_dim_name <- function(dim, is_geo, vl) {
 # label blocks (`ivt_f2_dim_member_labels()`), so 98-10-0241's six data dimensions,
 # Age/Gender (2021) and Age/Sex (1991) are handled identically. Full dimension
 # names come from the Variable List (by count) when present, otherwise the
-# descriptor's (truncated) display name.
+# descriptor's (truncated) display name. Data dimensions additionally carry
+# `ordinal` (the codebook member-ordinal block, when the slot directory stores
+# one) so member order is available for factor levels (`ivt_members()`).
 ivt_f2_dimensions <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(list())
@@ -66,6 +68,10 @@ ivt_f2_dimensions <- function(raw) {
   # directory (dimdir.R) -- keyed by dimension INDEX, so same-name and same-count
   # dimensions cannot collide, and no tail-window scan is needed.
   dirlab <- ivt_f2_dim_dir_labels(raw)
+  # the member-ordinal blocks (dimdir.R): the codebook's stored member order,
+  # kept on each dimension so factor levels can honour it (collect_ivt()). A
+  # dimension without an ordinal block (NULL) is ordered by member id.
+  dirord <- ivt_f2_dim_dir_ordinals(raw)
   # scan fallbacks, computed only for dimensions the slot directories miss: the
   # name-anchored marker labels (so two dimensions of the same member count --
   # e.g. 98-10-0662's 6-member "French used at work" / "English used at work" --
@@ -98,8 +104,11 @@ ivt_f2_dimensions <- function(raw) {
       if (is.null(m)) m <- name_lut[[dim$name]]
       if (is.null(m)) labels[[as.character(dim$count)]] else m
     }
+    ordinal <- if (!is_geo && !is.null(dirord) && length(dirord) >= i)
+      dirord[[i]] else NULL
     list(name = ivt_f2_dim_name(dim, is_geo, vl), count = dim$count,
-         type = dim$type, is_geography = is_geo, members = members)
+         type = dim$type, is_geography = is_geo, members = members,
+         ordinal = ordinal)
   })
 }
 

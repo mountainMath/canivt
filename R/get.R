@@ -31,7 +31,10 @@
 #' @param quiet Suppress progress messages.
 #' @return An [arrow::open_dataset()] connection to the Parquet file. The Parquet
 #'   path is attached as `attr(., "path")`; the resolved catalogue row (if any)
-#'   as `attr(., "catalogue_row")`.
+#'   as `attr(., "catalogue_row")`; the member-level table ([ivt_members()],
+#'   read from the `_members.parquet` sidecar when present) as
+#'   `attr(., "members")` -- [collect_ivt()] uses it to convert dimension
+#'   columns into full-level factors.
 #' @seealso [statcan_ivt_catalogue()], [read_ivt()]
 #' @export
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
@@ -68,11 +71,14 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   ivt_parquet_connection(parquet, row)
 }
 
-# Open the Parquet and attach provenance attributes.
+# Open the Parquet and attach provenance attributes (plus the member-level
+# sidecar, when one was written, so collect_ivt() finds it on the connection
+# and on any dplyr query built from it).
 ivt_parquet_connection <- function(parquet, row) {
   ds <- arrow::open_dataset(parquet)
   attr(ds, "path") <- parquet
   attr(ds, "catalogue_row") <- row
+  attr(ds, "members") <- ivt_read_members(ivt_members_path(parquet))
   ds
 }
 
