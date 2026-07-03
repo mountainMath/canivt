@@ -178,6 +178,118 @@ ivt_cached_catalogue <- function(data_dir = ivt_cache_dir("data", create = FALSE
   tryCatch(tibble::as_tibble(arrow::read_parquet(cf)), error = function(e) NULL)
 }
 
+# Which listing rows match any of `wants` (catalogue numbers / cache keys), on
+# the normalised `key` or enriched `catalogue`, exact or prefix (either
+# direction, so "98-10-0241" matches key "98100241" and catalogue
+# "98-10-0241-01").
+ivt_cache_match <- function(rows, wants) {
+  wn <- ivt_catalogue_norm(wants)
+  wn <- wn[nzchar(wn)]
+  if (!length(wn) || !nrow(rows)) return(rep(FALSE, nrow(rows)))
+  kn <- ivt_catalogue_norm(rows$key)
+  cn <- ivt_catalogue_norm(ifelse(is.na(rows$catalogue), "", rows$catalogue))
+  hit <- function(a) vapply(seq_along(a), function(i) {
+    if (!nzchar(a[i])) return(FALSE)
+    any(a[i] == wn | startsWith(a[i], wn) | startsWith(wn, a[i]))
+  }, logical(1))
+  hit(kn) | hit(cn)
+}
+
+#' Prune files from the canivt cache
+#'
+#' Deletes raw `.ivt` inputs and/or parsed data Parquets from the cache. The
+#' target files can be given three ways (combinable):
+#'
+#' - **catalogue numbers / cache keys** via `x` (a character vector), matched as
+#'   in [list_ivt_cache()] (normalised key or catalogue number, exact or prefix);
+#' - **format / language filters** via `kind` (`"ivt"` / `"parquet"`) and
+#'   `language` (`"en"` / `"fr"`);
+#' - a **filtered listing** via `x` (a data frame from [list_ivt_cache()], e.g.
+#'   `list_ivt_cache() |> dplyr::filter(census_year == 2016)`): exactly its `path`
+#'   files are removed.
+#'
+#' With no `x`/`kind`/`language`, **every** listed cache file is targeted (the
+#' member sidecars and the catalogue cache are never touched here). When a
+#' Parquet is removed and no remaining Parquet references its shared
+#' `<key>_members.parquet` sidecar, the orphaned sidecar is removed too
+#' (`sidecars = TRUE`); emptied per-table `.ivt` folders are cleaned up.
+#'
+#' @param x A character vector of catalogue numbers / cache keys, **or** a data
+#'   frame from [list_ivt_cache()] (its `path` column is used), or `NULL` (all
+#'   listed files, subject to `kind`/`language`).
+#' @param kind Restrict to `"ivt"` and/or `"parquet"` files. `NULL` = both.
+#' @param language Restrict Parquets to these languages (`"en"`/`"fr"`); `.ivt`
+#'   files (language `NA`) are excluded when `language` is set. `NULL` = all.
+#' @param sidecars Also delete a `<key>_members.parquet` sidecar once no Parquet
+#'   references it (default `TRUE`).
+#' @param dry_run If `TRUE`, report what would be removed without deleting.
+#' @return Invisibly, a tibble of the removed (or, for `dry_run`, matched) files
+#'   with `kind` (`"ivt"`/`"parquet"`/`"sidecar"`), `path` and `bytes`.
+#' @seealso [list_ivt_cache()]
+#' @export
+prune_ivt_cache <- function(x = NULL, kind = NULL, language = NULL,
+                            sidecars = TRUE, dry_run = FALSE) {
+  data_dir <- ivt_cache_dir("data", create = FALSE)
+  ivt_dir  <- ivt_cache_dir("ivt",  create = FALSE)
+
+  if (is.data.frame(x)) {
+    rows <- x
+    if (!"path" %in% names(rows))
+      cli::cli_abort("Data frame {.arg x} must have a {.field path} column (from {.fn list_ivt_cache}).")
+  } else {
+    rows <- list_ivt_cache()
+    if (!is.null(x)) rows <- rows[ivt_cache_match(rows, as.character(x)), , drop = FALSE]
+  }
+  if (!is.null(kind) && "kind" %in% names(rows))
+    rows <- rows[rows$kind %in% kind, , drop = FALSE]
+  if (!is.null(language) && "language" %in% names(rows))
+    rows <- rows[!is.na(rows$language) & rows$language %in% language, , drop = FALSE]
+
+  paths <- unique(rows$path[!is.na(rows$path) & file.exists(rows$path)])
+
+  # orphaned member sidecars: those not referenced by any Parquet that remains
+  # after `paths` are removed (also sweeps pre-existing orphans).
+  orphan <- character(0)
+  all_side <- list.files(data_dir, pattern = "_members\\.parquet$",
+                         full.names = TRUE, ignore.case = TRUE)
+  if (isTRUE(sidecars) && length(all_side)) {
+    cur <- list_ivt_cache()
+    remaining_pq <- cur$path[cur$kind == "parquet" & !(cur$path %in% paths)]
+    keep <- normalizePath(unique(ivt_members_path(remaining_pq)), mustWork = FALSE)
+    orphan <- all_side[!(normalizePath(all_side, mustWork = FALSE) %in% keep)]
+  }
+
+  remove <- unique(c(paths, orphan))
+  bytes <- file.info(remove)$size
+  removed <- tibble::tibble(
+    kind = ifelse(grepl("\\.ivt$", remove, ignore.case = TRUE), "ivt",
+           ifelse(grepl("_members\\.parquet$", remove, ignore.case = TRUE),
+                  "sidecar", "parquet")),
+    path = remove, bytes = bytes)
+
+  total <- sum(removed$bytes, na.rm = TRUE)
+  size <- format(structure(total, class = "object_size"), units = "auto")
+  if (!nrow(removed)) {
+    cli::cli_inform("No matching cache files to prune.")
+    return(invisible(removed))
+  }
+  if (dry_run) {
+    cli::cli_inform("Would remove {nrow(removed)} file{?s} ({size}).")
+    return(invisible(removed))
+  }
+
+  unlink(remove)
+  # remove now-empty per-table .ivt folders (never the ivt cache root itself)
+  root <- normalizePath(ivt_dir, mustWork = FALSE)
+  for (d in unique(dirname(paths[removed$kind == "ivt"]))) {
+    if (normalizePath(d, mustWork = FALSE) == root) next
+    if (dir.exists(d) && !length(list.files(d, all.files = TRUE, no.. = TRUE)))
+      unlink(d, recursive = TRUE)
+  }
+  cli::cli_inform("Removed {nrow(removed)} file{?s} ({size}).")
+  invisible(removed)
+}
+
 # Open the Parquet and attach provenance attributes (plus the member-level
 # sidecar, when one was written, so collect_ivt() finds it on the connection
 # and on any dplyr query built from it).

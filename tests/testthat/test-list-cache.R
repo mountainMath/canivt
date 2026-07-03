@@ -82,3 +82,52 @@ test_that("list_ivt_cache returns a typed empty tibble for empty caches", {
   expect_true(all(c("kind", "key", "language", "catalogue", "bytes", "path") %in%
                     names(tab)))
 })
+
+test_that("prune_ivt_cache dry_run reports without deleting", {
+  skip_if_not_installed("arrow")
+  d <- seed_cache()
+  before <- list.files(d$data)
+  out <- prune_ivt_cache(kind = "parquet", language = "fr", dry_run = TRUE)
+  expect_equal(nrow(out), 1L)
+  expect_match(basename(out$path), "_fr\\.parquet$")
+  expect_setequal(list.files(d$data), before)     # nothing deleted
+})
+
+test_that("prune_ivt_cache by catalogue removes files + orphaned sidecar + empty folder", {
+  skip_if_not_installed("arrow")
+  d <- seed_cache()
+  # add a second, unrelated table that must survive
+  arrow::write_parquet(data.frame(a = 1L), file.path(d$data, "other_en.parquet"))
+  arrow::write_parquet(data.frame(a = 1L), file.path(d$data, "other_members.parquet"))
+
+  out <- prune_ivt_cache("98-10-0241")
+  # the ivt, both parquets and the now-orphaned shared sidecar are gone
+  expect_setequal(out$kind, c("ivt", "parquet", "sidecar"))
+  expect_false(file.exists(file.path(d$data, "98100241_en.parquet")))
+  expect_false(file.exists(file.path(d$data, "98100241_fr.parquet")))
+  expect_false(file.exists(file.path(d$data, "98100241_members.parquet")))
+  # the emptied per-table folder is cleaned up
+  expect_false(dir.exists(file.path(d$ivt, "98-10-0241")))
+  # unrelated files and the catalogue cache survive
+  expect_true(file.exists(file.path(d$data, "other_en.parquet")))
+  expect_true(file.exists(file.path(d$data, "other_members.parquet")))
+  expect_true(file.exists(file.path(d$data, "statcan_ivt_catalogue.parquet")))
+  # a still-referenced sidecar is NOT removed (only orphans)
+  expect_false("other_members.parquet" %in% basename(out$path))
+})
+
+test_that("prune_ivt_cache accepts a filtered listing and keeps a sidecar with a survivor", {
+  skip_if_not_installed("arrow")
+  d <- seed_cache()
+  # remove only the French parquet via a filtered listing; en survives -> sidecar kept
+  sel <- list_ivt_cache()
+  sel <- sel[sel$kind == "parquet" & !is.na(sel$language) & sel$language == "fr", ]
+  prune_ivt_cache(sel)
+  expect_false(file.exists(file.path(d$data, "98100241_fr.parquet")))
+  expect_true(file.exists(file.path(d$data, "98100241_en.parquet")))
+  expect_true(file.exists(file.path(d$data, "98100241_members.parquet")))  # en still refs it
+})
+
+test_that("prune_ivt_cache errors on a data frame without a path column", {
+  expect_error(prune_ivt_cache(data.frame(key = "x")), "path")
+})
