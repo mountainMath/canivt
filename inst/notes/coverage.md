@@ -447,7 +447,13 @@ corpus table:
   `ivt_decode()` still runs with a loud `canivt_skipped_pages` warning, but the
   file is unsupported: its cells were never ground-truthed and its metadata
   needs two heuristic fallbacks. To revisit: validate a `0x0a` page against a
-  B2020 viewer slice.
+  B2020 viewer slice. Note 2016203 is the odd one out, not the 2016 norm: the
+  large crosstabs 98-400-X2016328 (5-dim, 4,868 geos) and 98-400-X2016261
+  (6-dim, 86.8 MB, 14.4M cells) are ordinary supported-container tables —
+  every geometry invariant clean, cells viewer-exact (360/360 and 154/154 on
+  leading geographies, 1,680/1,680 on deep-tail members 3000+/4860+), and **no
+  sentinel suppression anywhere** (suppression there is realised as
+  absent/zero cells).
 
 ### Note: the `0xa` marker variant and empty geographies
 

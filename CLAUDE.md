@@ -50,6 +50,13 @@ on all six reference tables:
   descriptor anchor dropped) 72/72; **95F0223XDB96001** (5,007 geos, duplicate
   member labels) 1,134/1,134; **95F0200XDB96003** (43,234 enumeration areas)
   200/200.
+- **Large 2016 `98-400-X` crosstabs** in the supported container, needing zero
+  code changes: **98-400-X2016328** (18.7 MB, 5-dim, 4,868 geos) 360/360 vs the
+  viewer plus **1,680/1,680 on deep-tail geographies** (member positions
+  3000+/4860+, pinning member order); **98-400-X2016261** (86.8 MB, 6-dim,
+  14.4M cells) 154/154. No sentinel suppression anywhere in either table —
+  suppression in this container is realised as absent/zero cells (the
+  `b3 = 0x0a` sentinel pages remain unique to the rejected 2016203).
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every

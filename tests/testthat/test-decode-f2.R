@@ -849,3 +849,29 @@ test_that("the 1996 census tables decode (viewer-validated)", {
     expect_equal(ivt_f2_geo_count(raw), 43234L)
   }
 })
+
+test_that("large 2016 98-400-X crosstabs decode in the supported container", {
+  # 98-400-X2016328 (18.7 MB, 5-dim, 4,868 geographies) and 98-400-X2016261
+  # (86.8 MB, 6-dim) are ordinary family-1 layouts: every page satisfies the
+  # geometry invariants and the cells validate exact against the B2020 viewer
+  # (360/360 and 154/154 on the leading geographies; 1,680/1,680 on deep-tail
+  # geographies at member positions 3000+/4860+, confirming member order).
+  p <- locate_sample_ivt("", "98-400-X2016328", "98-400-X2016328.ivt")
+  skip_if(p == "", "no 98-400-X2016328 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_equal(ivt_family(raw), 1L)
+  expect_equal(ivt_f2_geo_count(raw), 4868L)
+  lay <- ivt_layout(raw)
+  expect_false(lay$geo_in_page)
+  expect_equal(lay$window_count, 6L)
+  cells <- ivt_decode(raw)
+  expect_equal(nrow(cells), 2912227L)
+  # Canada x all-total coordinates: total commuters (viewer-validated)
+  tot <- cells[cells$geo == 1L & cells$commuting == 1L & cells$time == 1L &
+                 cells$main == 1L & cells$distance == 1L, ]
+  expect_equal(tot$value, 13891675)
+  m <- ivt_f2_metadata(raw)
+  expect_equal(m$n_geographies, 4868L)
+  expect_equal(m$geographies$geo_name[1], "Canada")
+  expect_equal(m$geographies$geo_uid[1:2], c("01", "10"))
+})
