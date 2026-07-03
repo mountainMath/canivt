@@ -461,7 +461,20 @@ corpus table:
   viewer renders exactly those geographies' cells blank; published
   geographies' absent cells all render as 0. `read_ivt()` exposes both
   signals: `metadata$geographies$has_data` (presence-derived, all tables) and
-  `metadata$geographies$dqf_code` (inline pre-DGUID tables). 2016120's
+  `metadata$geographies$dqf_code` (inline pre-DGUID tables). Cross-vintage
+  survey of the two signals: `has_data` is universal by construction (any
+  vintage, any table — it is the per-TABLE truth). The dqf flag is a
+  per-geography descriptor with per-SUBJECT digits, where digit value `9`
+  marks suppression for that subject: exact 888/888 on both 2016 income
+  tables (digit 5 = income), a consistent subset on the 2016 commuting table
+  (its 5 empty geos all carry the flag, but most flagged geos publish
+  commuting data), and multi-9 patterns (`09999`, `19999`, …) on the 2021 CT
+  table's 90 empty geographies (2021's schema DQF_CODE uses the same 5-digit
+  convention). The 1996/2011 flags carry 0/1/2 quality rounds without 9s, and
+  their empty geographies (806 on 95F0250, 137 on 95F0200, 2 on 2011) are NOT
+  flag-marked — consistent with genuinely empty/tiny areas rather than
+  quality suppression; 1991 has no 9-convention and no empty geographies in
+  the corpus table. 2016120's
   geography also reads positionally now: its dim-1 directory carries two
   odd-sized auxiliary blocks BEFORE the group runs (2016328/2016261 carry the
   same two after them), so the run walk accepts a small leading-block skip —
