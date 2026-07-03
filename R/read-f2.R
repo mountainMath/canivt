@@ -60,7 +60,11 @@ ivt_f2_dim_name <- function(dim, is_geo, vl) {
 # names come from the Variable List (by count) when present, otherwise the
 # descriptor's (truncated) display name. Data dimensions additionally carry
 # `ordinal` (the codebook member-ordinal block, when the slot directory stores
-# one) so member order is available for factor levels (`ivt_members()`).
+# one) so member order is available for factor levels (`ivt_members()`), and the
+# FRENCH copies `members_fr` (the Desc Français label block) + `name_fr` (the
+# French dimension name, from the French "Total - ..." member) -- both read
+# through the slot directory's dictionary-schema order, NULL/NA when only the
+# English-only scan fallbacks resolve.
 ivt_f2_dimensions <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(list())
@@ -79,7 +83,8 @@ ivt_f2_dimensions <- function(raw) {
   # count-keyed block heuristics.
   miss <- if (length(d$dims) > 1L)
     which(vapply(2:length(d$dims), function(i)
-      is.null(dirlab) || length(dirlab) < i || is.null(dirlab[[i]]),
+      is.null(dirlab) || length(dirlab) < i || is.null(dirlab[[i]]) ||
+        is.null(dirlab[[i]]$en),
       logical(1))) + 1L
   else integer(0)
   labels <- list(); name_lut <- list()
@@ -99,16 +104,23 @@ ivt_f2_dimensions <- function(raw) {
   lapply(seq_along(d$dims), function(i) {
     dim <- d$dims[[i]]
     is_geo <- i == 1L                       # geography is the first dimension
+    dl <- if (!is.null(dirlab) && length(dirlab) >= i) dirlab[[i]] else NULL
     members <- if (is_geo) NULL else {
-      m <- if (!is.null(dirlab) && length(dirlab) >= i) dirlab[[i]] else NULL
+      m <- dl$en                            # slot-directory English labels (primary)
       if (is.null(m)) m <- name_lut[[dim$name]]
-      if (is.null(m)) labels[[as.character(dim$count)]] else m
+      if (is.null(m)) m <- labels[[as.character(dim$count)]]
+      m
     }
+    # French member labels + the French dimension name come from the slot
+    # directory's second (Desc Français) block; the scan fallbacks are English
+    # only, so these are NULL/NA on a dimension the directories miss.
+    members_fr <- if (is_geo) NULL else dl$fr
+    name_fr <- if (is_geo || is.null(dl)) NA_character_ else dl$name_fr
     ordinal <- if (!is_geo && !is.null(dirord) && length(dirord) >= i)
       dirord[[i]] else NULL
-    list(name = ivt_f2_dim_name(dim, is_geo, vl), count = dim$count,
-         type = dim$type, is_geography = is_geo, members = members,
-         ordinal = ordinal)
+    list(name = ivt_f2_dim_name(dim, is_geo, vl), name_fr = name_fr,
+         count = dim$count, type = dim$type, is_geography = is_geo,
+         members = members, members_fr = members_fr, ordinal = ordinal)
   })
 }
 
@@ -227,6 +239,8 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
     universe          = info$universe,
     dimensions        = dims,                                  # uniform per-dim model
     dimension_names   = vapply(dims, `[[`, "", "name"),
+    dimension_names_fr = vapply(dims, function(d)
+                          if (is.null(d$name_fr)) NA_character_ else d$name_fr, ""),
     dimension_counts  = vapply(dims, `[[`, NA_integer_, "count"),
     geographies       = geographies,
     n_geographies     = if (!is.na(n_geo)) n_geo else {

@@ -78,18 +78,56 @@ ivt_f2_dim_dir <- function(raw, k, slots = NULL) {
   if (ok(d)) d else NULL
 }
 
-# Member labels for one data dimension, read positionally from its slot
-# directory. The directory lists (among framing/separator entries) the
-# dimension's doubled-name marker block followed by the EN then FR member
-# blocks, so the labels are the first two member-array entries after the marker
-# entry: each candidate's trailing `count` records are taken (the EN block can
-# carry a couple of leading framing bytes the Pascal scan misreads as records,
-# e.g. 98-10-0077's Ages), and English is picked per pair by `ivt_f2_frscore()`
-# over the members where the two differ (a tie means the pair is identical,
-# e.g. the numeric reference-period years). The marker entry is matched to the
-# dimension NAME (prefix match, as `ivt_f2_match_dim()`), so a directory that
-# belongs to something else on an unknown layout yields NULL rather than wrong
-# labels. Returns the label vector (untrimmed, as stored) or NULL.
+# Which of a dimension's two member-label blocks is English, decided by a
+# STRUCTURAL marker rather than by scoring the text. Every data dimension carries
+# a dictionary/schema block (`81 02 <nfields> 00` ...) that names its columns --
+# `Code`, `English Desc`, `Desc Francais`/`Desc fran` (1991), `_Description`,
+# `_ItemNotes2` -- and the member-label blocks are laid down in that schema order.
+# So the language of the two blocks is fixed by whether `English Desc` precedes
+# `Desc Fran...` in the schema (it does on every validated table). Returns TRUE
+# (English block first), FALSE (French first), or NA when no schema block is
+# found (the caller then falls back to `ivt_f2_frscore()`).
+ivt_f2_dim_dict_en_first <- function(raw, dir) {
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; ln <- dir[r, "len"]
+    if (ln < 12L || ln > 400L || off + ln > length(raw)) next
+    if (as.integer(raw[off + 1L]) != 0x81L) next
+    txt <- raw_to_latin1(raw[(off + 1L):(off + ln)])
+    # case-insensitive: 98-10-* store "Desc Francais", 1991 "Desc fran"
+    ie <- regexpr("English Desc", txt, ignore.case = TRUE)
+    ifr <- regexpr("Desc Fran", txt, ignore.case = TRUE)
+    if (ie > 0L && ifr > 0L) return(ie < ifr)
+  }
+  NA
+}
+
+# The dimension name embedded in a "Total - <name>" member label (the first
+# member of a dimension is almost always "Total - <dimension name>", in whichever
+# language the block is). Used to recover the FRENCH dimension name, which the
+# header Variable List (English only) does not carry. Returns NA when the first
+# member is not a "Total - ..." label (e.g. the Statistics dimension, whose first
+# member is "Number of private households" / "Nombre de menages prives").
+ivt_f2_total_name <- function(labels) {
+  if (!length(labels) || is.na(labels[1])) return(NA_character_)
+  m <- regmatches(labels[1],
+                  regexec("^\\s*Total\\s*[-\u2013\u2014]\\s*(.+?)\\s*$", labels[1]))[[1]]
+  if (length(m) >= 2L && nzchar(trimws(m[2]))) trimws(m[2]) else NA_character_
+}
+
+# English AND French member labels for one data dimension, read positionally from
+# its slot directory. The directory lists (among framing/separator entries) the
+# dimension's doubled-name marker block followed by the two member-label blocks in
+# dictionary-schema order (English Desc then Desc Francais). We take the first two
+# clean member-array entries after the marker (each candidate's trailing `count`
+# records; the block can carry a couple of leading framing bytes the Pascal scan
+# misreads as records, e.g. 98-10-0077's Ages), then assign languages by the
+# schema (`ivt_f2_dim_dict_en_first()`) -- a structural marker, not a content
+# guess. `ivt_f2_frscore()` is used only when the schema block is absent (then a
+# loud fallback fires). The marker entry is matched to the dimension NAME (prefix
+# match), so a directory that belongs to something else on an unknown layout
+# yields NULL rather than wrong labels. Returns `list(en, fr, name_fr)` (labels
+# untrimmed, as stored; `fr`/`name_fr` NULL/NA when only one block is present) or
+# NULL.
 ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   cnt <- as.integer(dim$count)
   if (is.na(cnt) || cnt < 1L) return(NULL)
@@ -129,10 +167,21 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
     if (length(cand) == 2L) break
   }
   if (!length(cand)) return(NULL)
-  if (length(cand) == 1L) return(cand[[1L]])
-  diff <- which(cand[[1L]] != cand[[2L]])
-  if (ivt_f2_frscore(cand[[1L]][diff]) <= ivt_f2_frscore(cand[[2L]][diff]))
-    cand[[1L]] else cand[[2L]]
+  if (length(cand) == 1L)
+    return(list(en = cand[[1L]], fr = NULL, name_fr = NA_character_))
+  # assign languages by the dictionary schema order (English Desc / Desc Francais)
+  en_first <- ivt_f2_dim_dict_en_first(raw, dir)
+  if (is.na(en_first)) {
+    diff <- which(cand[[1L]] != cand[[2L]])
+    en_first <- ivt_f2_frscore(cand[[1L]][diff]) <= ivt_f2_frscore(cand[[2L]][diff])
+    ivt_fallback(paste(
+      "Dimension {.val {nm}} carries no English Desc/Desc Fran schema block;",
+      "its English vs French label blocks were told apart by content score,",
+      "not the schema order."))
+  }
+  en <- if (en_first) cand[[1L]] else cand[[2L]]
+  fr <- if (en_first) cand[[2L]] else cand[[1L]]
+  list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr))
 }
 
 # The member-ordinal block for one data dimension, read positionally from its
@@ -188,11 +237,11 @@ ivt_f2_dim_dir_ordinals <- function(raw) {
   out
 }
 
-# Member labels for every dimension, read from the header slot table. Returns a
-# list parallel to the descriptor dimensions (element k = dimension k's label
-# vector; geography and unresolved dimensions are NULL), or NULL when the slot
-# table itself is absent. Unresolved dimensions fall back to the marker/count
-# scans in `ivt_f2_dimensions()`.
+# English + French member labels for every dimension, read from the header slot
+# table. Returns a list parallel to the descriptor dimensions (element k =
+# dimension k's `list(en, fr, name_fr)`; geography and unresolved dimensions are
+# NULL), or NULL when the slot table itself is absent. Unresolved dimensions fall
+# back to the marker/count scans in `ivt_f2_dimensions()` (English only).
 ivt_f2_dim_dir_labels <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || length(d$dims) < 2L) return(NULL)

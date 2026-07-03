@@ -9,9 +9,10 @@ fake_ivt <- function() {
   dims <- list(
     list(name = "Geography", count = 2L, type = 0x10L, is_geography = TRUE,
          members = NULL, ordinal = NULL),
-    list(name = "Age (in single years)", count = 3L, type = 0x07L,
-         is_geography = FALSE,
+    list(name = "Age (in single years)", name_fr = "Âge", count = 3L,
+         type = 0x07L, is_geography = FALSE,
          members = c("Total - Age", "  0 to 14 years", "  15 years and over"),
+         members_fr = c("Total - Âge", "  0 à 14 ans", "  15 ans et plus"),
          ordinal = 1:3))
   meta <- list(
     product_id = "test-0001", title_en = "Test table", title_fr = "Table test",
@@ -40,6 +41,7 @@ test_that("ivt_members builds the full level table in ordinal order", {
   expect_equal(age$dimension, rep(age_col, 3))
   expect_equal(age$label[2], "  0 to 14 years")     # raw label keeps indentation
   expect_equal(age$level[2], "0 to 14 years")       # level is trimmed like ivt_tidy
+  expect_equal(age$level_fr, c("Total - Âge", "0 à 14 ans", "15 ans et plus"))
   expect_equal(age$depth, c(0L, 1L, 1L))
   geo <- m[m$column == "geo_uid", ]
   expect_equal(geo$level, c("2021A000011124", "2021A000235"))

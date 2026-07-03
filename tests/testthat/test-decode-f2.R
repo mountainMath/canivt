@@ -162,8 +162,11 @@ test_that("the header dimension slot table resolves every dimension's directory"
   # them needs no tail-window scan and reproduces the marker-anchored labels.
   lab <- ivt_f2_dim_dir_labels(raw)
   expect_null(lab[[1L]])                            # geography has no member labels
-  expect_equal(length(lab[[2L]]), 128L)
-  expect_equal(trimws(lab[[3L]]), c("Total - Gender", "Men+", "Women+"))
+  expect_equal(length(lab[[2L]]$en), 128L)
+  expect_equal(trimws(lab[[3L]]$en), c("Total - Gender", "Men+", "Women+"))
+  # French labels are read from the same slot directory (Desc Français block)
+  expect_equal(trimws(lab[[3L]]$fr), c("Total - Genre", "Hommes+", "Femmes+"))
+  expect_equal(length(lab[[2L]]$fr), 128L)
 })
 
 test_that("footnotes are read from the slot directories and attributed", {
@@ -703,10 +706,13 @@ test_that("the 1991 legacy file carries the same dimension slot table", {
   expect_null(ivt_f2_dqf_legend(raw))
   # Age (110) and Sex (3) label positionally, byte-identical to the marker scan
   lab <- ivt_f2_dim_dir_labels(raw)
-  expect_equal(length(lab[[2L]]), 110L)
-  expect_equal(trimws(lab[[2L]][1]), "Total - Age Groups")
-  expect_equal(trimws(lab[[3L]]), c("Total - Sex", "Male", "Female"))
-  expect_identical(lab[[3L]], ivt_f2_dimensions(raw)[[3L]]$members)
+  expect_equal(length(lab[[2L]]$en), 110L)
+  expect_equal(trimws(lab[[2L]]$en[1]), "Total - Age Groups")
+  expect_equal(trimws(lab[[3L]]$en), c("Total - Sex", "Male", "Female"))
+  expect_identical(lab[[3L]]$en, ivt_f2_dimensions(raw)[[3L]]$members)
+  # bilingual: the French block reads from the same directory (schema-ordered)
+  expect_equal(trimws(lab[[3L]]$fr), c("Total - Sexe", "Masculin", "Féminin"))
+  expect_identical(lab[[3L]]$fr, ivt_f2_dimensions(raw)[[3L]]$members_fr)
 })
 
 test_that("the page directory is located from the header pointer (no marker scan)", {

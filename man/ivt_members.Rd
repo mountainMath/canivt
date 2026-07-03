@@ -23,7 +23,8 @@ A tibble with columns \code{column} (the tidy column name), \code{dimension}
 \code{member_id} (1-based StatCan member id), \code{ordinal} (the codebook
 member-ordinal; equals \code{member_id} when the file stores no ordinal block),
 \code{label} (the stored label, untrimmed), \code{level} (the label as it appears in
-the tidy output) and \code{depth} (hierarchy depth implied by the label
+the tidy output), \code{level_fr} (the French label, \code{NA} when the file carries
+none for that column) and \code{depth} (hierarchy depth implied by the label
 indentation).
 }
 \description{

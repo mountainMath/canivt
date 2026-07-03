@@ -78,16 +78,24 @@ ivt_write_metadata <- function(x, dir = NULL) {
     ord <- d$ordinal
     if (is.null(ord) || length(ord) != length(d$members))
       ord <- seq_along(d$members)
-    data.frame(dimension = d$name, member_id = seq_along(d$members),
+    fr <- d$members_fr                              # NULL when only EN resolved
+    label_fr <- if (!is.null(fr) && length(fr) == length(d$members))
+      trimws(fr) else NA_character_
+    data.frame(dimension = d$name,
+               dimension_fr = if (is.null(d$name_fr)) NA_character_ else d$name_fr,
+               member_id = seq_along(d$members),
                ordinal = as.integer(ord), label = trimws(d$members),
-               depth = ivt_label_depth(d$members))
+               label_fr = label_fr, depth = ivt_label_depth(d$members))
   }))
   wr(members, "dimension_members.csv")
 
   geos <- meta$geographies
   geo_df <- data.frame(member_id = geos$member_id)
-  if (!is.null(geos$geo_name)) geo_df$name <- geos$geo_name
-  if (!is.null(geos$geo_uid))  geo_df$uid  <- geos$geo_uid
+  if (!is.null(geos$geo_label))    geo_df$label    <- geos$geo_label
+  if (!is.null(geos$geo_label_fr)) geo_df$label_fr <- geos$geo_label_fr
+  if (!is.null(geos$geo_name))     geo_df$name     <- geos$geo_name
+  if (!is.null(geos$geo_name_fr))  geo_df$name_fr  <- geos$geo_name_fr
+  if (!is.null(geos$geo_uid))      geo_df$uid      <- geos$geo_uid
   wr(geo_df, "geographies.csv")
 
   if (length(meta$footnotes)) {

@@ -40,8 +40,26 @@ exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
 The codebook scan finds 5,942 member-array blocks; we extract the English/first
 copy of each attribute and parse past the rest.
 
-- [~] **French copies of every label** — names, levels, types, footnotes, and the
-  Age/Gender member labels (~half the codebook volume). Discarded (EN-only).
+- [x] **French member labels + French dimension names — now DECODED and SURFACED**
+  (2026-07-03). Each dimension's slot directory carries a dictionary/schema block
+  naming its fields `Code · English Desc · Desc Français` (`Desc fran` in 1991), and
+  the two member-label blocks are laid down in that **schema order** — so English
+  vs French is decided by a **structural marker** (`ivt_f2_dim_dict_en_first()`),
+  not by content-scoring (`ivt_f2_frscore()` is only the fallback when the schema
+  block is absent, and it fires a loud warning). `ivt_f2_dim_dir_label1()` returns
+  `list(en, fr, name_fr)`; each dimension of `ivt_metadata()` gains `members_fr`
+  and `name_fr`, and `dimension_names_fr` is exposed on the metadata list. The
+  **French dimension name** comes from the French `Total - <name>` first member
+  (the header Variable List is English-only) — full and accented (e.g. `Mode
+  d'occupation incluant la présence de paiements hypothécaires…`); NA for the
+  Statistics-type dimension whose first member is not a `Total - …` label.
+  `ivt_write_metadata()` writes `dimension_fr`/`label_fr` (dimension_members.csv)
+  and `name_fr`/`label_fr` (geographies.csv); `ivt_members()` / the
+  `_members.parquet` sidecar carries `level_fr`. Validated on 98-10-0241 (6 dims),
+  -0023/-0129 (incl. the Gender/Sex dimensions frscore cannot separate), and the
+  1991 legacy 1003011. Geography names/labels were already bilingual
+  (`geo_*_fr`); footnotes (`Footnote`/`Renvoi`), the DQF legend and the title were
+  already EN+FR.
 - [x] **Member-ordinal arrays** (`1..n`) — now PARSED and SURFACED (2026-07-02),
   no longer just anchors: `ivt_f2_dim_dir_ordinals()` (dimdir.R) reads each data
   dimension's ordinal block positionally from its slot directory (a candidate
@@ -655,9 +673,10 @@ directory slot table**:
 
 For the **reference tables** (family 1: 98-10-0241; 3-dim family 2: 98-10-0023;
 legacy: 1003011), ~100 % of information-bearing bytes are identified and the data
-plus all geography/dimension/footnote metadata decode exactly. The bit-level gaps
-there, by size: (1) the **French label copies** (~half the codebook, recoverable,
-just not surfaced); (2) a few small header/marker bytes with inferred/unknown
+plus all geography/dimension/footnote metadata decode exactly, in **both
+languages** (English + French member labels, dimension names, geography
+names/labels, footnotes, DQF legend and title). The bit-level gaps
+there, by size: (1) a few small header/marker bytes with inferred/unknown
 semantics and the dense value arrays' **bitstream per-member coding** (their
 values decode fully via the plain siblings' NA pattern); plus the
 footnote↔*member* linkage (dimension linkage is decoded) and structured member

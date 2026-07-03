@@ -125,10 +125,11 @@ test_that("the header dimension slot table drives labels and footnotes", {
   expect_equal(nrow(ivt_f2_dim_dir(raw, 1L, slots)), 58L)   # geography codebook
   lab <- ivt_f2_dim_dir_labels(raw)
   expect_null(lab[[1L]])
-  expect_equal(lengths(lab)[-1L], c(9L, 16L, 13L, 3L, 6L, 7L))
+  expect_equal(vapply(lab[-1L], function(x) length(x$en), 1L),
+               c(9L, 16L, 13L, 3L, 6L, 7L))
   # the positional read is byte-identical to the marker-anchored scan
   dims <- ivt_f2_dimensions(raw)
-  for (i in 2:7) expect_identical(lab[[i]], dims[[i]]$members)
+  for (i in 2:7) expect_identical(lab[[i]]$en, dims[[i]]$members)
   # footnotes come from the slot directories, attributed to their dimension
   fn <- ivt_f2_dir_footnotes(raw)
   expect_equal(length(fn), 20L)
@@ -140,14 +141,16 @@ test_that("all 98-10-0077 dimensions label from the slot directories, incl. Ages
   skip_if(p == "", "no 98-10-0077 sample (set CANIVT_SAMPLE_IVT_F1_077)")
   raw <- readBin(p, "raw", n = file.info(p)$size)
   lab <- ivt_f2_dim_dir_labels(raw)
-  expect_equal(lengths(lab)[-1L], c(9L, 5L, 18L, 6L, 22L, 2L))
+  expect_equal(vapply(lab[-1L], function(x) length(x$en), 1L),
+               c(9L, 5L, 18L, 6L, 22L, 2L))
   # Ages' EN block carries 2 leading framing records (only its trailing 18 are
   # labels) and Year is a 2-member reference period whose EN/FR blocks are
   # identical -- both read correctly by position.
-  expect_match(trimws(lab[[4L]][1]), "^Total - Economic families by number")
-  expect_equal(trimws(lab[[7L]]), c("2020", "2015"))
+  expect_match(trimws(lab[[4L]]$en[1]), "^Total - Economic families by number")
+  expect_equal(trimws(lab[[7L]]$en), c("2020", "2015"))
+  expect_equal(trimws(lab[[7L]]$fr), c("2020", "2015"))   # Year: identical EN/FR
   dims <- ivt_f2_dimensions(raw)
-  for (i in 2:7) expect_identical(lab[[i]], dims[[i]]$members)
+  for (i in 2:7) expect_identical(lab[[i]]$en, dims[[i]]$members)
 })
 
 test_that("footnotes are extracted in both languages", {
@@ -191,6 +194,23 @@ test_that("Canada decodes to the published tenure totals", {
   expect_equal(row$value,
                c(14687350L, 9787420L, 5870875L, 3916550L, 4899925L,
                  576625L, 4323300L))
+})
+
+test_that("dimensions carry French labels + a French dimension name", {
+  p <- sample_ivt()
+  skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
+  m <- ivt_metadata(p)
+  ten <- m$dimensions[[7]]                          # Tenure
+  expect_equal(ten$name, "Tenure including presence of mortgage payments and subsidized housing")
+  expect_equal(ten$name_fr,
+               "Mode d'occupation incluant la présence de paiements hypothécaires et le logement subventionné")
+  expect_equal(length(ten$members_fr), length(ten$members))
+  expect_equal(trimws(ten$members[2]), "Owner")
+  expect_equal(trimws(ten$members_fr[2]), "Propriétaire")
+  # the Statistics dimension has no "Total - ..." member, so no French name
+  expect_true(is.na(m$dimensions[[5]]$name_fr))
+  # exposed on the metadata list
+  expect_equal(m$dimension_names_fr[7], ten$name_fr)
 })
 
 test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int16/int32, Health straddle)", {

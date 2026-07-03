@@ -25,7 +25,8 @@
 #'   `member_id` (1-based StatCan member id), `ordinal` (the codebook
 #'   member-ordinal; equals `member_id` when the file stores no ordinal block),
 #'   `label` (the stored label, untrimmed), `level` (the label as it appears in
-#'   the tidy output) and `depth` (hierarchy depth implied by the label
+#'   the tidy output), `level_fr` (the French label, `NA` when the file carries
+#'   none for that column) and `depth` (hierarchy depth implied by the label
 #'   indentation).
 #' @seealso [collect_ivt()]
 #' @export
@@ -40,6 +41,11 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
   datacols <- setdiff(names(x$cells), c("geo", "value"))
   colnm <- ivt_data_colnames(datacols, meta, dim_names)
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
+  # French level, aligned to the English member vector `v` (NA when unavailable)
+  fr_level <- function(v, fr) {
+    if (is.null(fr) || length(fr) != length(v)) rep(NA_character_, length(v))
+    else fix(fr)
+  }
   for (j in seq_along(datacols)) {
     if (j > length(data_dims)) break
     d <- data_dims[[j]]
@@ -51,10 +57,12 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
       column = colnm[j], dimension = d$name,
       member_id = seq_along(d$members), ordinal = as.integer(ord),
       label = d$members, level = fix(d$members),
+      level_fr = fr_level(d$members, d$members_fr),
       depth = ivt_label_depth(d$members))
   }
   # geography columns, as ivt_tidy emits them (uids are never trimmed there)
   geo <- meta$geographies
+  geo_fr <- c(geo_label = "geo_label_fr", geo_name = "geo_name_fr")
   for (col in c("geo_label", "geo_name", "geo_uid", "geo_level")) {
     v <- geo[[col]]
     if (is.null(v)) next
@@ -62,12 +70,14 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
       column = col, dimension = "Geography",
       member_id = as.integer(seq_along(v)), ordinal = as.integer(seq_along(v)),
       label = v, level = if (col == "geo_uid") v else fix(v),
+      level_fr = if (col %in% names(geo_fr)) fr_level(v, geo[[geo_fr[[col]]]])
+                 else rep(NA_character_, length(v)),
       depth = ivt_label_depth(v))
   }
   if (!length(out)) return(tibble::tibble(
     column = character(0), dimension = character(0), member_id = integer(0),
     ordinal = integer(0), label = character(0), level = character(0),
-    depth = integer(0)))
+    level_fr = character(0), depth = integer(0)))
   do.call(rbind, out)
 }
 
