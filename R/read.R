@@ -126,15 +126,28 @@ ivt_metadata <- function(path) {
 #'
 #' @param x An `ivt` object from [read_ivt()].
 #' @param labels If `TRUE` (default) replace member-id columns with member
-#'   labels; if `FALSE` return the compact integer-id table unchanged.
+#'   labels; if `FALSE` return the compact integer-id table (member ids).
 #' @param trim_labels If `TRUE` (default) strip the hierarchy-indentation spaces
 #'   from member labels.
+#' @param dim_names How to name the data-dimension columns: `"label"` (default)
+#'   uses the full English dimension name (e.g.
+#'   `Age of primary household maintainer`); `"slug"` uses the terse structural
+#'   slug (e.g. `age`). Geography columns (`geo_name`, `geo_uid`, ...) are
+#'   unaffected. The choice applies to both `labels` values.
 #' @return A tibble.
 #' @export
-ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE) {
+ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
+                     dim_names = c("label", "slug")) {
   stopifnot(inherits(x, "ivt"))
-  if (!labels) return(x$cells)
-  ivt_f2_tidy(x, trim_labels)
+  dim_names <- match.arg(dim_names)
+  if (!labels) {
+    cells <- x$cells
+    datacols <- setdiff(names(cells), c("geo", "value"))
+    names(cells)[match(datacols, names(cells))] <-
+      ivt_data_colnames(datacols, x$metadata, dim_names)
+    return(cells)
+  }
+  ivt_f2_tidy(x, trim_labels, dim_names)
 }
 
 #' @export

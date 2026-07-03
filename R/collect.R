@@ -16,6 +16,10 @@
 #' @param x An `ivt` object from [read_ivt()].
 #' @param trim_labels Trim the hierarchy-indentation whitespace from `level`
 #'   the same way [ivt_tidy()] does by default (`TRUE`).
+#' @param dim_names How the data-dimension `column` names are formed, matching
+#'   [ivt_tidy()]: `"label"` (default, the full English dimension name) or
+#'   `"slug"` (the terse structural slug). Must match the tidy output the levels
+#'   will be joined to.
 #' @return A tibble with columns `column` (the tidy column name), `dimension`
 #'   (the full dimension name; `"Geography"` for the geography columns),
 #'   `member_id` (1-based StatCan member id), `ordinal` (the codebook
@@ -25,14 +29,16 @@
 #'   indentation).
 #' @seealso [collect_ivt()]
 #' @export
-ivt_members <- function(x, trim_labels = TRUE) {
+ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
   stopifnot(inherits(x, "ivt"))
+  dim_names <- match.arg(dim_names)
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
   out <- list()
   # data dimensions: the cells' data columns line up with the non-geography
   # dimensions in declaration order (the same positional match ivt_f2_tidy uses)
   datacols <- setdiff(names(x$cells), c("geo", "value"))
+  colnm <- ivt_data_colnames(datacols, meta, dim_names)
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
   for (j in seq_along(datacols)) {
     if (j > length(data_dims)) break
@@ -42,7 +48,7 @@ ivt_members <- function(x, trim_labels = TRUE) {
     if (is.null(ord) || length(ord) != length(d$members))
       ord <- seq_along(d$members)
     out[[length(out) + 1L]] <- tibble::tibble(
-      column = datacols[j], dimension = d$name,
+      column = colnm[j], dimension = d$name,
       member_id = seq_along(d$members), ordinal = as.integer(ord),
       label = d$members, level = fix(d$members),
       depth = ivt_label_depth(d$members))
@@ -91,17 +97,23 @@ ivt_members <- function(x, trim_labels = TRUE) {
 #'   `geo_name`, `geo_uid`, `geo_level`) to factors. Default `FALSE`: large
 #'   tables carry tens of thousands of geographies, which makes for unwieldy
 #'   factor levels.
+#' @param dim_names For `ivt` objects, how to name the data-dimension columns
+#'   (passed to [ivt_tidy()] and [ivt_members()]): `"label"` (default) or
+#'   `"slug"`. Ignored for the Arrow / Parquet forms, where the column names are
+#'   already fixed by how the Parquet was written.
 #' @param ... For `ivt` objects, passed to [ivt_tidy()].
 #' @return A tibble with the dimension columns converted to factors.
 #' @export
-collect_ivt <- function(x, members = NULL, geography = FALSE, ...) {
+collect_ivt <- function(x, members = NULL, geography = FALSE,
+                        dim_names = c("label", "slug"), ...) {
+  dim_names <- match.arg(dim_names)
   if (inherits(x, "ivt")) {
     if (is.null(members)) {
       dots <- list(...)
       trim <- if (is.null(dots$trim_labels)) TRUE else isTRUE(dots$trim_labels)
-      members <- ivt_members(x, trim_labels = trim)
+      members <- ivt_members(x, trim_labels = trim, dim_names = dim_names)
     }
-    df <- ivt_tidy(x, ...)
+    df <- ivt_tidy(x, dim_names = dim_names, ...)
   } else if (is.character(x) && length(x) == 1L) {
     if (!requireNamespace("arrow", quietly = TRUE)) {
       cli::cli_abort("Package {.pkg arrow} is required to read Parquet.")

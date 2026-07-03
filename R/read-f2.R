@@ -261,10 +261,34 @@ ivt_f2_footnotes <- function(raw, dims = NULL) {
   sc
 }
 
+# Output column name per data dimension. `datacols` is the cells' data-column
+# order (the structural slugs, in descriptor order). `dim_names` selects "slug"
+# (keep the terse structural names, e.g. `age`/`tenure`) or "label" (the full
+# English dimension name from the metadata -- Variable List, count-stripped --
+# e.g. `Age of primary household maintainer`). Both `ivt_tidy()` and
+# `ivt_members()` name columns through this, so the tidy output and the level
+# sidecar always agree. Names are made unique so two dimensions sharing a leading
+# word (slug) or a display name (label) stay distinct.
+ivt_data_colnames <- function(datacols, meta, dim_names = c("label", "slug")) {
+  dim_names <- match.arg(dim_names)
+  if (dim_names == "slug" || !length(datacols)) return(datacols)
+  data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
+  nm <- datacols
+  for (j in seq_along(datacols)) {
+    if (j > length(data_dims)) break
+    v <- data_dims[[j]]$name
+    if (!is.null(v) && !is.na(v) && nzchar(v)) nm[j] <- v      # else keep the slug
+  }
+  make.unique(nm, sep = "")
+}
+
 # Label a decoded cell table (any family): geography by name and/or uid, each data
 # dimension by its member name. Cells are keyed by 1-based member ids (`geo`, plus
-# one column per data dimension), so labels join by direct indexing.
-ivt_f2_tidy <- function(x, trim_labels = TRUE) {
+# one column per data dimension), so labels join by direct indexing. Data columns
+# are named by `dim_names` (the full English dimension label by default, the terse
+# structural slug when "slug").
+ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
+  dim_names <- match.arg(dim_names)
   cells <- x$cells
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
@@ -284,10 +308,11 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE) {
   # dimensions in declaration order; label each from its dimension's member list.
   datacols <- setdiff(names(cells), c("geo", "value"))
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
+  outnames <- ivt_data_colnames(datacols, meta, dim_names)
   for (j in seq_along(datacols)) {
     col <- datacols[j]
     labs <- if (j <= length(data_dims)) data_dims[[j]]$members else NULL
-    out[[col]] <- if (!is.null(labs)) fix(labs)[cells[[col]]] else cells[[col]]
+    out[[outnames[j]]] <- if (!is.null(labs)) fix(labs)[cells[[col]]] else cells[[col]]
   }
   out$value <- cells$value
   out

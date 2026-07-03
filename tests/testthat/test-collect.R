@@ -27,28 +27,37 @@ fake_ivt <- function() {
             class = "ivt")
 }
 
+# the fake table's single data dimension: full English label vs terse slug
+age_col <- "Age (in single years)"
+
 test_that("ivt_members builds the full level table in ordinal order", {
   m <- ivt_members(fake_ivt())
-  expect_setequal(unique(m$column), c("age", "geo_name", "geo_uid"))
-  age <- m[m$column == "age", ]
+  # data column defaults to the full dimension label; geography columns unchanged
+  expect_setequal(unique(m$column), c(age_col, "geo_name", "geo_uid"))
+  age <- m[m$column == age_col, ]
   expect_equal(age$member_id, 1:3)
   expect_equal(age$ordinal, 1:3)
+  expect_equal(age$dimension, rep(age_col, 3))
   expect_equal(age$label[2], "  0 to 14 years")     # raw label keeps indentation
   expect_equal(age$level[2], "0 to 14 years")       # level is trimmed like ivt_tidy
   expect_equal(age$depth, c(0L, 1L, 1L))
   geo <- m[m$column == "geo_uid", ]
   expect_equal(geo$level, c("2021A000011124", "2021A000235"))
   expect_equal(unique(geo$dimension), "Geography")
+  # dim_names = "slug" names the data column by its structural slug
+  expect_setequal(unique(ivt_members(fake_ivt(), dim_names = "slug")$column),
+                  c("age", "geo_name", "geo_uid"))
 })
 
 test_that("collect_ivt on an ivt object yields factors with ALL member levels", {
   x <- fake_ivt()
   df <- collect_ivt(x)
-  expect_s3_class(df$age, "factor")
+  expect_s3_class(df[[age_col]], "factor")
   # the third member never occurs in the cells but is still a level
-  expect_equal(levels(df$age),
+  expect_equal(levels(df[[age_col]]),
                c("Total - Age", "0 to 14 years", "15 years and over"))
-  expect_equal(as.character(df$age), c("Total - Age", "0 to 14 years", "Total - Age"))
+  expect_equal(as.character(df[[age_col]]),
+               c("Total - Age", "0 to 14 years", "Total - Age"))
   # geography stays character by default, converts on request
   expect_type(df$geo_name, "character")
   df2 <- collect_ivt(x, geography = TRUE)
@@ -56,12 +65,19 @@ test_that("collect_ivt on an ivt object yields factors with ALL member levels", 
   expect_equal(levels(df2$geo_name), c("Canada", "Ontario"))
 })
 
+test_that("collect_ivt dim_names = 'slug' names the data column by its slug", {
+  df <- collect_ivt(fake_ivt(), dim_names = "slug")
+  expect_s3_class(df$age, "factor")
+  expect_equal(levels(df$age),
+               c("Total - Age", "0 to 14 years", "15 years and over"))
+})
+
 test_that("collect_ivt maps the compact integer-id table through member ids", {
   x <- fake_ivt()
   df <- collect_ivt(x, labels = FALSE)
-  expect_s3_class(df$age, "factor")
-  expect_equal(as.integer(df$age), c(1L, 2L, 1L))   # ordinal order == id order
-  expect_equal(levels(df$age),
+  expect_s3_class(df[[age_col]], "factor")
+  expect_equal(as.integer(df[[age_col]]), c(1L, 2L, 1L))   # ordinal order == id order
+  expect_equal(levels(df[[age_col]]),
                c("Total - Age", "0 to 14 years", "15 years and over"))
   expect_type(df$geo, "integer")                    # the id key is left alone
 })
@@ -70,7 +86,7 @@ test_that("collect_ivt honours a non-identity ordinal order", {
   x <- fake_ivt()
   x$metadata$dimensions[[2]]$ordinal <- c(3L, 1L, 2L)
   df <- collect_ivt(x)
-  expect_equal(levels(df$age),
+  expect_equal(levels(df[[age_col]]),
                c("0 to 14 years", "15 years and over", "Total - Age"))
 })
 
@@ -84,7 +100,7 @@ test_that("collect_ivt round-trips through the Parquet sidecar and keeps filtere
 
   # a bare path
   df <- collect_ivt(path)
-  expect_equal(levels(df$age),
+  expect_equal(levels(df[[age_col]]),
                c("Total - Age", "0 to 14 years", "15 years and over"))
 
   # an arrow dataset with attributes (as get_statcan_ivt attaches them)
@@ -92,13 +108,13 @@ test_that("collect_ivt round-trips through the Parquet sidecar and keeps filtere
   attr(ds, "path") <- path
   attr(ds, "members") <- ivt_read_members(ivt_members_path(path))
   df <- collect_ivt(ds)
-  expect_s3_class(df$age, "factor")
+  expect_s3_class(df[[age_col]], "factor")
 
   # a dplyr query that filters a member out entirely: its level survives
-  q <- dplyr::filter(ds, age == "Total - Age")
+  q <- dplyr::filter(ds, .data[[age_col]] == "Total - Age")
   df <- collect_ivt(q)
-  expect_equal(as.character(unique(df$age)), "Total - Age")
-  expect_equal(levels(df$age),
+  expect_equal(as.character(unique(df[[age_col]])), "Total - Age")
+  expect_equal(levels(df[[age_col]]),
                c("Total - Age", "0 to 14 years", "15 years and over"))
 })
 
@@ -113,7 +129,7 @@ test_that("collect_ivt aborts helpfully without a member table", {
   expect_error(collect_ivt(ds), "member-level")
   # but an explicit member table always works
   df <- collect_ivt(ds, members = ivt_members(x))
-  expect_s3_class(df$age, "factor")
+  expect_s3_class(df[[age_col]], "factor")
 })
 
 test_that("the member-ordinal blocks parse from the sample IVT", {

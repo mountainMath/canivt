@@ -27,6 +27,9 @@
 #'   geography attribute table (slower) so geographies can be labelled by name.
 #' @param labels Passed to [ivt_write_parquet()]: write labelled columns
 #'   (`TRUE`, default) or the compact integer-id table.
+#' @param dim_names Passed to [ivt_write_parquet()]: name the data-dimension
+#'   columns by the full English dimension label (`"label"`, default) or the
+#'   terse structural slug (`"slug"`).
 #' @param refresh Re-download and re-parse even if cached outputs exist.
 #' @param quiet Suppress progress messages.
 #' @return An [arrow::open_dataset()] connection to the Parquet file. The Parquet
@@ -38,10 +41,12 @@
 #' @seealso [statcan_ivt_catalogue()], [read_ivt()]
 #' @export
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
+                            dim_names = c("label", "slug"),
                             refresh = FALSE, quiet = FALSE) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to open the parsed Parquet.")
   }
+  dim_names <- match.arg(dim_names)
   catalogue <- as.character(catalogue)
   key <- ivt_catalogue_key(catalogue)
   parquet <- file.path(ivt_cache_dir("data"), paste0(key, ".parquet"))
@@ -66,7 +71,7 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   # 3. Decode and cache the tidy table as Parquet.
   if (!quiet) cli::cli_inform("Decoding {.path {ivt_path}}")
   tab <- read_ivt(ivt_path, geo_attributes = geo_attributes)
-  ivt_write_parquet(tab, path = parquet, labels = labels)
+  ivt_write_parquet(tab, path = parquet, labels = labels, dim_names = dim_names)
 
   ivt_parquet_connection(parquet, row)
 }

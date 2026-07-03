@@ -9,17 +9,23 @@
 #' @param members Also write the member-level table ([ivt_members()]) as a
 #'   `<name>_members.parquet` sidecar next to `path` (`TRUE`, default), so
 #'   [collect_ivt()] can convert dimension columns to full-level factors.
+#' @param dim_names How to name the data-dimension columns (passed to
+#'   [ivt_tidy()] and the member sidecar): `"label"` (default, the full English
+#'   dimension name) or `"slug"` (the terse structural slug).
 #' @param ... Passed to [arrow::write_parquet()].
 #' @return `path`, invisibly.
 #' @export
-ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE, ...) {
+ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
+                              dim_names = c("label", "slug"), ...) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to write Parquet.")
   }
+  dim_names <- match.arg(dim_names)
   if (is.null(path)) path <- ivt_data_cache_file(x, ".parquet")
-  arrow::write_parquet(ivt_tidy(x, labels = labels), path, ...)
+  arrow::write_parquet(ivt_tidy(x, labels = labels, dim_names = dim_names),
+                       path, ...)
   if (isTRUE(members)) {
-    mem <- ivt_members(x)
+    mem <- ivt_members(x, dim_names = dim_names)
     if (nrow(mem)) arrow::write_parquet(mem, ivt_members_path(path))
   }
   invisible(path)
@@ -34,9 +40,11 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE, ...
 #'   [utils::write.csv()]).
 #' @return `path`, invisibly.
 #' @export
-ivt_write_csv <- function(x, path = NULL, labels = TRUE, ...) {
+ivt_write_csv <- function(x, path = NULL, labels = TRUE,
+                          dim_names = c("label", "slug"), ...) {
+  dim_names <- match.arg(dim_names)
   if (is.null(path)) path <- ivt_data_cache_file(x, ".csv")
-  df <- ivt_tidy(x, labels = labels)
+  df <- ivt_tidy(x, labels = labels, dim_names = dim_names)
   if (requireNamespace("readr", quietly = TRUE)) {
     readr::write_csv(df, path, ...)
   } else {

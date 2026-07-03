@@ -4,16 +4,22 @@
 \alias{ivt_tidy}
 \title{Tidy an \code{ivt} object into a labelled data frame}
 \usage{
-ivt_tidy(x, labels = TRUE, trim_labels = TRUE)
+ivt_tidy(x, labels = TRUE, trim_labels = TRUE, dim_names = c("label", "slug"))
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
 
 \item{labels}{If \code{TRUE} (default) replace member-id columns with member
-labels; if \code{FALSE} return the compact integer-id table unchanged.}
+labels; if \code{FALSE} return the compact integer-id table (member ids).}
 
 \item{trim_labels}{If \code{TRUE} (default) strip the hierarchy-indentation spaces
 from member labels.}
+
+\item{dim_names}{How to name the data-dimension columns: \code{"label"} (default)
+uses the full English dimension name (e.g.
+\verb{Age of primary household maintainer}); \code{"slug"} uses the terse structural
+slug (e.g. \code{age}). Geography columns (\code{geo_name}, \code{geo_uid}, ...) are
+unaffected. The choice applies to both \code{labels} values.}
 }
 \value{
 A tibble.

@@ -4,7 +4,13 @@
 \alias{ivt_write_csv}
 \title{Write an IVT table to CSV}
 \usage{
-ivt_write_csv(x, path = NULL, labels = TRUE, ...)
+ivt_write_csv(
+  x,
+  path = NULL,
+  labels = TRUE,
+  dim_names = c("label", "slug"),
+  ...
+)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
@@ -14,6 +20,10 @@ cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}).}
 
 \item{labels}{Passed to \code{\link[=ivt_tidy]{ivt_tidy()}}: write labelled columns (\code{TRUE},
 default) or the compact integer-id table (\code{FALSE}).}
+
+\item{dim_names}{How to name the data-dimension columns (passed to
+\code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"label"} (default, the full English
+dimension name) or \code{"slug"} (the terse structural slug).}
 
 \item{...}{Passed to the CSV writer (\code{\link[readr:write_csv]{readr::write_csv()}} if available, else
 \code{\link[utils:write.csv]{utils::write.csv()}}).}

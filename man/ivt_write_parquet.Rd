@@ -4,7 +4,14 @@
 \alias{ivt_write_parquet}
 \title{Write an IVT table to Parquet}
 \usage{
-ivt_write_parquet(x, path = NULL, labels = TRUE, members = TRUE, ...)
+ivt_write_parquet(
+  x,
+  path = NULL,
+  labels = TRUE,
+  members = TRUE,
+  dim_names = c("label", "slug"),
+  ...
+)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
@@ -19,6 +26,10 @@ default) or the compact integer-id table (\code{FALSE}).}
 \item{members}{Also write the member-level table (\code{\link[=ivt_members]{ivt_members()}}) as a
 \verb{<name>_members.parquet} sidecar next to \code{path} (\code{TRUE}, default), so
 \code{\link[=collect_ivt]{collect_ivt()}} can convert dimension columns to full-level factors.}
+
+\item{dim_names}{How to name the data-dimension columns (passed to
+\code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"label"} (default, the full English
+dimension name) or \code{"slug"} (the terse structural slug).}
 
 \item{...}{Passed to \code{\link[arrow:write_parquet]{arrow::write_parquet()}}.}
 }

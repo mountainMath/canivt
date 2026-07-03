@@ -4,13 +4,18 @@
 \alias{ivt_members}
 \title{Member levels of an IVT table}
 \usage{
-ivt_members(x, trim_labels = TRUE)
+ivt_members(x, trim_labels = TRUE, dim_names = c("label", "slug"))
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
 
 \item{trim_labels}{Trim the hierarchy-indentation whitespace from \code{level}
 the same way \code{\link[=ivt_tidy]{ivt_tidy()}} does by default (\code{TRUE}).}
+
+\item{dim_names}{How the data-dimension \code{column} names are formed, matching
+\code{\link[=ivt_tidy]{ivt_tidy()}}: \code{"label"} (default, the full English dimension name) or
+\code{"slug"} (the terse structural slug). Must match the tidy output the levels
+will be joined to.}
 }
 \value{
 A tibble with columns \code{column} (the tidy column name), \code{dimension}

@@ -130,7 +130,12 @@ test_that("family-2 ivt_tidy labels geography by DGUID and ages/genders", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
   x <- read_ivt(p)
-  td <- ivt_tidy(x)
+  # default: data columns named by the full English dimension label
+  expect_equal(names(ivt_tidy(x)),
+               c("geo_uid", "Age (in single years), average age and median age",
+                 "Gender", "value"))
+  # slug mode for the value checks below
+  td <- ivt_tidy(x, dim_names = "slug")
   expect_equal(names(td), c("geo_uid", "age", "gender", "value"))
 
   can <- td[x$cells$geo == 1L, ]
@@ -350,7 +355,9 @@ test_that("family-2 ivt_tidy labels geography by name when requested", {
   expect_false(is.null(x$metadata$geographies$geo_name))
   td <- ivt_tidy(x)
   expect_equal(names(td),
-               c("geo_label", "geo_name", "geo_uid", "geo_level", "age", "gender", "value"))
+               c("geo_label", "geo_name", "geo_uid", "geo_level",
+                 "Age (in single years), average age and median age",
+                 "Gender", "value"))
   can <- td[x$cells$geo == 1L, ]
   expect_equal(unique(can$geo_label), "Canada")
   expect_equal(unique(can$geo_name), "Canada")
@@ -533,7 +540,7 @@ test_that("read_ivt() handles the legacy 1991 table end-to-end", {
 
   # default tidy now labels geography from the marker-anchored inline codebook
   # (name + character GEOUID), the same content-free path used for 2006/2011
-  td <- ivt_tidy(x)
+  td <- ivt_tidy(x, dim_names = "slug")
   expect_equal(names(td), c("geo_name", "geo_uid", "single", "sex", "value"))
   expect_type(td$geo_uid, "character")
   ca <- td[td$geo_name == "Canada", ]

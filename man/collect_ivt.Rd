@@ -4,7 +4,13 @@
 \alias{collect_ivt}
 \title{Collect IVT data with dimension columns as factors}
 \usage{
-collect_ivt(x, members = NULL, geography = FALSE, ...)
+collect_ivt(
+  x,
+  members = NULL,
+  geography = FALSE,
+  dim_names = c("label", "slug"),
+  ...
+)
 }
 \arguments{
 \item{x}{An \code{ivt} object, an Arrow dataset / dplyr-on-Arrow query, or a
@@ -18,6 +24,11 @@ from \code{x} (an attached \code{members} attribute, or the Parquet's
 \code{geo_name}, \code{geo_uid}, \code{geo_level}) to factors. Default \code{FALSE}: large
 tables carry tens of thousands of geographies, which makes for unwieldy
 factor levels.}
+
+\item{dim_names}{For \code{ivt} objects, how to name the data-dimension columns
+(passed to \code{\link[=ivt_tidy]{ivt_tidy()}} and \code{\link[=ivt_members]{ivt_members()}}): \code{"label"} (default) or
+\code{"slug"}. Ignored for the Arrow / Parquet forms, where the column names are
+already fixed by how the Parquet was written.}
 
 \item{...}{For \code{ivt} objects, passed to \code{\link[=ivt_tidy]{ivt_tidy()}}.}
 }

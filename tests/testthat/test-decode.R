@@ -170,18 +170,24 @@ test_that("Canada decodes to the published tenure totals", {
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
   tab <- read_ivt(p)
   expect_equal(nrow(tab$cells), 7489464L)
+  # by default data columns are named by the full English dimension label
   td <- ivt_tidy(tab)
-  # the uniform decoder names data columns by each dimension's slug (the
-  # lower-cased leading word of its descriptor name), descriptor order.
   expect_equal(setdiff(names(td), c("geo_name", "geo_uid", "value")),
+               c("Age of primary household maintainer",
+                 "Household type including census family structure",
+                 "Period of construction", "Statistics", "Housing indicators",
+                 "Tenure including presence of mortgage payments and subsidized housing"))
+  # dim_names = "slug" keeps the terse structural slugs (descriptor order)
+  tds <- ivt_tidy(tab, dim_names = "slug")
+  expect_equal(setdiff(names(tds), c("geo_name", "geo_uid", "value")),
                c("age", "household", "period", "statistics", "housing", "tenure"))
-  row <- td[td$geo_uid == "2021A000011124" &
-    td$age == "Total - Age of primary household maintainer" &
-    td$household ==
+  row <- tds[tds$geo_uid == "2021A000011124" &
+    tds$age == "Total - Age of primary household maintainer" &
+    tds$household ==
       "Total - Household type including census family structure" &
-    td$period == "Total - Period of construction" &
-    td$statistics == "Number of private households" &
-    td$housing == "Total - Housing indicators", ]
+    tds$period == "Total - Period of construction" &
+    tds$statistics == "Number of private households" &
+    tds$housing == "Total - Housing indicators", ]
   expect_equal(row$value,
                c(14687350L, 9787420L, 5870875L, 3916550L, 4899925L,
                  576625L, 4323300L))
