@@ -130,24 +130,30 @@ ivt_metadata <- function(path) {
 #' @param trim_labels If `TRUE` (default) strip the hierarchy-indentation spaces
 #'   from member labels.
 #' @param dim_names How to name the data-dimension columns: `"label"` (default)
-#'   uses the full English dimension name (e.g.
-#'   `Age of primary household maintainer`); `"slug"` uses the terse structural
-#'   slug (e.g. `age`). Geography columns (`geo_name`, `geo_uid`, ...) are
-#'   unaffected. The choice applies to both `labels` values.
+#'   uses the full dimension name (e.g. `Age of primary household maintainer`, or
+#'   its French equivalent when `language = "fr"`); `"slug"` uses the terse
+#'   structural slug (e.g. `age`), which is language-neutral. The choice applies
+#'   to both `labels` values.
+#' @param language Output language for labels and label-derived column names:
+#'   `"en"` (default) or `"fr"`. Also accepts `"eng"`/`"fra"` and any case (it is
+#'   lower-cased). French falls back to English wherever the file carries no
+#'   French copy (e.g. the language-neutral `geo_uid`, or a dimension with no
+#'   French name).
 #' @return A tibble.
 #' @export
 ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
-                     dim_names = c("label", "slug")) {
+                     dim_names = c("label", "slug"), language = "en") {
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
+  language <- ivt_norm_lang(language)
   if (!labels) {
     cells <- x$cells
     datacols <- setdiff(names(cells), c("geo", "value"))
     names(cells)[match(datacols, names(cells))] <-
-      ivt_data_colnames(datacols, x$metadata, dim_names)
+      ivt_data_colnames(datacols, x$metadata, dim_names, language)
     return(cells)
   }
-  ivt_f2_tidy(x, trim_labels, dim_names)
+  ivt_f2_tidy(x, trim_labels, dim_names, language)
 }
 
 #' @export

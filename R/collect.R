@@ -17,9 +17,13 @@
 #' @param trim_labels Trim the hierarchy-indentation whitespace from `level`
 #'   the same way [ivt_tidy()] does by default (`TRUE`).
 #' @param dim_names How the data-dimension `column` names are formed, matching
-#'   [ivt_tidy()]: `"label"` (default, the full English dimension name) or
-#'   `"slug"` (the terse structural slug). Must match the tidy output the levels
-#'   will be joined to.
+#'   [ivt_tidy()]: `"label"` (default, the full dimension name) or `"slug"` (the
+#'   terse structural slug). Must match the tidy output the levels will be joined
+#'   to.
+#' @param language Language for the `column` names (label mode), matching
+#'   [ivt_tidy()]: `"en"` (default) or `"fr"`. The table always carries both the
+#'   English `level` and the French `level_fr`, so a single sidecar serves both
+#'   languages; only the label-derived `column` names follow `language`.
 #' @return A tibble with columns `column` (the tidy column name), `dimension`
 #'   (the full dimension name; `"Geography"` for the geography columns),
 #'   `member_id` (1-based StatCan member id), `ordinal` (the codebook
@@ -30,16 +34,18 @@
 #'   indentation).
 #' @seealso [collect_ivt()]
 #' @export
-ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
+ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
+                        language = "en") {
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
+  language <- ivt_norm_lang(language)
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
   out <- list()
   # data dimensions: the cells' data columns line up with the non-geography
   # dimensions in declaration order (the same positional match ivt_f2_tidy uses)
   datacols <- setdiff(names(x$cells), c("geo", "value"))
-  colnm <- ivt_data_colnames(datacols, meta, dim_names)
+  colnm <- ivt_data_colnames(datacols, meta, dim_names, language)
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
   # French level, aligned to the English member vector `v` (NA when unavailable)
   fr_level <- function(v, fr) {
@@ -111,19 +117,26 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
 #'   (passed to [ivt_tidy()] and [ivt_members()]): `"label"` (default) or
 #'   `"slug"`. Ignored for the Arrow / Parquet forms, where the column names are
 #'   already fixed by how the Parquet was written.
+#' @param language Factor-level language: `"en"` (default) or `"fr"`. For `ivt`
+#'   objects it is passed to [ivt_tidy()]/[ivt_members()] (French labels and
+#'   column names); for the Arrow / Parquet forms it selects the French `level_fr`
+#'   from the sidecar as the factor levels and must match the language the Parquet
+#'   was written in.
 #' @param ... For `ivt` objects, passed to [ivt_tidy()].
 #' @return A tibble with the dimension columns converted to factors.
 #' @export
 collect_ivt <- function(x, members = NULL, geography = FALSE,
-                        dim_names = c("label", "slug"), ...) {
+                        dim_names = c("label", "slug"), language = "en", ...) {
   dim_names <- match.arg(dim_names)
+  language <- ivt_norm_lang(language)
   if (inherits(x, "ivt")) {
     if (is.null(members)) {
       dots <- list(...)
       trim <- if (is.null(dots$trim_labels)) TRUE else isTRUE(dots$trim_labels)
-      members <- ivt_members(x, trim_labels = trim, dim_names = dim_names)
+      members <- ivt_members(x, trim_labels = trim, dim_names = dim_names,
+                             language = language)
     }
-    df <- ivt_tidy(x, dim_names = dim_names, ...)
+    df <- ivt_tidy(x, dim_names = dim_names, language = language, ...)
   } else if (is.character(x) && length(x) == 1L) {
     if (!requireNamespace("arrow", quietly = TRUE)) {
       cli::cli_abort("Package {.pkg arrow} is required to read Parquet.")
@@ -144,7 +157,7 @@ collect_ivt <- function(x, members = NULL, geography = FALSE,
            Parquet (e.g. {.code get_statcan_ivt(..., refresh = TRUE)}) so the
            {.file _members.parquet} sidecar is written."))
   }
-  ivt_factorize(df, members, geography = geography)
+  ivt_factorize(df, members, geography = geography, language = language)
 }
 
 # The sidecar path for a data Parquet: <name>_members.parquet next to it.
@@ -192,19 +205,23 @@ ivt_locate_members <- function(x) {
 # Numeric columns are the compact member-id table (`labels = FALSE`) and are
 # mapped to their labels while converting; the integer `geo` key has no level
 # rows (the geography levels live on geo_label/geo_name/geo_uid/geo_level) and
-# is left as is.
-ivt_factorize <- function(df, members, geography = FALSE) {
+# is left as is. `language = "fr"` uses the French `level_fr` where the column
+# has one (per column, so a column with no French copy -- which the tidy output
+# also left English -- keeps its English levels).
+ivt_factorize <- function(df, members, geography = FALSE, language = "en") {
   if (!isTRUE(geography)) {
     members <- members[members$dimension != "Geography", , drop = FALSE]
   }
+  has_fr <- language == "fr" && "level_fr" %in% names(members)
   for (col in unique(members$column)) {
     if (!col %in% names(df)) next
     m <- members[members$column == col, , drop = FALSE]
     m <- m[order(m$ordinal, m$member_id), , drop = FALSE]
-    lvls <- unique(m$level)
+    lev <- if (has_fr && !all(is.na(m$level_fr))) m$level_fr else m$level
+    lvls <- unique(lev)
     lvls <- lvls[!is.na(lvls)]         # e.g. undecodable geo_name code partials
     orig <- df[[col]]
-    v <- if (is.numeric(orig)) m$level[match(orig, m$member_id)] else orig
+    v <- if (is.numeric(orig)) lev[match(orig, m$member_id)] else orig
     f <- factor(v, levels = lvls)
     dropped <- sum(!is.na(orig) & is.na(f))
     if (dropped > 0L) {

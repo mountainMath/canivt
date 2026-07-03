@@ -4,7 +4,12 @@
 \alias{ivt_members}
 \title{Member levels of an IVT table}
 \usage{
-ivt_members(x, trim_labels = TRUE, dim_names = c("label", "slug"))
+ivt_members(
+  x,
+  trim_labels = TRUE,
+  dim_names = c("label", "slug"),
+  language = "en"
+)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
@@ -13,9 +18,14 @@ ivt_members(x, trim_labels = TRUE, dim_names = c("label", "slug"))
 the same way \code{\link[=ivt_tidy]{ivt_tidy()}} does by default (\code{TRUE}).}
 
 \item{dim_names}{How the data-dimension \code{column} names are formed, matching
-\code{\link[=ivt_tidy]{ivt_tidy()}}: \code{"label"} (default, the full English dimension name) or
-\code{"slug"} (the terse structural slug). Must match the tidy output the levels
-will be joined to.}
+\code{\link[=ivt_tidy]{ivt_tidy()}}: \code{"label"} (default, the full dimension name) or \code{"slug"} (the
+terse structural slug). Must match the tidy output the levels will be joined
+to.}
+
+\item{language}{Language for the \code{column} names (label mode), matching
+\code{\link[=ivt_tidy]{ivt_tidy()}}: \code{"en"} (default) or \code{"fr"}. The table always carries both the
+English \code{level} and the French \code{level_fr}, so a single sidecar serves both
+languages; only the label-derived \code{column} names follow \code{language}.}
 }
 \value{
 A tibble with columns \code{column} (the tidy column name), \code{dimension}

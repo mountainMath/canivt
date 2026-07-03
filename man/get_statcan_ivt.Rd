@@ -9,6 +9,7 @@ get_statcan_ivt(
   geo_attributes = FALSE,
   labels = TRUE,
   dim_names = c("label", "slug"),
+  language = "en",
   refresh = FALSE,
   quiet = FALSE
 )
@@ -26,8 +27,11 @@ geography attribute table (slower) so geographies can be labelled by name.}
 (\code{TRUE}, default) or the compact integer-id table.}
 
 \item{dim_names}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: name the data-dimension
-columns by the full English dimension label (\code{"label"}, default) or the
-terse structural slug (\code{"slug"}).}
+columns by the full dimension label (\code{"label"}, default) or the terse
+structural slug (\code{"slug"}).}
+
+\item{language}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: output labels and
+label-derived column names in English (\code{"en"}, default) or French (\code{"fr"}).}
 
 \item{refresh}{Re-download and re-parse even if cached outputs exist.}
 

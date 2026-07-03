@@ -10,6 +10,7 @@ ivt_write_parquet(
   labels = TRUE,
   members = TRUE,
   dim_names = c("label", "slug"),
+  language = "en",
   ...
 )
 }
@@ -28,8 +29,12 @@ default) or the compact integer-id table (\code{FALSE}).}
 \code{\link[=collect_ivt]{collect_ivt()}} can convert dimension columns to full-level factors.}
 
 \item{dim_names}{How to name the data-dimension columns (passed to
-\code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"label"} (default, the full English
-dimension name) or \code{"slug"} (the terse structural slug).}
+\code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"label"} (default, the full dimension
+name) or \code{"slug"} (the terse structural slug).}
+
+\item{language}{Output language for labels and label-derived column names
+(passed to \code{\link[=ivt_tidy]{ivt_tidy()}}): \code{"en"} (default) or \code{"fr"}. The member sidecar
+carries both languages regardless.}
 
 \item{...}{Passed to \code{\link[arrow:write_parquet]{arrow::write_parquet()}}.}
 }

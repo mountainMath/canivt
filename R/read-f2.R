@@ -61,7 +61,7 @@ ivt_f2_dim_name <- function(dim, is_geo, vl) {
 # descriptor's (truncated) display name. Data dimensions additionally carry
 # `ordinal` (the codebook member-ordinal block, when the slot directory stores
 # one) so member order is available for factor levels (`ivt_members()`), and the
-# FRENCH copies `members_fr` (the Desc Français label block) + `name_fr` (the
+# FRENCH copies `members_fr` (the Desc Francais label block) + `name_fr` (the
 # French dimension name, from the French "Total - ..." member) -- both read
 # through the slot directory's dictionary-schema order, NULL/NA when only the
 # English-only scan fallbacks resolve.
@@ -112,7 +112,7 @@ ivt_f2_dimensions <- function(raw) {
       m
     }
     # French member labels + the French dimension name come from the slot
-    # directory's second (Desc Français) block; the scan fallbacks are English
+    # directory's second (Desc Francais) block; the scan fallbacks are English
     # only, so these are NULL/NA on a dimension the directories miss.
     members_fr <- if (is_geo) NULL else dl$fr
     name_fr <- if (is_geo || is.null(dl)) NA_character_ else dl$name_fr
@@ -282,50 +282,80 @@ ivt_f2_footnotes <- function(raw, dims = NULL) {
 # e.g. `Age of primary household maintainer`). Both `ivt_tidy()` and
 # `ivt_members()` name columns through this, so the tidy output and the level
 # sidecar always agree. Names are made unique so two dimensions sharing a leading
-# word (slug) or a display name (label) stay distinct.
-ivt_data_colnames <- function(datacols, meta, dim_names = c("label", "slug")) {
+# word (slug) or a display name (label) stay distinct. `language` picks the label:
+# "fr" uses each dimension's French name (`name_fr`), falling back to the English
+# name when the file carries none (e.g. the Statistics dimension).
+ivt_data_colnames <- function(datacols, meta, dim_names = c("label", "slug"),
+                              language = "en") {
   dim_names <- match.arg(dim_names)
   if (dim_names == "slug" || !length(datacols)) return(datacols)
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
   nm <- datacols
   for (j in seq_along(datacols)) {
     if (j > length(data_dims)) break
-    v <- data_dims[[j]]$name
+    d <- data_dims[[j]]
+    v <- if (language == "fr" && !is.null(d$name_fr) && !is.na(d$name_fr) &&
+             nzchar(d$name_fr)) d$name_fr else d$name
     if (!is.null(v) && !is.na(v) && nzchar(v)) nm[j] <- v      # else keep the slug
   }
   make.unique(nm, sep = "")
 }
 
+# Normalise a language argument to "en" or "fr". Accepts en/eng/english and
+# fr/fra/fre/french/francais (case-insensitive); errors on anything else.
+ivt_norm_lang <- function(language = "en") {
+  l <- tolower(trimws(as.character(language)[1]))
+  if (l %in% c("en", "eng", "english")) return("en")
+  if (l %in% c("fr", "fra", "fre", "french", "francais", "fran\u00e7ais")) return("fr")
+  cli::cli_abort(c(
+    "Unknown {.arg language} value {.val {language}}.",
+    i = 'Use {.val en} / {.val eng} for English or {.val fr} / {.val fra} for French.'))
+}
+
 # Label a decoded cell table (any family): geography by name and/or uid, each data
 # dimension by its member name. Cells are keyed by 1-based member ids (`geo`, plus
 # one column per data dimension), so labels join by direct indexing. Data columns
-# are named by `dim_names` (the full English dimension label by default, the terse
-# structural slug when "slug").
-ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("label", "slug")) {
+# are named by `dim_names` (the full dimension label by default, the terse
+# structural slug when "slug"). `language` selects English ("en") or French
+# ("fr") labels throughout -- geography names, member labels and the data column
+# names -- falling back to English wherever the file carries no French copy (the
+# language-neutral `geo_uid` is unaffected).
+ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("label", "slug"),
+                        language = "en") {
   dim_names <- match.arg(dim_names)
   cells <- x$cells
   meta <- x$metadata
   fix <- if (trim_labels) trimws else identity
   geo <- meta$geographies
+  # language-aware geography getter: the French copy (`<key>_fr`) when
+  # language == "fr" and it is present, else the English column.
+  gval <- function(key) {
+    if (language == "fr" && !is.null(geo[[paste0(key, "_fr")]]))
+      geo[[paste0(key, "_fr")]] else geo[[key]]
+  }
   # geography columns, included only when decoded: `geo_label` (display Member
   # Name), `geo_name` (schema GEO_NAME) + `geo_level` come from the full attribute
   # table (read_ivt(geo_attributes = TRUE)), `geo_uid` from the light path (DGUID;
   # legacy files have none until geo_attributes = TRUE). If nothing is available,
   # fall back to the bare member id.
   out <- tibble::tibble(.rows = nrow(cells))
-  if (!is.null(geo[["geo_label"]])) out$geo_label <- fix(geo[["geo_label"]])[cells$geo]
-  if (!is.null(geo[["geo_name"]]))  out$geo_name  <- fix(geo[["geo_name"]])[cells$geo]
+  if (!is.null(geo[["geo_label"]])) out$geo_label <- fix(gval("geo_label"))[cells$geo]
+  if (!is.null(geo[["geo_name"]]))  out$geo_name  <- fix(gval("geo_name"))[cells$geo]
   if (!is.null(geo[["geo_uid"]]))   out$geo_uid   <- geo[["geo_uid"]][cells$geo]
-  if (!is.null(geo[["geo_level"]])) out$geo_level <- fix(geo[["geo_level"]])[cells$geo]
+  if (!is.null(geo[["geo_level"]])) out$geo_level <- fix(gval("geo_level"))[cells$geo]
   if (ncol(out) == 0L) out$geo <- cells$geo
   # the non-geography data columns of `cells` line up with the non-geography
   # dimensions in declaration order; label each from its dimension's member list.
   datacols <- setdiff(names(cells), c("geo", "value"))
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
-  outnames <- ivt_data_colnames(datacols, meta, dim_names)
+  outnames <- ivt_data_colnames(datacols, meta, dim_names, language)
   for (j in seq_along(datacols)) {
     col <- datacols[j]
-    labs <- if (j <= length(data_dims)) data_dims[[j]]$members else NULL
+    d <- if (j <= length(data_dims)) data_dims[[j]] else NULL
+    labs <- if (is.null(d)) NULL
+      else if (language == "fr" && !is.null(d$members_fr) &&
+               length(d$members_fr) == length(d$members)) d$members_fr
+      else d$members
     out[[outnames[j]]] <- if (!is.null(labs)) fix(labs)[cells[[col]]] else cells[[col]]
   }
   out$value <- cells$value

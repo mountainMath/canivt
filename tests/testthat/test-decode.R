@@ -213,6 +213,27 @@ test_that("dimensions carry French labels + a French dimension name", {
   expect_equal(m$dimension_names_fr[7], ten$name_fr)
 })
 
+test_that("ivt_tidy language = 'fr' emits French labels and column names", {
+  p <- sample_ivt()
+  skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
+  tab <- read_ivt(p)
+  fr <- ivt_tidy(tab, language = "Fra")            # mixed case normalises
+  # data columns are the French dimension names
+  ten_fr <- "Mode d'occupation incluant la présence de paiements hypothécaires et le logement subventionné"
+  expect_true(ten_fr %in% names(fr))
+  expect_false("Tenure including presence of mortgage payments and subsidized housing" %in%
+                 names(fr))
+  # French member labels, joined to the same rows as the English tidy
+  row <- fr[fr$geo_uid == "2021A000011124" &
+    fr[["Âge du principal soutien du ménage"]] == "Total - Âge du principal soutien du ménage" &
+    fr[[ten_fr]] == "Propriétaire", ]
+  expect_true(all(c("Avec hypothèque") %in% fr[[ten_fr]]))
+  expect_gt(nrow(row), 0L)
+  # the Statistics dimension has no French name -> English column name fallback
+  expect_true("Statistics" %in% names(fr))
+  expect_error(ivt_tidy(tab, language = "de"), "language")
+})
+
 test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int16/int32, Health straddle)", {
   p <- locate_sample_ivt("CANIVT_SAMPLE_IVT_F1_662", "98100662")
   skip_if(p == "", "no 98-10-0662 sample (set CANIVT_SAMPLE_IVT_F1_662)")

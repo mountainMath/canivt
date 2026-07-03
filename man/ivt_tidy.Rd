@@ -4,7 +4,13 @@
 \alias{ivt_tidy}
 \title{Tidy an \code{ivt} object into a labelled data frame}
 \usage{
-ivt_tidy(x, labels = TRUE, trim_labels = TRUE, dim_names = c("label", "slug"))
+ivt_tidy(
+  x,
+  labels = TRUE,
+  trim_labels = TRUE,
+  dim_names = c("label", "slug"),
+  language = "en"
+)
 }
 \arguments{
 \item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
@@ -16,10 +22,16 @@ labels; if \code{FALSE} return the compact integer-id table (member ids).}
 from member labels.}
 
 \item{dim_names}{How to name the data-dimension columns: \code{"label"} (default)
-uses the full English dimension name (e.g.
-\verb{Age of primary household maintainer}); \code{"slug"} uses the terse structural
-slug (e.g. \code{age}). Geography columns (\code{geo_name}, \code{geo_uid}, ...) are
-unaffected. The choice applies to both \code{labels} values.}
+uses the full dimension name (e.g. \verb{Age of primary household maintainer}, or
+its French equivalent when \code{language = "fr"}); \code{"slug"} uses the terse
+structural slug (e.g. \code{age}), which is language-neutral. The choice applies
+to both \code{labels} values.}
+
+\item{language}{Output language for labels and label-derived column names:
+\code{"en"} (default) or \code{"fr"}. Also accepts \code{"eng"}/\code{"fra"} and any case (it is
+lower-cased). French falls back to English wherever the file carries no
+French copy (e.g. the language-neutral \code{geo_uid}, or a dimension with no
+French name).}
 }
 \value{
 A tibble.

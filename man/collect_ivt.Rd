@@ -9,6 +9,7 @@ collect_ivt(
   members = NULL,
   geography = FALSE,
   dim_names = c("label", "slug"),
+  language = "en",
   ...
 )
 }
@@ -29,6 +30,12 @@ factor levels.}
 (passed to \code{\link[=ivt_tidy]{ivt_tidy()}} and \code{\link[=ivt_members]{ivt_members()}}): \code{"label"} (default) or
 \code{"slug"}. Ignored for the Arrow / Parquet forms, where the column names are
 already fixed by how the Parquet was written.}
+
+\item{language}{Factor-level language: \code{"en"} (default) or \code{"fr"}. For \code{ivt}
+objects it is passed to \code{\link[=ivt_tidy]{ivt_tidy()}}/\code{\link[=ivt_members]{ivt_members()}} (French labels and
+column names); for the Arrow / Parquet forms it selects the French \code{level_fr}
+from the sidecar as the factor levels and must match the language the Parquet
+was written in.}
 
 \item{...}{For \code{ivt} objects, passed to \code{\link[=ivt_tidy]{ivt_tidy()}}.}
 }

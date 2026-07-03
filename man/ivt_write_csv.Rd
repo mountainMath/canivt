@@ -9,6 +9,7 @@ ivt_write_csv(
   path = NULL,
   labels = TRUE,
   dim_names = c("label", "slug"),
+  language = "en",
   ...
 )
 }
@@ -22,8 +23,12 @@ cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}).}
 default) or the compact integer-id table (\code{FALSE}).}
 
 \item{dim_names}{How to name the data-dimension columns (passed to
-\code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"label"} (default, the full English
-dimension name) or \code{"slug"} (the terse structural slug).}
+\code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"label"} (default, the full dimension
+name) or \code{"slug"} (the terse structural slug).}
+
+\item{language}{Output language for labels and label-derived column names
+(passed to \code{\link[=ivt_tidy]{ivt_tidy()}}): \code{"en"} (default) or \code{"fr"}. The member sidecar
+carries both languages regardless.}
 
 \item{...}{Passed to the CSV writer (\code{\link[readr:write_csv]{readr::write_csv()}} if available, else
 \code{\link[utils:write.csv]{utils::write.csv()}}).}

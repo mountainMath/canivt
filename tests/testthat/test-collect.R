@@ -67,6 +67,22 @@ test_that("collect_ivt on an ivt object yields factors with ALL member levels", 
   expect_equal(levels(df2$geo_name), c("Canada", "Ontario"))
 })
 
+test_that("collect_ivt language = 'fr' yields French columns and French levels", {
+  fr_col <- "Âge"                                  # the dimension's French name
+  df <- collect_ivt(fake_ivt(), language = "FR")   # upper-case normalises
+  expect_true(fr_col %in% names(df))
+  expect_false(age_col %in% names(df))
+  expect_s3_class(df[[fr_col]], "factor")
+  expect_equal(levels(df[[fr_col]]),
+               c("Total - Âge", "0 à 14 ans", "15 ans et plus"))
+  expect_equal(as.character(df[[fr_col]]),
+               c("Total - Âge", "0 à 14 ans", "Total - Âge"))
+  # slug column names stay language-neutral, but levels are still French
+  df2 <- collect_ivt(fake_ivt(), dim_names = "slug", language = "fr")
+  expect_true("age" %in% names(df2))
+  expect_equal(levels(df2$age), c("Total - Âge", "0 à 14 ans", "15 ans et plus"))
+})
+
 test_that("collect_ivt dim_names = 'slug' names the data column by its slug", {
   df <- collect_ivt(fake_ivt(), dim_names = "slug")
   expect_s3_class(df$age, "factor")
