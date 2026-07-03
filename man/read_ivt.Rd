@@ -20,6 +20,17 @@ An object of class \code{ivt}: a list with \code{cells} (a tibble of one value
 per row, keyed by 1-based member-id columns matching the StatCan metadata
 Member IDs), and \code{metadata} (table identity, \code{dimensions}, \code{geographies}
 with names and DGUIDs, and \code{footnotes}).
+
+The value store keeps only non-zero cells, so a cell absent from \code{cells}
+is a \strong{zero} — \emph{within a geography that carries any data}. A geography
+with no stored cells at all is either wholly suppressed or wholly empty,
+and the cell store cannot distinguish the two: \code{metadata$geographies$has_data}
+flags which geographies carry data, and on the pre-DGUID tables
+\code{metadata$geographies$dqf_code} (the per-geography data-quality flag from
+the codebook) corroborates it (e.g. on the 2016 income table
+98-400-X2016120 the flag's last digit is \code{9} exactly for the 888
+geographies with no stored cells, which the Beyond 20/20 viewer renders
+as suppressed).
 }
 \description{
 Parses a Statistics Canada Beyond 20/20 \code{.ivt} table straight from its bytes:

@@ -55,6 +55,17 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
 #'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`
 #'   with names and DGUIDs, and `footnotes`).
+#'
+#'   The value store keeps only non-zero cells, so a cell absent from `cells`
+#'   is a **zero** — *within a geography that carries any data*. A geography
+#'   with no stored cells at all is either wholly suppressed or wholly empty,
+#'   and the cell store cannot distinguish the two: `metadata$geographies$has_data`
+#'   flags which geographies carry data, and on the pre-DGUID tables
+#'   `metadata$geographies$dqf_code` (the per-geography data-quality flag from
+#'   the codebook) corroborates it (e.g. on the 2016 income table
+#'   98-400-X2016120 the flag's last digit is `9` exactly for the 888
+#'   geographies with no stored cells, which the Beyond 20/20 viewer renders
+#'   as suppressed).
 #' @export
 read_ivt <- function(path, geo_attributes = FALSE) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
@@ -73,6 +84,18 @@ read_ivt <- function(path, geo_attributes = FALSE) {
   meta <- ivt_f2_metadata(raw)
   if (isTRUE(geo_attributes) && family == 2L)
     meta$geographies <- ivt_f2_geographies(raw)
+  # Per-geography PRESENCE summary: the value store keeps only non-zero cells,
+  # so within a geography that carries any data an absent cell is a true zero
+  # -- but a geography with NO stored cells at all is either wholly suppressed
+  # or wholly empty, and the cell store cannot tell which (validated on
+  # 98-400-X2016120: every viewer-blank/suppressed cell belongs to a
+  # zero-stored-cell geography, and published geographies' absent cells all
+  # render as 0). `has_data` exposes that distinction; on the pre-DGUID tables
+  # the per-geography `dqf_code` flag corroborates it (last digit 9 =
+  # suppressed on the 2016 income table).
+  n_geo <- length(meta$geographies$member_id)
+  if (n_geo > 0L && nrow(cells) > 0L)
+    meta$geographies$has_data <- tabulate(cells$geo, nbins = n_geo) > 0L
   structure(list(cells = cells, metadata = meta, path = path, family = family),
             class = "ivt")
 }

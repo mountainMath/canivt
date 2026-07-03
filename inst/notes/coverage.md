@@ -453,11 +453,20 @@ corpus table:
   (all-float64 pages) are ordinary supported-container tables — every geometry
   invariant clean, cells viewer-exact (360/360, 154/154 and 510/510 on leading
   geographies; 1,680/1,680 and 1,432/1,432 on deep-tail members 3000+/4860+).
-  **Suppression in this container is CELL ABSENCE, not a sentinel**: on
-  2016120 (income — heavily suppressed for small areas) every one of the 340
-  viewer-blank tail-village cells is simply absent from the value store, and
-  the decoder found no value at any of them; absent is indistinguishable from
-  zero in the store (the blank-vs-0 display rule is not in the cell data).
+  **Suppression in this container is WHOLE-GEOGRAPHY cell absence, not a
+  per-cell sentinel** — and it IS recoverable from the file: on 2016120
+  (income — heavily suppressed for small areas) the 888 geographies with no
+  stored cells at all are exactly the 888 whose inline per-geography dqf flag
+  ends in `9` (888/888, zero crossovers over all 4,868 geographies), and the
+  viewer renders exactly those geographies' cells blank; published
+  geographies' absent cells all render as 0. `read_ivt()` exposes both
+  signals: `metadata$geographies$has_data` (presence-derived, all tables) and
+  `metadata$geographies$dqf_code` (inline pre-DGUID tables). 2016120's
+  geography also reads positionally now: its dim-1 directory carries two
+  odd-sized auxiliary blocks BEFORE the group runs (2016328/2016261 carry the
+  same two after them), so the run walk accepts a small leading-block skip —
+  a wrong skip cannot fit, the partial chunks anchor the alignment. Member
+  order = the viewer d0 list, 4,868/4,868, on all three tables.
 
 ### Note: the `0xa` marker variant and empty geographies
 

@@ -896,4 +896,23 @@ test_that("the 2016 income table decodes, with suppression as ABSENT cells", {
   # Canada x Total income sources: the five income statistics (viewer-validated)
   can <- cells[cells$geo == 1L & cells$income == 1L, ]
   expect_equal(can$value, c(28643015, 27489395, 96, 47487, 1305380183))
+
+  # the geography reads positionally despite two odd-sized auxiliary blocks
+  # BEFORE the group runs (the walk skips leading non-conforming blocks);
+  # member order == the viewer d0 list, 4,868/4,868
+  gd <- ivt_f2_geo_inline_dir(raw)
+  expect_equal(nrow(gd), 4868L)
+  expect_equal(gd$geo_name[1], "Canada")
+
+  # suppression is exposed through PRESENCE + the per-geography flag: the 888
+  # geographies with no stored cells (has_data FALSE) are exactly the 888 whose
+  # inline dqf flag ends in 9 (validated vs the viewer: every blank/suppressed
+  # cell belongs to such a geography; published geographies' absent cells all
+  # render as 0)
+  x <- read_ivt(p)
+  g <- x$metadata$geographies
+  expect_true(all(c("dqf_code", "has_data") %in% names(g)))
+  expect_equal(sum(!g$has_data), 888L)
+  expect_identical(!g$has_data, substr(g$dqf_code, 5L, 5L) == "9")
+  expect_equal(g$geo_name[which(!g$has_data)[1]], "Portugal Cove South")
 })

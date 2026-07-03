@@ -590,7 +590,10 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   #    DGUID array; the uid is the bare code inside the combined block).
   inl <- ivt_f2_geo_inline(raw)
   if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo))
-    return(list(geo_name = inl$geo_name, geo_uid = inl$geouid))
+    return(list(geo_name = inl$geo_name, geo_uid = inl$geouid,
+                dqf_code = inl$dqf_code))   # the per-geography flag: on the
+                                            # 2016 tables its last digit marks
+                                            # wholly-suppressed geographies
   # 1. single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
   #    positional attribute read is cheap here (one group of one chunk) and fully
   #    metadata-addressed; trim = FALSE keeps the hierarchy indentation the
@@ -1368,10 +1371,15 @@ ivt_f2_geo_inline_dir <- function(raw) {
     })
     if (identical(vapply(bb, length, 1L), w)) bb else NULL
   }
-  walk <- function(R) {
-    if (k < R * total) return(NULL)
+  # `skip` leading candidate blocks may precede the group runs (98-400-X2016120
+  # carries two odd-sized auxiliary blocks, 185 and 232 records, BEFORE the
+  # runs; 98-400-X2016328 carries the same two AFTER them, where the walk never
+  # sees them). A wrong skip cannot fit spuriously: the partial chunks (record
+  # count != 256) sit at fixed positions and misalign any shifted walk.
+  walk <- function(R, skip = 0L) {
+    if (k < skip + R * total) return(NULL)
     runs <- rep(list(character(0)), R)
-    pos <- 1L
+    pos <- 1L + skip
     for (gi in seq_along(sizes)) {
       G <- sizes[gi]; want <- chunk_of(gi)
       for (rr in seq_len(R)) {
@@ -1390,7 +1398,10 @@ ivt_f2_geo_inline_dir <- function(raw) {
   if (k < 2L * total) return(NULL)
   runs <- NULL
   for (R in seq.int(min(k %/% total, 6L), 2L, by = -1L)) {
-    runs <- walk(R)
+    for (skip in 0:min(k - R * total, 8L)) {
+      runs <- walk(R, skip)
+      if (!is.null(runs)) break
+    }
     if (!is.null(runs)) break
   }
   if (is.null(runs)) return(NULL)

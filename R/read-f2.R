@@ -210,6 +210,7 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   ivt_f2_check_geo_count(raw, length(g$geo_uid))
   geographies <- list(geo_name = g$geo_name, geo_uid = g$geo_uid,
                       member_id = seq_along(g$geo_uid))
+  if (!is.null(g$dqf_code)) geographies$dqf_code <- g$dqf_code
   list(
     product_id        = info$product_id,
     title_en          = info$title_en,
