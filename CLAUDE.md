@@ -54,9 +54,13 @@ on all six reference tables:
   code changes: **98-400-X2016328** (18.7 MB, 5-dim, 4,868 geos) 360/360 vs the
   viewer plus **1,680/1,680 on deep-tail geographies** (member positions
   3000+/4860+, pinning member order); **98-400-X2016261** (86.8 MB, 6-dim,
-  14.4M cells) 154/154. No sentinel suppression anywhere in either table —
-  suppression in this container is realised as absent/zero cells (the
-  `b3 = 0x0a` sentinel pages remain unique to the rejected 2016203).
+  14.4M cells) 154/154; **98-400-X2016120** (income statistics, all-float64
+  pages, geo-straddle 4/page) 510/510 leading + 1,432/1,432 deep-tail numeric
+  cells. **Suppression is CELL ABSENCE, not a sentinel**: every viewer-blank
+  (suppressed / not-applicable) cell — 340 on 2016120's tail villages alone —
+  is simply absent from the value store, indistinguishable there from a zero
+  (the blank-vs-0 display rule lives outside the cell store). The `b3 = 0x0a`
+  "-1" pages remain unique to the rejected 2016203.
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every

@@ -875,3 +875,25 @@ test_that("large 2016 98-400-X crosstabs decode in the supported container", {
   expect_equal(m$geographies$geo_name[1], "Canada")
   expect_equal(m$geographies$geo_uid[1:2], c("01", "10"))
 })
+
+test_that("the 2016 income table decodes, with suppression as ABSENT cells", {
+  # 98-400-X2016120 (Income Sources and Taxes x Income Statistics, 4,868 geos,
+  # all-float64 pages): viewer-validated 510/510 numeric cells on the leading
+  # geographies and 1,432/1,432 on deep-tail villages, with ZERO mismatches.
+  # Every viewer-blank (suppressed / not-applicable) cell is simply ABSENT from
+  # the value store -- this container carries no suppression sentinels (the
+  # b3 = 0x0a "-1" pages are unique to the rejected 98-400-X2016203).
+  p <- locate_sample_ivt("", "98-400-X2016120", "98-400-X2016120.ivt")
+  skip_if(p == "", "no 98-400-X2016120 sample in the ivt cache")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+  expect_equal(ivt_family(raw), 2L)
+  expect_equal(ivt_f2_geo_count(raw), 4868L)
+  lay <- ivt_layout(raw)
+  expect_true(lay$geo_in_page)
+  expect_equal(lay$window_count, 1217L)     # 4 geographies per float64 page
+  cells <- ivt_decode(raw)
+  expect_equal(nrow(cells), 634119L)
+  # Canada x Total income sources: the five income statistics (viewer-validated)
+  can <- cells[cells$geo == 1L & cells$income == 1L, ]
+  expect_equal(can$value, c(28643015, 27489395, 96, 47487, 1305380183))
+})

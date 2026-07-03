@@ -448,12 +448,16 @@ corpus table:
   file is unsupported: its cells were never ground-truthed and its metadata
   needs two heuristic fallbacks. To revisit: validate a `0x0a` page against a
   B2020 viewer slice. Note 2016203 is the odd one out, not the 2016 norm: the
-  large crosstabs 98-400-X2016328 (5-dim, 4,868 geos) and 98-400-X2016261
-  (6-dim, 86.8 MB, 14.4M cells) are ordinary supported-container tables —
-  every geometry invariant clean, cells viewer-exact (360/360 and 154/154 on
-  leading geographies, 1,680/1,680 on deep-tail members 3000+/4860+), and **no
-  sentinel suppression anywhere** (suppression there is realised as
-  absent/zero cells).
+  large crosstabs 98-400-X2016328 (5-dim, 4,868 geos), 98-400-X2016261
+  (6-dim, 86.8 MB, 14.4M cells) and the income table 98-400-X2016120
+  (all-float64 pages) are ordinary supported-container tables — every geometry
+  invariant clean, cells viewer-exact (360/360, 154/154 and 510/510 on leading
+  geographies; 1,680/1,680 and 1,432/1,432 on deep-tail members 3000+/4860+).
+  **Suppression in this container is CELL ABSENCE, not a sentinel**: on
+  2016120 (income — heavily suppressed for small areas) every one of the 340
+  viewer-blank tail-village cells is simply absent from the value store, and
+  the decoder found no value at any of them; absent is indistinguishable from
+  zero in the store (the blank-vs-0 display rule is not in the cell data).
 
 ### Note: the `0xa` marker variant and empty geographies
 
