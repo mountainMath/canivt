@@ -555,13 +555,16 @@ Files in the test corpus that are currently unsupported:
 
 Decoding any of these is future work — each likely needs its descriptor/codebook
 layout reverse-engineered. Reconnaissance (sub-format taxonomy, descriptor
-locations, which share the family-2 value container) is captured in
-[`unsupported-formats.md`](unsupported-formats.md). Summary: they fall into ≥3
-sub-formats — a near-family-2 crosstab (`ord-08035`, `97F0020X`; `ord-08035`
-reuses the 98-10-0023 value container exactly and is the recommended first
-target), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`; int
-container we already decode), and older layouts whose container is not yet located
-(`97F0015X`, 1981 `97-570-X`).
+locations, per-file blockers) is captured in
+[`unsupported-formats.md`](unsupported-formats.md). Summary: near-family-2
+crosstabs (`ord-08035` — its page body turned out NOT to be the 98-10-0023
+container and needs re-RE'ing; `97F0020X` — container located, presence nesting
+differs), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`,
+plus the geography-last `97-570-X1981004`; hybrid page set decoded, the
+non-rectangular page→grid mapping is the open item), the 2006 crosstab
+`97-563-XCB2006072` (directory hunt), and older layouts whose container is not
+yet located (`97F0015X`, 1981 `97-570-X1981002`). The most tractable targets:
+the 2006 directory hunt and the profile grid mapping.
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
