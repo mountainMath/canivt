@@ -120,12 +120,15 @@ data.frame(dimension = meta$dimension_names,
 Each directory record is a page that packs **4 geographies**:
 
 ```
-[4-byte marker][4 × 64-byte presence records][0xFF trailer][dense value run]
+[4-byte marker][4 × 64-byte presence records][0xFF trailer][head block][dense value run]
 ```
 
 * the **marker**'s low nibble is the value width: `0x8` → float64, `0x4` →
   int32, `0x2` → int16 (so age counts are int16 but the average/median-age
-  statistics are float64);
+  statistics are float64); its third byte encodes the trailer length and its
+  fourth an auxiliary head block of `32·(b3 − 8)` bytes (0 on most pages; the
+  2006 census vintage uses 64/128-byte heads and appends absent-cell mask
+  records after the value run);
 * each geography's **presence** is a 64-byte record stored **byte-pair-swapped**
   — swap adjacent bytes, then read a positional nibble per member, with the three
   genders Total/Men/Women at bits 3/2/1 (the all-present marker is `0xE`);

@@ -1598,6 +1598,15 @@ ivt_f2_descriptor <- function(raw) {
         if (identical(run[1:p], run[(p + 1L):(2L * p)])) { half <- p; break }
       }
       if (!is.na(half) && half >= 2L) {
+        # The FIRST copy is truncated at a ~15-byte cap; the SECOND copy is
+        # complete ("Presence of incPresence of income (9)" in the 2006 DA
+        # crosstab). Prefer the tail (second copy) when the first copy looks
+        # capped (>= 14 chars) and the tail strictly extends it -- the cap
+        # guard keeps short, complete names immune to a stray printable byte
+        # from the NEXT record's count field being glued onto the run (e.g. a
+        # count of 110 reads as "n").
+        nm_run <- run[1:half]
+        if (half >= 14L && rl > 2L * half) nm_run <- run[(half + 1L):rl]
         if (v[k - 1L] == 0x01L) {                  # period/facet double-01 framing
           type <- v[k - 3L]; count <- v[k - 2L]
         } else {
@@ -1611,7 +1620,7 @@ ivt_f2_descriptor <- function(raw) {
           count <- if (type %in% c(0x10L, 0x0dL)) v[k - 3L] + v[k - 2L] * 256L
                    else v[k - 2L]
         }
-        dims[[length(dims) + 1L]] <- list(name = trimws(intToUtf8(run[1:half])),
+        dims[[length(dims) + 1L]] <- list(name = trimws(intToUtf8(nm_run)),
                                           count = count, type = type)
         k <- e; next
       }

@@ -85,12 +85,13 @@ copy of each attribute and parse past the rest.
   display masks `f3 ff f0 ff` / `c0 ff c0 ff`).
 - [?] Dimension **type markers** `0x10`/`0x07`/`0x02` (geography / age-type /
   gender-type — inferred, not proven).
-- [?] Page-marker bytes `b2` (`0x20`/`0x41`/`0x03`) and `b3` (`08`/`09`); only the
-  value-width low nibble of `b0` is understood.
-- [x] The marker-specific pad/`0xFF` **trailer length** is now tabulated per
-  marker (`IVT_F2_PAGE_TRAILER`: 4/10/34/18/8/16) and the value-run start derived
-  as `4 + presence_len + trailer`. Still *positional* (we do not know why each
-  marker has its particular trailer), but no longer a decode gap.
+- [x] Page-marker bytes `b2` and `b3` are now both DECODED as size fields:
+  `b2` encodes the pad/`0xFF` trailer (`2·(b2>>4) + 2·(lo>0)`, 0 when `b2==0`)
+  and `b3` the auxiliary head block (`32·(b3−8)`, `b3 ∈ {08,09,0a,0c}`); the
+  value run starts at `4 + presence_len + trailer + head`
+  (`ivt_value_trailer()`). What the trailer/head bytes *contain* remains
+  unproven (the 2006 heads carry per-geo sentinel/value words), but the
+  arithmetic is corpus-verified — no longer a decode gap.
 
 ## [x] Decoder generality — arbitrary-dimension family-2 (DONE)
 
@@ -419,16 +420,24 @@ Per-page invariants, verified across every page of every supported table in the
 corpus, are enforced by the decoder (2026-07-02):
 
 - the **b2 trailer formula**: `b2 == 0x00` → no trailer, else
-  `2*(b2 >> 4) + 2*(low nibble(b2) > 0)`, plus a fixed 32-byte auxiliary block
-  on `0xa2` int16 pages. Derived from 98-10-0013 (22 pages, 18 distinct b2
-  values, trailers 6–14, each anchored byte-exact vs the StatCan CSV); it
-  reproduces the formerly hard-coded six-marker constants, which had made the
-  trailer look like a per-width constant (`32/width` / `64/width + 2`) only
-  because b2 never varied within a marker family before 0013. Unknown width
-  codes / high nibbles abort (`canivt_unknown_marker`);
+  `2*(b2 >> 4) + 2*(low nibble(b2) > 0)`. Derived from 98-10-0013 (22 pages,
+  18 distinct b2 values, trailers 6–14, each anchored byte-exact vs the
+  StatCan CSV); it reproduces the formerly hard-coded six-marker constants,
+  which had made the trailer look like a per-width constant (`32/width` /
+  `64/width + 2`) only because b2 never varied within a marker family before
+  0013. Unknown width codes / high nibbles abort (`canivt_unknown_marker`);
+- the **b3 head formula** (2026-07-03): the marker's fourth byte encodes an
+  auxiliary head block of `32*(b3 - 8)` bytes before the value run
+  (`b3 ∈ {08,09,0a,0c}`). This generalises the former "+32 on 0xa2 pages"
+  constant (every corpus 0xa2 page is `a2 01 03 09`; everything else on the
+  supported tables is b3=08, so the two rules were observationally identical
+  there) and is what unlocked the 2006 vintage (b3=0a/0c, 64/128-byte heads).
+  Unknown b3 aborts (`canivt_unknown_marker`);
 - the **extent check**: the directory entry's u16 size is the page's allocated
-  length and `4 + presence + trailer + nv*width <= size` always (with equality
-  on the `b2 == 0` pages); an overrun aborts (`canivt_page_overrun`);
+  length and `4 + presence + trailer + head + nv*width <= size` always (with
+  equality on the `b2 == 0` pages when `b3 <= 0x09`; the `b3 >= 0x0a`
+  suppression-tail pages append absent-cell mask records after the run); an
+  overrun aborts (`canivt_page_overrun`);
 - **no silent page skips**: a valid directory entry pointing at an unknown
   marker warns (`canivt_skipped_pages`);
 - the **pre-flight** (`ivt_page_preflight()`) applies these to the first pages
@@ -556,11 +565,36 @@ Files in the test corpus that are currently unsupported:
   data is nested differently and the pre-flight **capacity rule** rejects it.
   Served by StatCan's legacy `www12` dynamic system, not the modern b2020
   endpoint.
-- [ ] **2006 census DA crosstab** (`97-563-XCB2006072`): geography fully
-  validated (57,523 members, positional inline reader) but its **page directory
-  has not been located** — no `@558` unwrap candidate validates, so the file
-  stays unsupported. Open: find where this vintage stores its directory pointer
-  (or whether its directory starts with entry shapes the validator rejects).
+- [x] **2006 census DA crosstab** (`97-563-XCB2006072`): **DECODED — SUPPORTED**
+  (2026-07-03). The page directory was at the plain `u16@558 = 45641` all along
+  (14,381 entries = ⌈57,523/4⌉ exactly, the geography-straddle layout the
+  descriptor predicts); the validator had rejected it only because this
+  vintage's markers carry **`b3 = 0x0a/0x0c`**, which encode a
+  **`32·(b3−8)`-byte auxiliary head block** before the value run — the general
+  rule behind the formerly hard-coded "+32 on `a2 01 03 09` pages"
+  (`ivt_value_trailer()` now takes b3; observationally identical on every
+  supported table, where all 0xa2 pages are b3=09 and everything else b3=08).
+  Its `b2 == 0` pages are NOT exact-fit: after the popcount value run they
+  append **per-(geo, age) suppression-mask records** (one nibble per
+  presence-member, sex T/M/F at bits 3..1, split into value-width units with
+  all-zero units dropped) — byte-exact reconstructible from the presence
+  bitmap on 14,111 of 14,381 pages, the rest benign writer slack/truncation
+  (see ivt-format.md "The b3 head block and suppression tails"). Exact-fit is
+  now asserted only for `b3 ≤ 0x09`; the capacity/span preflight rules carry
+  the gate. Cell semantics are the SAME as every other vintage — only non-zero
+  cells stored, absent renders `0` in the published table (the 2006
+  tabulations zero-fill area-suppressed small areas; the tail masks flag every
+  absent cell but the published value is 0 either way, and `has_data` remains
+  the per-geography suppression signal). **Viewer-validated cell-exact**:
+  3,487/3,487 stored cells match the B2020 viewer across 32 geographies ×
+  all 135 cells (Canada, NL, deep-tail members 40,000/57,000/57,523, 20
+  random ones, and wholly-empty geographies) and all 833 absent sampled cells
+  render 0. 6,526,221 cells decode in ~6 s; all four dimensions labelled
+  (the descriptor's truncated first name copy "Presence of inc" is repaired
+  from its complete second copy — `ivt_f2_descriptor()` prefers the tail copy
+  when the first hits the ~15-byte cap, which also completes the
+  1996/2011/2016 descriptor names); geography (already viewer-validated)
+  names + uids flow through the standard inline reader.
 - [ ] **1981 census** (`97-570-X1981002` profile, descriptor undecoded;
   `97-570-X1981004` parses — Values(32) × Profile(79) × Geography(5989),
   geography stored LAST — but its directory covers only the first outer member
@@ -579,10 +613,11 @@ crosstabs (`ord-08035` — its page body turned out NOT to be the 98-10-0023
 container and needs re-RE'ing; `97F0020X` — container located, presence nesting
 differs), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`,
 plus the geography-last `97-570-X1981004`; hybrid page set decoded, the
-non-rectangular page→grid mapping is the open item), the 2006 crosstab
-`97-563-XCB2006072` (directory hunt), and older layouts whose container is not
-yet located (`97F0015X`, 1981 `97-570-X1981002`). The most tractable targets:
-the 2006 directory hunt and the profile grid mapping.
+non-rectangular page→grid mapping is the open item), and older layouts whose
+container is not yet located (`97F0015X`, 1981 `97-570-X1981002`). (The 2006
+crosstab `97-563-XCB2006072`, formerly the top open container hunt, is now
+SUPPORTED — the b3 head-block rule.) The most tractable targets: the profile
+grid mapping, and a 98-400-X2016203 revisit under the b3 rule.
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
@@ -684,13 +719,15 @@ hierarchy that may be absent from the binary. The master directory at 992 and
 the `@712` DQF legend are now read (see the header section-pointer table above).
 
 The unified decoder handles **arbitrary-dimension** tables (validated on the
-4-dim 98-10-0129, cell-exact) and, as of 2026-07-02, spans **1991–2021 census
-vintages**: the 1996 tables 94F0009XDB96078 / 95F0250XDB96001 / 95F0223XDB96001 /
+4-dim 98-10-0129, cell-exact) and spans **1991–2021 census vintages**: the 1996
+tables 94F0009XDB96078 / 95F0250XDB96001 / 95F0223XDB96001 /
 95F0200XDB96003 (13 → 43,234 geographies, all B2020-viewer-validated), the tiny
-one-page 98-10-0044 (the trivial geography-straddle, StatCan-CSV-exact) and
+one-page 98-10-0044 (the trivial geography-straddle, StatCan-CSV-exact),
 98-10-0013 (whose cell decode had been silently empty; now CSV-exact — the
-source of the b2 trailer formula and the `@558` pointer unwrap). Remaining open
-items: the **2006 crosstab 97-563-XCB2006072** (geography validated, page
-directory not located), the **profile-table lineage** (98F0172X, 95F0170X, 1981
-`97-570-X`: geography-last / `Values`-dimension layout) and the other 2001
-"F"-series products; see the section above.
+source of the b2 trailer formula and the `@558` pointer unwrap) and, as of
+2026-07-03, the **2006 DA crosstab 97-563-XCB2006072** (the b3 head-block rule
++ suppression tails; viewer-validated cell-exact). Remaining open items: the
+**profile-table lineage** (98F0172X, 95F0170X, 1981 `97-570-X`:
+geography-last / `Values`-dimension layout), the other 2001 "F"-series
+products, and a **98-400-X2016203 revisit** under the b3 rule; see the section
+above.

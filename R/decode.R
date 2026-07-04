@@ -40,34 +40,43 @@ IVT_PRES_BITS  <- 2048L
 IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 
 # Bytes between the end of the presence record and the dense value run, derived
-# structurally from the marker's third byte (`b2`), which ENCODES the trailer:
+# structurally from the marker's third and fourth bytes (`b2`, `b3`), which
+# ENCODE it:
 #
 #   trailer = 0                                        when b2 == 0x00
 #           = 2*(b2 >> 4) + 2*(low nibble(b2) > 0)     otherwise
-#             (+ 32 on the 0xa2 int16 pages, which carry a fixed 32-byte
-#              auxiliary block before the run)
+#   head    = 32 * (b3 - 8)                            (the auxiliary head block)
 #
-# i.e. b2's high nibble counts 2-byte pad units (realised as a 0xFF run) and a
-# non-zero low nibble appends one further 2-byte field. Derived from 98-10-0013,
-# whose 22 pages carry 18 distinct b2 values (0x2a..0x63, trailers 6..14, each
-# anchored byte-exact against the StatCan CSV); it reproduces the formerly
-# hard-coded six-marker constants exactly (88/20 -> 4, a8/41 -> 10, 84/40 -> 8,
-# 82/80 -> 16, a4/82 -> 18, a2/03 -> 34 -- the old "32/width | 64/width + 2"
-# width formula only coincided because b2 was constant per marker family) and
-# holds with zero violations on every page of every supported table in the
-# local corpus. An unrecognised width code or high nibble aborts: decoding with
-# a guessed trailer would silently yield garbage values.
-ivt_value_trailer <- function(b0, b2) {
-  if (b2 == 0x00L) return(0L)
+# i.e. b2's high nibble counts 2-byte pad units (realised as a 0xFF run), a
+# non-zero low nibble appends one further 2-byte field, and b3 counts 32-byte
+# auxiliary head units. The b2 formula is derived from 98-10-0013, whose 22
+# pages carry 18 distinct b2 values (0x2a..0x63, trailers 6..14, each anchored
+# byte-exact against the StatCan CSV); it reproduces the formerly hard-coded
+# six-marker constants exactly (88/20 -> 4, a8/41 -> 10, 84/40 -> 8,
+# 82/80 -> 16, a4/82 -> 18 -- the old "32/width | 64/width + 2" width formula
+# only coincided because b2 was constant per marker family). The b3 head term
+# generalises what used to be a hard-coded "+32 on 0xa2 pages": across the
+# whole corpus every 0xa2 page is `a2 01 03 09` and every other supported-table
+# page is b3 = 0x08, so the two rules are observationally identical there --
+# but the 2006 census vintage (97-563-XCB2006072) carries b3 = 0x0a/0x0c pages
+# (64/128-byte heads) on 0x82/0x84 markers, byte-verified against the page-size
+# equation on all 14,381 of its pages. Those pages also append per-(geo,
+# outer-dim) suppression-mask records AFTER the value run, so they are not
+# exact-fit; see ivt_page_preflight() and ivt-format.md. An unrecognised width
+# code, high nibble or b3 aborts: decoding with a guessed value-run start would
+# silently yield garbage values.
+ivt_value_trailer <- function(b0, b2, b3 = 0x08L) {
   w <- bitwAnd(b0, 0x0FL)
   hi <- bitwAnd(b0, 0xF0L)
-  if (!w %in% c(2L, 4L, 8L) || !hi %in% c(0x80L, 0xa0L)) {
+  if (!w %in% c(2L, 4L, 8L) || !hi %in% c(0x80L, 0xa0L) ||
+      !b3 %in% ivt_f2_marker_b3) {
     cli::cli_abort(
-      "Unrecognised IVT page marker byte {.val {sprintf('0x%02x', b0)}}: cannot derive the value-run start.",
+      "Unrecognised IVT page marker bytes {.val {sprintf('0x%02x .. 0x%02x', b0, b3)}}: cannot derive the value-run start.",
       class = "canivt_unknown_marker")
   }
-  2L * (b2 %/% 16L) + 2L * as.integer(bitwAnd(b2, 0x0FL) > 0L) +
-    if (b0 == 0xa2L) 32L else 0L
+  head <- 32L * (b3 - 8L)
+  if (b2 == 0x00L) return(head)
+  2L * (b2 %/% 16L) + 2L * as.integer(bitwAnd(b2, 0x0FL) > 0L) + head
 }
 
 # Derive the full layout from the header descriptor: how the dimensions split into
@@ -127,11 +136,14 @@ ivt_layout <- function(raw) {
 # order) and their values, or NULL if the page is empty. `size` is the page's
 # allocated byte length from its directory entry (the two agreeing u16 fields):
 # the computed value run must fit inside it -- across the whole local corpus
-# `4 + rec_bytes + trailer + nv*width <= size` holds on every page (and exactly,
-# with equality, on the trailer-less b2 == 0x00 pages), so an overrun means the
-# marker was misread (wrong width or trailer) and the values would be garbage.
+# `4 + rec_bytes + trailer + head + nv*width <= size` holds on every page (and
+# exactly, with equality, on the trailer-less b2 == 0x00 pages with b3 <= 0x09;
+# the b3 >= 0x0a pages append suppression-mask records after the run), so an
+# overrun means the marker was misread (wrong width, trailer or head) and the
+# values would be garbage.
 ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
+  b3 <- as.integer(raw[off + 4L])
   w <- bitwAnd(b0, 0x0FL)
   if (!w %in% c(2L, 4L, 8L)) {
     cli::cli_abort(
@@ -140,7 +152,7 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   }
   width <- w
   is_float <- w == 8L
-  vstart <- 4L + lay$rec_bytes + ivt_value_trailer(b0, b2)
+  vstart <- 4L + lay$rec_bytes + ivt_value_trailer(b0, b2, b3)
 
   pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
   nv <- sum(pres)
@@ -193,14 +205,19 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     if (!ivt_f2_is_marker(raw, off)) next
     valid <- valid + 1L
     b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
+    b3 <- as.integer(raw[off + 4L])
     w <- bitwAnd(b0, 0x0FL)
-    tr <- tryCatch(ivt_value_trailer(b0, b2), error = function(e) NULL)
+    tr <- tryCatch(ivt_value_trailer(b0, b2, b3), error = function(e) NULL)
     if (is.null(tr) || !w %in% c(2L, 4L, 8L)) return(FALSE)
     nv <- sum(ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit))
     if (nv == 0L) next
     end <- 4L + lay$rec_bytes + tr + nv * w
     if (end > s1 || off + end > n || nv > cap) return(FALSE)
-    if (b2 == 0x00L && end != s1) return(FALSE)
+    # trailer-less pages fit exactly -- except the b3 >= 0x0a suppression-tail
+    # pages (2006 vintage), which append per-(geo, outer-dim) missing-cell mask
+    # records after the value run (with occasional writer slack/truncation), so
+    # only the <= extent bound applies there.
+    if (b2 == 0x00L && b3 <= 0x09L && end != s1) return(FALSE)
     seen <- seen + 1L
     if (seen >= max_pages) break
   }

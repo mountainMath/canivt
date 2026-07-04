@@ -1,8 +1,8 @@
 # The structural page-marker model (decode.R) and the loud-fallback machinery
 # (fallback.R). Pure unit tests -- no sample file needed.
 
-test_that("the value trailer is derived structurally from the marker's b2 byte", {
-  # b2 == 0x00: the value run starts immediately after the presence record
+test_that("the value trailer is derived structurally from the marker's b2/b3 bytes", {
+  # b2 == 0x00, b3 == 0x08: the value run starts right after the presence record
   expect_equal(ivt_value_trailer(0x84L, 0x00L), 0L)
   expect_equal(ivt_value_trailer(0x88L, 0x00L), 0L)
   # trailer = 2*(b2 >> 4) + 2*(low nibble > 0): the historically constant pairs
@@ -19,12 +19,22 @@ test_that("the value trailer is derived structurally from the marker's b2 byte",
   expect_equal(ivt_value_trailer(0xa8L, 0x53L), 12L)
   expect_equal(ivt_value_trailer(0xa8L, 0x60L), 12L)
   expect_equal(ivt_value_trailer(0xa8L, 0x63L), 14L)
-  # the 0xa2 int16 pages carry a fixed 32-byte auxiliary block before the run
-  expect_equal(ivt_value_trailer(0xa2L, 0x03L), 34L)
-  # unknown width code or high nibble: abort rather than decode garbage
+  # b3 encodes an auxiliary head block of 32*(b3 - 8) bytes before the run.
+  # The corpus's 0xa2 pages are all `a2 01 03 09`: trailer 2 + head 32 = 34
+  # (this reproduces the formerly hard-coded "+32 on 0xa2" constant).
+  expect_equal(ivt_value_trailer(0xa2L, 0x03L, 0x09L), 34L)
+  # The 2006 census vintage (97-563-XCB2006072): b3 = 0x0a / 0x0c heads on
+  # trailer-less pages, verified against the page-size equation on all
+  # 14,381 of its pages.
+  expect_equal(ivt_value_trailer(0x84L, 0x00L, 0x0aL), 64L)
+  expect_equal(ivt_value_trailer(0x84L, 0x00L, 0x0cL), 128L)
+  expect_equal(ivt_value_trailer(0x82L, 0x00L, 0x0cL), 128L)
+  # unknown width code, high nibble or b3: abort rather than decode garbage
   expect_error(ivt_value_trailer(0x86L, 0x01L), class = "canivt_unknown_marker")
   expect_error(ivt_value_trailer(0x81L, 0x01L), class = "canivt_unknown_marker")
   expect_error(ivt_value_trailer(0x48L, 0x01L), class = "canivt_unknown_marker")
+  expect_error(ivt_value_trailer(0x84L, 0x00L, 0x0bL), class = "canivt_unknown_marker")
+  expect_error(ivt_value_trailer(0x84L, 0x00L, 0x10L), class = "canivt_unknown_marker")
 })
 
 test_that("ivt_fallback warns with a classed condition", {

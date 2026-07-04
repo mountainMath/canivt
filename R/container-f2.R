@@ -33,8 +33,16 @@ IVT_F2_PRESENCE_LEN  <- IVT_F2_GEOS_PER_PAGE * IVT_F2_REC_BYTES  # 256
 # 0xa (the plain vs 0xFF-run variants, as in family 1) and its low nibble is the
 # value-width code (2/4/8). Markers seen in 98-10-0023: 88 01 20 08, a8 01 41 08,
 # a2 01 03 09.
+#
+# The fourth byte `b3` ENCODES the size of an auxiliary head block between the
+# trailer and the dense value run: `32 * (b3 - 8)` bytes (see
+# `ivt_value_trailer()`, decode.R). `0x08`/`0x09` are the modern values (no
+# head / the 32-byte block formerly attributed to the 0xa2 marker); the 2006
+# census vintage (97-563-XCB2006072) uses `0x0a`/`0x0c` (64/128-byte heads,
+# whose pages also append per-(geo, outer-dim) suppression-mask records AFTER
+# the value run -- see ivt-format.md "The b3 head block and suppression tails").
 ivt_f2_marker_b0 <- c(0x82L, 0x84L, 0x88L, 0xa2L, 0xa4L, 0xa8L)
-ivt_f2_marker_b3 <- c(0x08L, 0x09L)
+ivt_f2_marker_b3 <- c(0x08L, 0x09L, 0x0aL, 0x0cL)
 ivt_f2_is_marker_byte0 <- function(b) b %in% ivt_f2_marker_b0
 
 # Whole-marker test at a 0-based page offset.

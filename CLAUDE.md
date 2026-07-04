@@ -64,8 +64,21 @@ on all six reference tables:
   flag): on 2016120 the flag's **last digit = 9 exactly for the 888
   geographies with no stored cells** (888/888, zero crossovers), and the
   viewer renders precisely those geographies' cells blank. There is no
-  per-cell sentinel; the `b3 = 0x0a` "-1" pages remain unique to the rejected
-  2016203.
+  per-cell sentinel.
+- **2006 census DA crosstab 97-563-XCB2006072** (37.4 MB, 57,523 geographies,
+  Geography × Age(5) × Presence of income(9) × Sex(3), 6.5M cells in ~6 s):
+  the `b3 = 0x0a/0x0c` head-block vintage — the marker's fourth byte encodes
+  a `32·(b3−8)`-byte auxiliary head before the value run, and its pages append
+  per-(geo, age) absent-cell mask records after it (byte-exact reconstructible
+  from the presence bitmap on 14,111/14,381 pages). Viewer-validated
+  cell-exact: 3,487/3,487 stored cells + 833 absent-as-zero over 32
+  geographies (20 random) incl. deep tail (member 57,523) and wholly-empty
+  ones; `has_data` flags the 1,999 wholly-suppressed DAs. Fallback-clean under
+  `canivt.strict`. Its truncated descriptor name ("Presence of inc") is
+  repaired from the descriptor's complete SECOND name copy (the first copy
+  caps at ~15 bytes; `ivt_f2_descriptor()` prefers the tail when the first
+  copy hits the cap and the tail strictly extends it — this also completes
+  the 1996/2011/2016 descriptor names whose Variable List is absent).
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every
@@ -86,7 +99,7 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
 | `fallback.R`    | **loud fallbacks**: `ivt_fallback(msg, class)` — classed warning (`canivt_fallback` by default) raised whenever a content-heuristic fallback supplies values or pages are skipped; `options(canivt.strict = TRUE)` upgrades to a classed error. `ivt_quietly()` muffles both for speculative probes (family detection). Wire every new fallback path through this. |
 | `container.R`   | page-directory anchor `ivt_idx0()` (reads `u16@558`, validates by checking the first entry points at a page marker — works for any file size) + the legacy 0x1000-stride `ivt_geography_count()` (kept only for the family detector / regression). `IVT_IDX0_DEFAULT=37167` is a fallback. |
 | `decode.R`      | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides. `ivt_decode()` walks the paged-coordinate cartesian, decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`) → cell tibble (`geo` + one slug column per data dimension). Handles geography-paged (former family 1) and geography-in-page/multiple-geos-per-page (former family 2) identically. |
-| `container-f2.R`| family-2 page-directory finder (used by the metadata path) + per-page value params (`IVT_F2_PAGE_TRAILER` per marker); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
+| `container-f2.R`| family-2 page-directory finder (used by the metadata path) + the marker byte model (`ivt_f2_is_marker()`: `b0` width/variant nibbles, `b3 ∈ {08,09,0a,0c}` head-block codes); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
 | `decode-f2.R`   | shared presence-bitmap primitives used by `ivt_layout()`/`ivt_decode()` for **every** table (the `ivt_f2_` prefix is historical): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()` (power-of-two-nested strides), `ivt_f2_cell_grid()` (cells in dense value order), `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read). |
 | `dimdir.R`      | **Bilingual labels + dimension names** are read here: `ivt_f2_dim_dir_label1()` returns `list(en, fr, name_fr)` per dimension — EN vs FR chosen by a **structural marker** (`ivt_f2_dim_dict_en_first()`: the dimension's dictionary/schema block names `English Desc` before `Desc Français`/`Desc fran`, and the two member blocks follow that schema order), with `ivt_f2_frscore()` only as the loud fallback when the schema block is absent. The **French dimension name** (`ivt_f2_total_name()`) is the French `Total - <name>` first member (the header Variable List is English-only), NA for Statistics-type dims. **the header per-dimension directory slot table** — the primary, purely metadata-driven anchor for the whole codebook. Header `@824 + 14·(k−1)` holds a 14-byte record per descriptor dimension `k` (`[u32 dir_ptr][u32 ?][u32 n_entries][2B]`); `ivt_f2_dim_slots()` reads the table, `ivt_f2_dim_dir(raw, k)` resolves dimension `k`'s **block directory** (`[u32 off][u16 len][u16 len]` entries; two indirection depths — the big chunked geo dirs route slot → struct → directory), self-validated against the slot's `n_entries`. Each directory lists that dimension's codebook in logical order: dictionary/schema, member-id table, ordinals, the `81 02 02 00` doubled-name marker, the EN then FR member blocks, then **that dimension's footnotes**. `ivt_f2_dim_dir_labels()` reads every data dimension's labels positionally (marker entry matched to the descriptor name, then the first two member-array entries after it, trailing `count` records, EN via `ivt_f2_frscore()`) — byte-identical to the marker-scan on all 17 data dims of 0241/0077/0023/0129/1991, no tail window; `ivt_f2_dir_footnotes()` reads footnotes **with dimension attribution** (a `dimension` field; sets equal to the tail scan on all five tables). The 1991 legacy format carries the same table. Also home to the two other header directory slots: `ivt_f2_master_dir()` (`@544` → the whole-file **master directory** at offset 992: FACET04 titles, descriptor, EN/FR identity/notes blobs, product id, EOF trailer) and `ivt_f2_dqf_legend()` (`@712` → the **data-quality-flag legend**, `[82 01]`-framed EN/FR records per code A–E/R/P; NULL on the pre-DGUID stub). |
 | `codebook-f2.R` | **the unified codebook** (the `ivt_f2_` prefix is historical — used for every family): member-ordered geography DGUIDs (fast vectorised DGUID-shape Pascal-string scan, first-appearance dedup); `ivt_f2_geo_simple()` (cheap single-block geography names+DGUIDs for small/family-1 tables, NULL for the chunked large tables) — **schema-driven and content-free**: geography is dimension 1, located by its own `81 02 02 00` doubled-name marker (like every data dim), and its attribute arrays are named by the file's **geography attribute schema** `ivt_f2_geo_schema()` (the stored `GEO_NAME·GEO_TYPE_DESC·…·DGUID·…` field list), so `GEO_NAME`/`DGUID` are addressed **by slot/name**, not by sniffing a `"Canada"` first entry or a `"2021…"` prefix (DGUIDs byte-identical to the legacy scan on 0241/0077; `GEO_NAME` is the canonical short name). Falls back to the content-based `ivt_geo_arrays()` for layouts whose attribute arrays aren't clean `n_geo`-blocks (e.g. 0662); data-dimension member labels `ivt_f2_dim_member_labels(raw, want)` (anchored on the codebook **doubled-name marker** `81 02 02 00` via `ivt_f2_codebook_dim_markers()` + `ivt_f2_marker_labels()`: each dimension's `81 02 02 00`+name header sits right after its EN block, so labels are matched **by name** and taken as that block's trailing `count` records — robust to leading framing records, e.g. 0077 Ages, and to ordinal-less short dims, e.g. the 2-member reference period Year=`2020`/`2015`; the old ordinal-anchored + FR/EN-pair scans remain as fallback); the geography block directory `ivt_f2_geo_block_dir()` is now **dimension 1's slot directory** (`ivt_f2_dim_dir(raw, 1)`, `dimdir.R`), with the old `IVT_F2_DIR_SLOTS` guess loop as fallback; the full **geography attribute table** `ivt_f2_geo_attributes()` — **directory-driven**: `ivt_f2_geo_attrs_dir()` reads every attribute **positionally** from the file's own metadata block directory (blocks in logical order, per group `[display + schema fields]` × EN-then-FR runs of `G` chunks; group sizes `ivt_f2_geo_group_sizes()`, ordinals dropped `ivt_f2_is_ordinal()`), **no strides / no reverse-root override / no content-located TNR**; entry VALUES come from the **strict block-framing parse** `ivt_f2_dir_entry_members()` (plain `[01 01][u16 payload][u16 n_slots]` arrays: exactly n_slots NUL-terminated records, absent members and the pow-2 slot padding as explicit empty records → NA; dense `[81 01][u16 nbits][u16-padded bitstream][80|01]` arrays: unterminated records skipping absent members, re-aligned from a plain sibling's NA pattern; see ivt-format.md), the run-scanner only classifies entries and supplies fallback values; gated on the regular block count and falling back to the legacy **stride** path (attribute-major growing groups via the DGUID anchor `group_lo = d0 − dguid_slot·2G`; per-attribute EN-then-FR slots; `ivt_f2_geo_root_dir()` root override) only when the directory lists the codebook irregularly (e.g. 98-10-0013 ADA). `DQF_NOTE` is positional where strict-parsed (100% on 0023; the 1-byte record length caps values at 252 bytes — longer notes are truncated in the file itself), with the `ivt_f2_derive_text()` majority-vote filling only scanner-read slots; `ivt_f2_geo_inline()` the **combined-block reader** for every **schema-absent** layout (1991/2006/2011/2016: `"name (code) [type_abbr] flag [(pct%)]"` blocks; bilingual names; character GEOUIDs incl. dotted census-tract codes and bare 2016 codes) — **positional first** (`ivt_f2_geo_inline_dir()`: per group of `G` chunks, `R` directory-ordered runs of `G` chunk blocks; `R` derived from the candidate count and roles detected by content — the two combined runs by `IVT_F2_INLINE_PAT` parse rate, a code array as any other run equal to the parsed codes (uid falls back to the parsed code when absent, e.g. 2006's R=3); chunk record counts validated per run, 2006's partial-first rotation accepted, values strict-first via `ivt_f2_dir_entry_members()` — fixes the silent dedup-scan misorders on 1991/2006/2011, each validated vs the B2020 viewer), falling back to the marker-region block scan (`ivt_f2_geo_marker_region()`, itself bounded by the geography directory's byte span `ivt_f2_geo_dir_span()` when the slot table resolves); returns NULL for schema'd tables (they have no combined block). `ivt_f2_geo_light()` resolves all families through one entry (combined-block → directory-positional attrs read for single-chunk schema'd tables (`ivt_f2_geo_attrs_dir(trim = FALSE)`, byte-identical to `ivt_f2_geo_simple()`, which stays as fallback) → DGUID scan). Metadata-driven entry point `ivt_f2_geographies()` prefers the combined-block reader, else the DGUID attribute table, returns a unified `member_id/geo_name/geo_uid/…` table, validated against the header (`ivt_f2_check_geo_count()`). |
@@ -123,21 +136,26 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   power of two of count × inner-block; innermost in the low bits). Records are
   **byte-pair-swapped** then read **MSB-first**. The historical "Age nibble,
   genders Total/Men/Women at bits 3/2/1" is the Age×Gender special case.
-- Value run starts at `4 + presence_len + trailer(b2)`
+- Value run starts at `4 + presence_len + trailer(b2) + 32·(b3 − 8)`
   (`presence_len = rec_bytes × geos_per_page`); the trailer is **encoded in the
-  marker's third byte** (`ivt_value_trailer()`): `b2 == 0x00` → 0, else
-  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)`, plus a fixed **32-byte auxiliary
-  block** on `0xa2` int16 pages. Derived from 98-10-0013's 22 pages (18 distinct
-  b2 values, trailers 6–14, each anchored byte-exact vs the StatCan CSV); it
-  reproduces the formerly hard-coded constants (88/20→4, a8/41→10, 84/40→8,
-  82/80→16, a4/82→18, a2/03→34) — the old `32/width | 64/width+2` width formula
-  only coincided because b2 was constant per marker family. Unknown markers
-  **abort** (`canivt_unknown_marker`); every page is extent-checked against its
-  directory entry's u16 size (`4 + presence + trailer + nv·width ≤ size`,
-  equality when `b2 == 0`; `canivt_page_overrun`). Valid entries pointing at
-  unknown markers are skipped **loudly** (`canivt_skipped_pages`). The store
-  keeps only **non-zero** cells (the CSV publishes the zeros), so a missing
-  cell = 0; entirely empty geographies (zero presence record) are normal.
+  marker's third byte** and the auxiliary **head block in its fourth**
+  (`ivt_value_trailer(b0, b2, b3)`): trailer = `b2 == 0x00` → 0, else
+  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)`; head = `32·(b3 − 8)`,
+  `b3 ∈ {08,09,0a,0c}`. The b2 formula is derived from 98-10-0013's 22 pages
+  (18 distinct b2 values, trailers 6–14, each anchored byte-exact vs the
+  StatCan CSV); it reproduces the formerly hard-coded constants (88/20→4,
+  a8/41→10, 84/40→8, 82/80→16, a4/82→18) — the old `32/width | 64/width+2`
+  width formula only coincided because b2 was constant per marker family. The
+  b3 head rule generalises the former "+32 on `0xa2` pages" (every corpus 0xa2
+  page is `a2 01 03 09`) and unlocked the 2006 vintage (97-563: b3=0a/0c).
+  Unknown markers **abort** (`canivt_unknown_marker`); every page is
+  extent-checked against its directory entry's u16 size
+  (`4 + presence + trailer + head + nv·width ≤ size`, equality when `b2 == 0`
+  and `b3 ≤ 09` — the `b3 ≥ 0a` pages append absent-cell mask tails;
+  `canivt_page_overrun`). Valid entries pointing at unknown markers are skipped
+  **loudly** (`canivt_skipped_pages`). The store keeps only **non-zero** cells
+  (the CSV publishes the zeros), so a missing cell = 0; entirely empty
+  geographies (zero presence record) are normal.
 - **Fallbacks are LOUD** (`ivt_fallback()`, `fallback.R`): every content-heuristic
   path (stride walk, regex/dedup scans, count-keyed labels, marker-scan directory
   location, fixed slot orders, tail windows) raises a classed `canivt_fallback`
@@ -459,14 +477,26 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   are **different container variants**, all rejected structurally by the page
   pre-flight or descriptor gate: `98-400-X2016019` (descriptor misreads,
   `ivt_f2_decodable()`), `97F0020XCB2001070` (capacity rule), `97-570-X1981004`
-  (span rule — geography stored LAST), `98-400-X2016203` (non-exact `b2 == 0`
-  pages + 369 unknown `a2 01 03 0a` markers, likely suppression sentinels; its
-  direct `ivt_decode()` still runs with a loud `canivt_skipped_pages` warning
-  but the file is unsupported). **98-400-X2016387 IS supported** (directory
-  complete after the entry-floor fix; geography viewer-validated). The 2006
-  `97-563-XCB2006072` remains unsupported: its geography codebook is fully
-  validated but its **page directory has not been located** (no `@558` unwrap
-  candidate validates) — open item.
+  (span rule — geography stored LAST), `98-400-X2016203` (non-exact
+  `b2 == 0, b3 == 08` pages; its 369 `a2 01 03 0a` pages are likely ordinary
+  64-byte-head pages under the b3 rule below — revisit with viewer ground
+  truth). **98-400-X2016387 IS supported** (directory complete after the
+  entry-floor fix; geography viewer-validated). **The 2006 DA crosstab
+  `97-563-XCB2006072` IS supported** (2026-07-03): its directory was at the
+  plain `u16@558` all along, rejected only because this vintage's markers
+  carry `b3 = 0x0a/0x0c` — **the marker's fourth byte encodes an auxiliary
+  head block of `32·(b3−8)` bytes** before the value run (`ivt_value_trailer()`
+  now takes b3; the formerly hard-coded "+32 on `0xa2` pages" was really
+  `b3 = 09`, the two rules observationally identical on the whole supported
+  corpus). Its `b2 == 0` pages append **per-(geo, age) absent-cell mask
+  records** after the popcount value run (byte-exact reconstructible from the
+  presence bitmap on 14,111/14,381 pages; remainder is writer slack/truncation),
+  so `b2 == 0` exact-fit is asserted only for `b3 ≤ 09`. Cell semantics
+  unchanged (non-zero cells stored, absent renders 0 — 2006 zero-fills
+  area-suppressed small areas). Viewer-validated cell-exact (3,487/3,487
+  stored + 833 absent-as-zero across 32 geographies incl. random, deep-tail
+  and wholly-empty ones). See ivt-format.md "The b3 head block and suppression
+  tails".
 - **Family-2 geography attributes — DONE, positional-exact.** The strict
   value-entry parse (`ivt_f2_dir_entry_members()`, see ivt-format.md "Value-entry
   block framings": plain `[01 01][u16 payload][u16 n_slots]` arrays with explicit

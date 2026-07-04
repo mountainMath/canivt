@@ -141,14 +141,17 @@ HTML ground truth (the profile scraper, `/profiles/Rp-eng.cfm`).
 
 ### 3. Container not located / descriptor undecoded
 
-- **`97-563-XCB2006072`** (2006 census DA crosstab): the **geography codebook is
-  fully validated** (57,523 members, positional inline reader, viewer-exact),
-  but the **page directory has not been located** — no `@558` unwrap candidate
-  (`u16 + k·65536`) validates. Open: find where this vintage stores its
-  directory pointer, or whether its directory starts with entry shapes the
-  validator rejects. Probably the highest-value target in this doc: it is a
-  mainstream census product and everything *except* the directory is already
-  decoded.
+- **`97-563-XCB2006072`** (2006 census DA crosstab): **DECODED and SUPPORTED**
+  (2026-07-03) — moved out of this doc. The directory was at the plain
+  `u16@558 = 45641` all along (14,381 entries = ⌈57,523/4⌉ exactly); the
+  validator rejected it only because this vintage's page markers carry
+  `b3 = 0x0a/0x0c`, which turned out to encode a **`32·(b3−8)`-byte auxiliary
+  head block** before the value run — the general rule behind the formerly
+  hard-coded "+32 on `a2 01 03 09` pages". Its pages also append per-(geo, age)
+  suppression-mask records after the value run (byte-exact reconstructible from
+  the presence bitmap on 14,111 of 14,381 pages; the rest is writer
+  slack/truncation). See ivt-format.md "The b3 head block and suppression
+  tails" and coverage.md.
 - **`97F0015XCB2001041`** (2001) and **`97-570-X1981002`** (1981 Census Profile):
   `n_dim@+16` is garbage (1282 / 35841), no dimension records parse, and no page
   directory is found. Different header + container; the least understood.
@@ -169,10 +172,13 @@ make it unsupported:
 - its `b2 == 0x00` pages are **not exact-fit** (`4 + presence + nv·width <
   size`), where exactness holds on every validated table — so the value-run
   arithmetic cannot be trusted;
-- **369 pages carry the undecoded marker `a2 01 03 0a`** (`b3 = 0x0a`, a value
-  the marker validator otherwise never sees; their int16 values are all `-1`,
-  presumably suppression sentinels). They are skipped **loudly**
-  (`canivt_skipped_pages`).
+- **369 pages carry the marker `a2 01 03 0a`** (`b3 = 0x0a`). Under the b3
+  head-block rule (decoded 2026-07-03 on the 2006 crosstab: value run starts
+  `32·(b3−8)` bytes later) these are very likely ordinary pages with a 64-byte
+  head — the old arithmetic started 32 bytes early and read head bytes as the
+  int16 `-1` "suppression sentinels". The marker now passes validation, but
+  the file stays rejected on the non-exact fits above; revisit with viewer
+  ground truth.
 
 Its cells were never ground-truthed and its metadata needs two heuristic
 fallbacks. To revisit: validate a `0x0a` page against a B2020 viewer slice.
@@ -201,10 +207,8 @@ doubled-name delimiter.
 
 ## Decode path, by tractability
 
-1. **`97-563-XCB2006072`** (2006 DA crosstab): everything but the page
-   directory is decoded — a focused hunt for its directory pointer (or a
-   directory whose first entries the validator rejects) could flip a mainstream
-   product to supported.
+1. ~~**`97-563-XCB2006072`** (2006 DA crosstab)~~ — **DONE** (2026-07-03, the
+   b3 head-block rule; see §3).
 2. **`98F0172X`** (profile): geography + values + the full 1,046-record
    directory + both page formats decoded; geographies and spot values confirmed
    exact vs HTML ground truth. Remaining: accept `0x0_` markers, the hybrid
@@ -237,8 +241,8 @@ analysis had already revised the earlier strings-level recon downward).
   `97-570-X1981004` adds the geography-last nesting variant of the lineage.
 - `97F0020X` (2001 F crosstab): directory located and pages exact-fit under the
   b2 arithmetic, but the **presence nesting differs** (capacity-rule reject).
-- `97-563-XCB2006072` (2006 DA crosstab): geography viewer-validated, **page
-  directory unlocated** — the top open container hunt.
+- `97-563-XCB2006072` (2006 DA crosstab): **SUPPORTED** as of 2026-07-03 (the
+  `b3` head-block rule; directory was at the plain `u16@558`) — see §3.
 - `ord-08035` (CT custom export): descriptor + directory decode, but the
   **value-page body is a different (un-RE'd) encoding** — not a drop-in for the
   existing decoder.
@@ -246,8 +250,10 @@ analysis had already revised the earlier strings-level recon downward).
   `b2 == 0` fits + 369 `0x0a`-marker pages) — unsupported pending viewer
   validation.
 
-No new decoder is wired; all files are rejected **structurally** by
+All remaining files are rejected **structurally** by
 `ivt_is_supported()` (descriptor gate or page pre-flight — no allow/deny
 lists, no crashes). Each needs further dedicated reverse-engineering; the
-2006 crosstab (directory hunt) and the profile family (`98F0172X`, grid
-mapping) are the closest to done.
+profile family (`98F0172X`, grid mapping) is the closest to done, and
+98-400-X2016203 deserves a revisit under the b3 head-block rule (its
+`a2 01 03 0a` pages are very likely 64-byte-head pages misread by the old
+arithmetic, but its non-exact `b2 == 0, b3 = 08` pages remain unexplained).

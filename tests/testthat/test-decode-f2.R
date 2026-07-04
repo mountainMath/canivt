@@ -740,20 +740,37 @@ test_that("small files' page directories are not truncated by an offset floor", 
 })
 
 test_that("directory entries with unrecognised page markers are skipped LOUDLY", {
-  # 98-400-X2016203 carries 369 `a2 01 03 0a` pages (marker b3 = 0x0a, not the
-  # known 0x08/0x09); their cells cannot be decoded yet, and dropping them must
-  # warn -- silently missing cells read as zeros downstream. The file as a whole
-  # is REJECTED (its b2 == 0 pages do not fit their directory sizes exactly, so
-  # the pre-flight fails); the direct ivt_decode() path still exercises the
-  # loud skip.
+  # 98-400-X2016203's 369 `a2 01 03 0a` pages are now recognised under the b3
+  # head-block rule (b3 = 0x0a -> a 64-byte auxiliary head), so its direct
+  # decode no longer skips them -- but the file as a whole stays REJECTED (its
+  # b2 == 0, b3 == 08 pages do not fit their directory sizes exactly, so the
+  # pre-flight fails; the decoded values are unvalidated). To exercise the
+  # loud-skip machinery, doctor one page's b3 to the genuinely unknown 0x0b:
+  # the entry must be dropped with a classed warning -- silently missing cells
+  # read as zeros downstream.
   p <- locate_sample_ivt("", "98-400-X2016203", "98-400-X2016203.IVT")
   skip_if(p == "", "no 98-400-X2016203 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
   expect_false(ivt_is_supported(raw))
-  expect_warning(cells <- ivt_decode(raw), class = "canivt_skipped_pages")
+  cells <- ivt_decode(raw)                 # a2 01 03 0a pages decode via b3
   expect_gt(nrow(cells), 0L)
+  # doctor a LATER entry's page marker (the FIRST entry anchors ivt_idx0()'s
+  # pointer-unwrap validation -- breaking it re-anchors the whole directory
+  # instead of exercising the per-entry skip)
+  idx0 <- ivt_idx0(raw)
+  off <- NA_integer_
+  for (k in 1:200) {
+    o <- idx0 + 8L * k
+    if (rd_u16(raw, o + 4L) == rd_u16(raw, o + 6L) && rd_u16(raw, o + 4L) > 0L &&
+        ivt_f2_is_marker(raw, rd_u32(raw, o))) { off <- rd_u32(raw, o); break }
+  }
+  expect_false(is.na(off))
+  doctored <- raw
+  doctored[off + 4L] <- as.raw(0x0b)
+  expect_warning(cells2 <- ivt_decode(doctored), class = "canivt_skipped_pages")
+  expect_lt(nrow(cells2), nrow(cells))
   withr::local_options(canivt.strict = TRUE)
-  expect_error(ivt_decode(raw), class = "canivt_skipped_pages_error")
+  expect_error(ivt_decode(doctored), class = "canivt_skipped_pages_error")
 })
 
 test_that("incompatible same-signature containers fail the page pre-flight", {
@@ -834,7 +851,9 @@ test_that("the 1996 census tables decode (viewer-validated)", {
     raw <- readBin(p, "raw", n = file.info(p)$size)
     d <- ivt_f2_descriptor(raw)
     expect_equal(length(d$dims), 3L)
-    expect_equal(d$dims[[2L]]$name, "1995 Household")   # digit-led, stored truncated
+    # digit-led; the FIRST stored copy truncates at the ~15-byte cap and the
+    # descriptor read recovers the complete SECOND copy
+    expect_equal(d$dims[[2L]]$name, "1995 Household Income (3)")
     expect_equal(vapply(d$dims, `[[`, 1L, "count"), c(5544L, 3L, 3L))
     expect_equal(ivt_idx0(raw), 22330L + 2L * 65536L)   # unwrapped pointer
     cells <- ivt_decode(raw)

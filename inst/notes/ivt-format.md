@@ -119,23 +119,23 @@ fully decoded):
 - **The doubled directory size field.** Each 8-byte directory record stores the page
   byte-length **twice** (`[u32 off][u16 size][u16 size]`, the two `size`s identical).
   The size is the page's **allocated** length and upper-bounds its content: on every
-  page of every supported table `4 + presence + trailer + n_values*width <= size`,
-  with **equality** on the trailer-less `b2 == 0x00` pages. The decoder enforces
-  this per page (`canivt_page_overrun`), so a misread marker aborts rather than
+  page of every supported table `4 + presence + trailer + head + n_values*width <=
+  size`, with **equality** on the trailer-less `b2 == 0x00` pages whose `b3 <= 0x09`
+  (the `b3 >= 0x0a` suppression-tail pages append mask records after the run — see
+  "The b3 head block and suppression tails" below). The decoder enforces the bound
+  per page (`canivt_page_overrun`), so a misread marker aborts rather than
   decoding garbage values. The second copy's purpose (redundancy?) is unproven.
 - **Per-page header bytes.** The page marker is `[b0] 01 [b2] [b3]` with the value-
-  width in `b0`'s low nibble and `b3 ∈ {08,09}`; **`b2` encodes the trailer**:
-  `b2 == 0x00` means "no trailer" (the value run starts right after the presence
-  section, and the page size fits exactly), otherwise
-  `trailer = 2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes (plus a fixed 32-byte
-  auxiliary block on `0xa2` int16 pages). Derived from 98-10-0013, whose 22
+  width in `b0`'s low nibble and `b3 ∈ {08,09,0a,0c}`; **`b2` encodes the trailer**:
+  `b2 == 0x00` means "no trailer", otherwise
+  `trailer = 2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes; **`b3` encodes an
+  auxiliary head block** of `32·(b3 − 8)` bytes between the trailer and the value
+  run (see below). The b2 formula is derived from 98-10-0013, whose 22
   pages carry 18 distinct `b2` values (`0x2a`..`0x63`, trailers 6–14, each
   anchored byte-exact against the StatCan CSV); on the tables where `b2` never
   varies it reproduces the historical per-marker constants. What the trailing
   2-byte field (low-nibble flag) holds is unknown (`00 e0` on 0013's first
-  page). A **`b3 = 0x0a` page variant** exists (369 `a2 01 03 0a` pages on
-  98-400-X2016203; int16 values all -1, presumably suppression sentinels):
-  **undecoded**, skipped **loudly** (`canivt_skipped_pages`).
+  page).
 - **Label encoding is Windows-1252.** Labels use the cp1252 `0x80-0x9F` punctuation
   block (e.g. `0x92` = the curly apostrophe in `Tla’amin Lands` / `Sambaa K’e`,
   `0x93/0x94` quotes, `0x96/0x97` dashes). `is_label_byte()` must accept these
@@ -150,6 +150,59 @@ fully decoded):
 - Family-1 vs family-2 use different geography-id storage (separate DGUID array vs the
   attribute-major codebook); the per-table value-**type** byte beyond the marker low
   nibble is inferred, not located as a standalone field.
+
+## The b3 head block and suppression tails (2006 vintage; b3 ≥ 0x0a)
+
+The marker's fourth byte `b3` encodes an **auxiliary head block** of
+`32·(b3 − 8)` bytes between the (b2-encoded) trailer and the dense value run:
+
+    value run start = 4 + presence_len + trailer(b2) + 32·(b3 − 8)
+
+`b3 = 0x08` (no head) and `0x09` (32 bytes) are the modern values — every `0xa2`
+page in the corpus is `a2 01 03 09`, which is where the formerly hard-coded
+"+32 on 0xa2 pages" constant came from; the head, not the marker family, owns
+those 32 bytes. The **2006 census vintage** (97-563-XCB2006072, the first
+decoded table of its kind) uses `b3 = 0x0a` (64-byte head) and `0x0c` (128-byte
+head) on plain `0x82`/`0x84` `b2 == 0x00` pages. Verified against the page-size
+equation on all 14,381 of its pages (byte-exact tail reconstruction on 14,111;
+the rest carry writer slack/truncation, below). The head's *content* is
+per-geography records (wholly-suppressed geographies carry `EE EE / E0 00`
+sentinel words; published ones a small value + `E0 00`), semantics unproven —
+the decoder skips it.
+
+Pages with `b3 ≥ 0x0a` also append a **suppression tail** AFTER the value run:
+one mask field per (geography, outer-data-dimension member) that has ≥ 1
+missing cell, in ascending (geo, member) order. A field is the missing-cell
+mask over the inner dimensions in **presence-nesting order, one nibble per
+second-innermost member** (97-563: 9 `Presence of income` nibbles, each the
+sex mask with Total/Male/Female at bits 3/2/1 — a wholly-missing slice is nine
+`0xE` nibbles, `ee ee ee ee e0`), split into **value-width units with all-zero
+units dropped** (leading and trailing), each field padded to a width multiple.
+On 14,111 of 14,381 pages this reconstruction is byte-exact from the presence
+bitmap alone — **every cell absent from the presence bitmap is flagged**, so
+the tail is an absent-cell inventory, redundant with the presence bitmap. The
+published-value semantics are the SAME as every other vintage: the store keeps
+only non-zero cells and an absent cell renders `0` in the b2020 viewer
+(validated on 97-563: 3,487/3,487 stored cells viewer-exact and all 833
+absent sampled cells render 0, over 32 geographies — Canada through deep-tail
+member 57,523, 20 of them random, including wholly-empty ones — the 2006
+tabulations zero-fill area-suppressed small areas, so a suppression zero and
+a true zero are indistinguishable in the published table; the per-geography
+`has_data` signal remains the recoverable suppression marker). The remaining
+pages carry benign writer artifacts: stale bytes from an earlier, fatter
+encoding pass beyond the true tail (≤ 120 B, recognisably the same masks at
+16-bit-per-unit spread), tails truncated at the allocation boundary when the
+records did not fit, and occasional dropped all-`0xE` record groups — all
+after a valid prefix, and all recoverable from the presence bitmap, which is
+authoritative. The decoder therefore keys **only** on the presence bitmap and
+the head size: values = the `popcount` ints/floats at the head-adjusted
+start; `b2 == 0` exact-fit is asserted only for `b3 ≤ 0x09`.
+
+98-400-X2016203's 369 undecoded `a2 01 03 0a` pages are (very likely) this
+same layout — the old reader started 32 bytes early there and read head bytes
+(`0xFF…` runs) as int16 `-1` "values" — but that file also carries non-exact
+`b2 == 0, b3 = 0x08` pages the model does not explain, so it stays rejected
+pending viewer validation.
 
 ## Geography index
 
@@ -541,21 +594,23 @@ every value, float64 and int16). The complete spec:
   finding any page marker and the record that points at it, then growing the
   maximal contiguous run of valid records (`ivt_f2_find_directory`).
 - **Page markers and the value-type code.** Markers are `[b0] 01 [b2] [b3]` with
-  `b0` ∈ `{0x82,0x84,0x88,0xa2,0xa4,0xa8}` and `b3` ∈ `{0x08,0x09}`. The marker's
-  **low nibble is the value-width code** (exactly the per-table type marker that had
-  to exist): `0x8` → 8-byte **float64**, `0x4` → int32, `0x2` → **int16** (the int
-  pages are base-5 random-rounded counts). 98100023 uses `88` (float64), `a8`
-  (float64) and `a2` (int16).
-- **Page layout.** `[4-byte marker][256-byte presence section][0xFF trailer][dense
-  value run]`. The presence section is 4 × 64-byte records (one per geo, in value
-  order). The trailer is **encoded in the marker's `b2` byte**
-  (`ivt_value_trailer()`, decode.R): `b2 == 0x00` → no trailer; otherwise
-  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes, plus a fixed 32-byte auxiliary
-  block on `0xa2` int16 pages. This reproduces the six historically constant
-  pairs (`88/20`→4, `a8/41`→10, `84/40`→8, `82/80`→16, `a4/82`→18, `a2/03`→34 —
+  `b0` ∈ `{0x82,0x84,0x88,0xa2,0xa4,0xa8}` and `b3` ∈ `{0x08,0x09,0x0a,0x0c}`. The
+  marker's **low nibble is the value-width code** (exactly the per-table type marker
+  that had to exist): `0x8` → 8-byte **float64**, `0x4` → int32, `0x2` → **int16**
+  (the int pages are base-5 random-rounded counts). 98100023 uses `88` (float64),
+  `a8` (float64) and `a2` (int16).
+- **Page layout.** `[4-byte marker][256-byte presence section][0xFF trailer][head
+  block][dense value run]`. The presence section is 4 × 64-byte records (one per
+  geo, in value order). The trailer is **encoded in the marker's `b2` byte** and
+  the auxiliary head block **in its `b3` byte**
+  (`ivt_value_trailer()`, decode.R): trailer = `b2 == 0x00` → none; otherwise
+  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes; head = `32·(b3 − 8)` bytes (see
+  "The b3 head block and suppression tails" above). This reproduces the six
+  historically constant pairs (`88/20/08`→4, `a8/41/08`→10, `84/40/08`→8,
+  `82/80/08`→16, `a4/82/08`→18, `a2/03/09`→2+32=34 —
   which had made the trailer look like a per-width constant) and the 18 varying
   `b2` values of 98-10-0013 (each anchored byte-exact vs the StatCan CSV); an
-  unrecognised width code or high nibble aborts (`canivt_unknown_marker`)
+  unrecognised width code, high nibble or b3 aborts (`canivt_unknown_marker`)
   instead of decoding with a guessed layout. Values are dense in the page's
   width, one per present cell, in the presence order; the page is then
   zero-padded up to `size`, and the computed value run must fit `size` (checked

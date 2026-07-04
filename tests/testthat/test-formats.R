@@ -16,7 +16,16 @@ ivt_corpus <- list(
        dims = c(63404L, 3L, 13L, 16L)),
   list(id = "1003011",  file = "1003011.IVT",  family = 2L,
        dims = c(41859L, 110L, 3L)),
+  # 2006 DA crosstab: the b3 = 0x0a/0x0c head-block vintage (b3 encodes a
+  # 32*(b3-8)-byte auxiliary head before the value run; suppression-mask tail
+  # records after it). Viewer-validated cell-exact.
+  list(id = "97-563-XCB2006072", file = "97-563-XCB2006072.IVT", family = 2L,
+       dims = c(57523L, 5L, 9L, 3L)),
   # --- share the signature but are NOT a supported format ------------------
+  # 2016203 stays rejected under the extended b3 marker set: its a2 01 03 0a
+  # pages now pass the marker gate, but its non-exact b2 == 0, b3 == 08 pages
+  # still fail the pre-flight exact-fit rule.
+  list(id = "98-400-X2016203",   file = "98-400-X2016203.IVT",   family = NA),
   list(id = "95F0170X",          file = "95F0170X.IVT",          family = NA),
   list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA),
   list(id = "97F0020XCB2001070", file = "97F0020XCB2001070.IVT", family = NA),
