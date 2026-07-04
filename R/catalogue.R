@@ -21,7 +21,7 @@ IVT_CATALOGUE_MAX_AGE_DAYS <- 30
 #'
 #' @return A tibble with one row per version: `temporal` (the URL parameter,
 #'   e.g. `"2017"` for the 2016 long-form), `census` (the human label, e.g.
-#'   `"2016 Census – Part B (long-form questionnaire)"`) and `census_year` (the
+#'   `"2016 Census - Part B (long-form questionnaire)"`) and `census_year` (the
 #'   leading 4-digit year of the label as an integer).
 #' @export
 statcan_ivt_years <- function() {

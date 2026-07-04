@@ -30,7 +30,7 @@ languages; only the label-derived \code{column} names follow \code{language}.}
 \value{
 A tibble with columns \code{column} (the tidy column name), \code{dimension}
 (the full English dimension name; \code{"Geography"} for the geography columns),
-\code{dimension_fr} (the French dimension name, \code{NA} when none — used by
+\code{dimension_fr} (the French dimension name, \code{NA} when none -- used by
 \code{\link[=label_ivt_columns]{label_ivt_columns()}}), \code{member_id} (1-based StatCan member id), \code{ordinal}
 (the codebook
 member-ordinal; equals \code{member_id} when the file stores no ordinal block),

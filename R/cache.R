@@ -4,10 +4,10 @@
 #' the matching environment variable, which is read into the option when the
 #' package loads so it can be set in `.Renviron`):
 #'
-#' - **`ivt`** — raw downloaded `.ivt` files, option `canivt.ivt_cache` (env var
+#' - **`ivt`** -- raw downloaded `.ivt` files, option `canivt.ivt_cache` (env var
 #'   `CANIVT_IVT_CACHE`). When unset, downloads go to a per-session [tempdir()]
 #'   folder and are discarded at the end of the session.
-#' - **`data`** — parsed Parquet data and metadata that should persist across
+#' - **`data`** -- parsed Parquet data and metadata that should persist across
 #'   sessions, option `canivt.data_cache` (env var `CANIVT_DATA_CACHE`). When
 #'   unset, parsed output goes to [tempdir()] (and is lost when the session ends;
 #'   a one-time startup message points this out).

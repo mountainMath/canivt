@@ -1,4 +1,4 @@
-# INTERNAL — ground-truth scraping from the StatCan Beyond 20/20 HTML viewer.
+# INTERNAL -- ground-truth scraping from the StatCan Beyond 20/20 HTML viewer.
 #
 # These functions are not exported; they exist to build validation fixtures for
 # the binary decoder, the same way the 1991 age x sex ground truth was scraped
@@ -122,7 +122,7 @@ ivt_gt_fixed_dims <- function(doc) {
 
 # Parse the displayed data table into a tidy tibble (one row per cell), folding
 # in the fixed-dimension state and the geography. Dispatches on viewer layout:
-# the crosstab viewer tags each cell with a `[Row N: …] [Column M: …]` title; the
+# the crosstab viewer tags each cell with a `[Row N: ...] [Column M: ...]` title; the
 # profile viewer (`/profiles/Rp-eng.cfm`) lists one characteristic per row with a
 # single value column and no cell titles.
 ivt_gt_parse_table <- function(doc) {
@@ -242,7 +242,7 @@ ivt_gt_slug <- function(name) {
 # ---- URL helpers ------------------------------------------------------------
 
 # Replace/add query parameters in a URL (existing keys are overwritten, not
-# duplicated — the viewer breaks on duplicate GID/dN params).
+# duplicated -- the viewer breaks on duplicate GID/dN params).
 ivt_gt_set_params <- function(url, params) {
   if (!length(params)) return(url)
   split <- strsplit(url, "?", fixed = TRUE)[[1]]

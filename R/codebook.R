@@ -118,7 +118,7 @@ ivt_footnote_texts <- function(raw, from, to = length(raw)) {
     m <- regmatches(s, regexec(marker, s))[[1]]
     if (length(m) < 3L) next
     lang <- unname(langs[m[2]])
-    body <- trimws(gsub(" ", " ", sub(marker, "", s)))
+    body <- trimws(gsub("\u00a0", " ", sub(marker, "", s)))
     body <- gsub("[[:space:]]+", " ", body)
     if (!nzchar(body)) next
     out[[length(out) + 1L]] <- list(language = lang, text = body)

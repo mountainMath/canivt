@@ -16,7 +16,7 @@
 #' placed in the ivt cache yourself (as `<id>.ivt` directly in
 #' [ivt_cache_dir("ivt")][ivt_cache_dir], or as the only `.ivt` in a `<id>/`
 #' subfolder). Such files are used directly, with no catalogue lookup or
-#' download — handy for tables that are not on the public index, or for local
+#' download -- handy for tables that are not on the public index, or for local
 #' experiments.
 #'
 #' @param catalogue A StatCan catalogue number (e.g. `"98-10-0241-01"`,
@@ -93,10 +93,10 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
 #'
 #' @param catalogue A catalogue tibble (from [statcan_ivt_catalogue()]) used to
 #'   enrich the listing. `NULL` (default) reads the **cached** catalogue if one
-#'   exists and skips enrichment otherwise — it never triggers a scrape, so this
+#'   exists and skips enrichment otherwise -- it never triggers a scrape, so this
 #'   function works offline.
 #' @return A tibble with one row per cached file: `kind` (`"ivt"` or
-#'   `"parquet"`), `key` (the cache key — the catalogue number for downloaded
+#'   `"parquet"`), `key` (the cache key -- the catalogue number for downloaded
 #'   tables, the folder/file name otherwise), `language` (`"en"`/`"fr"` for a
 #'   language-marked Parquet, `NA` for `.ivt` files and old unmarked Parquets),
 #'   `path`, `bytes`, `modified`, and the catalogue columns `catalogue`, `title`,

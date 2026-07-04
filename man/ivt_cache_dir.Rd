@@ -23,10 +23,10 @@ package loads so it can be set in \code{.Renviron}):
 }
 \details{
 \itemize{
-\item \strong{\code{ivt}} — raw downloaded \code{.ivt} files, option \code{canivt.ivt_cache} (env var
+\item \strong{\code{ivt}} -- raw downloaded \code{.ivt} files, option \code{canivt.ivt_cache} (env var
 \code{CANIVT_IVT_CACHE}). When unset, downloads go to a per-session \code{\link[=tempdir]{tempdir()}}
 folder and are discarded at the end of the session.
-\item \strong{\code{data}} — parsed Parquet data and metadata that should persist across
+\item \strong{\code{data}} -- parsed Parquet data and metadata that should persist across
 sessions, option \code{canivt.data_cache} (env var \code{CANIVT_DATA_CACHE}). When
 unset, parsed output goes to \code{\link[=tempdir]{tempdir()}} (and is lost when the session ends;
 a one-time startup message points this out).

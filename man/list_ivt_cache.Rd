@@ -9,12 +9,12 @@ list_ivt_cache(catalogue = NULL)
 \arguments{
 \item{catalogue}{A catalogue tibble (from \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}) used to
 enrich the listing. \code{NULL} (default) reads the \strong{cached} catalogue if one
-exists and skips enrichment otherwise — it never triggers a scrape, so this
+exists and skips enrichment otherwise -- it never triggers a scrape, so this
 function works offline.}
 }
 \value{
 A tibble with one row per cached file: \code{kind} (\code{"ivt"} or
-\code{"parquet"}), \code{key} (the cache key — the catalogue number for downloaded
+\code{"parquet"}), \code{key} (the cache key -- the catalogue number for downloaded
 tables, the folder/file name otherwise), \code{language} (\code{"en"}/\code{"fr"} for a
 language-marked Parquet, \code{NA} for \code{.ivt} files and old unmarked Parquets),
 \code{path}, \code{bytes}, \code{modified}, and the catalogue columns \code{catalogue}, \code{title},

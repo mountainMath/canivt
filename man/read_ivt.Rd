@@ -22,7 +22,7 @@ Member IDs), and \code{metadata} (table identity, \code{dimensions}, \code{geogr
 with names and DGUIDs, and \code{footnotes}).
 
 The value store keeps only non-zero cells, so a cell absent from \code{cells}
-is a \strong{zero} — \emph{within a geography that carries any data}. A geography
+is a \strong{zero} -- \emph{within a geography that carries any data}. A geography
 with no stored cells at all is either wholly suppressed or wholly empty,
 and the cell store cannot distinguish the two: \code{metadata$geographies$has_data}
 flags which geographies carry data, and on the pre-DGUID tables

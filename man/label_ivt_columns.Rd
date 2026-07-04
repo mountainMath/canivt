@@ -21,14 +21,14 @@ is an Arrow object, else a data frame).
 }
 \description{
 The Parquet written by \code{\link[=ivt_write_parquet]{ivt_write_parquet()}} / \code{\link[=get_statcan_ivt]{get_statcan_ivt()}} names its
-data-dimension columns by their compact structural slug (\code{age}, \code{tenure}, …).
-This renames those columns to the full dimension label — English or French —
+data-dimension columns by their compact structural slug (\code{age}, \code{tenure}, ...).
+This renames those columns to the full dimension label -- English or French --
 on an Arrow dataset / dplyr-on-Arrow query (lazily, no data read) or a
-collected data frame. Geography columns (\code{geo_name}, \code{geo_uid}, …) are left as
+collected data frame. Geography columns (\code{geo_name}, \code{geo_uid}, ...) are left as
 is; a column whose slug is not found is skipped.
 }
 \details{
-The slug → label map comes from the \verb{<name>_members.parquet} sidecar (or an
+The slug -> label map comes from the \verb{<name>_members.parquet} sidecar (or an
 explicit \code{members} table, e.g. from \code{\link[=ivt_members]{ivt_members()}}). The language is taken
 from the file name marker via \code{\link[=ivt_parquet_language]{ivt_parquet_language()}} unless given, so the
 labels match the language the Parquet was written in.

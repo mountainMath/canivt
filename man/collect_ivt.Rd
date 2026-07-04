@@ -32,7 +32,7 @@ factor levels.}
 already fixed by how the Parquet was written.}
 
 \item{language}{Factor-level language: \code{"en"} or \code{"fr"}. \code{NULL} (default)
-auto-detects — \code{"en"} for \code{ivt} objects, and for the Arrow / Parquet forms
+auto-detects -- \code{"en"} for \code{ivt} objects, and for the Arrow / Parquet forms
 the language marker in the file name (see \code{\link[=ivt_parquet_language]{ivt_parquet_language()}}). For
 \code{ivt} objects it is passed to \code{\link[=ivt_tidy]{ivt_tidy()}}/\code{\link[=ivt_members]{ivt_members()}}; for the Arrow /
 Parquet forms it selects the French \code{level_fr} from the sidecar as the factor

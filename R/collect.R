@@ -26,7 +26,7 @@
 #'   languages; only the label-derived `column` names follow `language`.
 #' @return A tibble with columns `column` (the tidy column name), `dimension`
 #'   (the full English dimension name; `"Geography"` for the geography columns),
-#'   `dimension_fr` (the French dimension name, `NA` when none — used by
+#'   `dimension_fr` (the French dimension name, `NA` when none -- used by
 #'   [label_ivt_columns()]), `member_id` (1-based StatCan member id), `ordinal`
 #'   (the codebook
 #'   member-ordinal; equals `member_id` when the file stores no ordinal block),
@@ -121,7 +121,7 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #'   `"label"`. Ignored for the Arrow / Parquet forms, where the column names are
 #'   already fixed by how the Parquet was written.
 #' @param language Factor-level language: `"en"` or `"fr"`. `NULL` (default)
-#'   auto-detects — `"en"` for `ivt` objects, and for the Arrow / Parquet forms
+#'   auto-detects -- `"en"` for `ivt` objects, and for the Arrow / Parquet forms
 #'   the language marker in the file name (see [ivt_parquet_language()]). For
 #'   `ivt` objects it is passed to [ivt_tidy()]/[ivt_members()]; for the Arrow /
 #'   Parquet forms it selects the French `level_fr` from the sidecar as the factor
@@ -251,13 +251,13 @@ ivt_locate_members <- function(x) {
 #' Relabel slug data columns with their full dimension names
 #'
 #' The Parquet written by [ivt_write_parquet()] / [get_statcan_ivt()] names its
-#' data-dimension columns by their compact structural slug (`age`, `tenure`, …).
-#' This renames those columns to the full dimension label — English or French —
+#' data-dimension columns by their compact structural slug (`age`, `tenure`, ...).
+#' This renames those columns to the full dimension label -- English or French --
 #' on an Arrow dataset / dplyr-on-Arrow query (lazily, no data read) or a
-#' collected data frame. Geography columns (`geo_name`, `geo_uid`, …) are left as
+#' collected data frame. Geography columns (`geo_name`, `geo_uid`, ...) are left as
 #' is; a column whose slug is not found is skipped.
 #'
-#' The slug → label map comes from the `<name>_members.parquet` sidecar (or an
+#' The slug -> label map comes from the `<name>_members.parquet` sidecar (or an
 #' explicit `members` table, e.g. from [ivt_members()]). The language is taken
 #' from the file name marker via [ivt_parquet_language()] unless given, so the
 #' labels match the language the Parquet was written in.

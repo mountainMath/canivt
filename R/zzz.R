@@ -20,7 +20,7 @@
 .onAttach <- function(libname, pkgname) {
   if (!ivt_cache_is_set("data")) {
     packageStartupMessage(
-      "canivt: 'canivt.data_cache' is not set — parsed Parquet data and ",
+      "canivt: 'canivt.data_cache' is not set -- parsed Parquet data and ",
       "metadata will be written to a temporary directory and lost when the R ",
       "session ends.\n",
       "  Set options(canivt.data_cache = \"/path/to/cache\") in .Rprofile, or ",

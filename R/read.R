@@ -57,7 +57,7 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   with names and DGUIDs, and `footnotes`).
 #'
 #'   The value store keeps only non-zero cells, so a cell absent from `cells`
-#'   is a **zero** — *within a geography that carries any data*. A geography
+#'   is a **zero** -- *within a geography that carries any data*. A geography
 #'   with no stored cells at all is either wholly suppressed or wholly empty,
 #'   and the cell store cannot distinguish the two: `metadata$geographies$has_data`
 #'   flags which geographies carry data, and on the pre-DGUID tables

@@ -432,7 +432,7 @@ ivt_f2_dir_entry_members <- function(raw, off, len) {
 # schema order -- each stored EN then FR. So we read the value blocks (those whose
 # record count is the chunk size `rootN`) in directory order, pair them, and map:
 # pair 1 -> the display name; pair k+1 -> `ivt_f2_geo_schema()[k]`. No marker, no
-# content sniffing, no `d0 ± k*2G` stride: the block starts come from the header
+# content sniffing, no `d0 +/- k*2G` stride: the block starts come from the header
 # directory and the field identity from the schema position. Language within a pair
 # is decided by `ivt_f2_frscore()` (EN-first here, but structurally, not by order).
 # Returns a named list of `rootN`-long vectors keyed by OUTPUT attribute name
@@ -679,18 +679,18 @@ ivt_f2_geo_slot_map <- function(raw) {
   slots
 }
 
-# Clean attribute blocks from the codebook tail: member arrays only — drop the
+# Clean attribute blocks from the codebook tail: member arrays only -- drop the
 # tiny garbage byte-runs the block scanner picks up and the consecutive-integer
 # member-ordinal delimiter blocks, both of which would shift positional indexing.
 #
 # The full 256-member chunks are always kept. A chunk group's LAST chunk is a
-# partial (`n_geo mod 256` members) and can fall below any fixed size floor — e.g.
+# partial (`n_geo mod 256` members) and can fall below any fixed size floor -- e.g.
 # 98-10-0013's last group ends in a 71-member partial, so the old blunt
 # `length(t) >= 150` floor silently dropped the trailing DGUID/name/code partials
 # and undercounted that group (5,376 of 5,447 geographies). Instead of a magic
 # size, a partial is recognised *structurally*: a small but clean member-array
 # block (no control bytes, no single repeated byte, low fraction / not an ordinal
-# delimiter) that **immediately follows a full member block** — i.e. it trails its
+# delimiter) that **immediately follows a full member block** -- i.e. it trails its
 # own attribute's full chunks. Garbage byte-runs cluster on their own and never
 # trail a real member array, so they are still dropped.
 ivt_f2_codebook_blocks <- function(raw, tail_bytes = 20000000L) {
@@ -701,7 +701,7 @@ ivt_f2_codebook_blocks <- function(raw, tail_bytes = 20000000L) {
     iv <- suppressWarnings(as.integer(t))
     !anyNA(iv) && length(iv) >= 3L && all(diff(iv) == 1L)
   }
-  is_clean <- function(t) mean(grepl("[½¾¼÷×Þþ{}]", t)) < 0.3 && !is_ord(t)
+  is_clean <- function(t) mean(grepl("[\u00bd\u00be\u00bc\u00f7\u00d7\u00de\u00fe{}]", t)) < 0.3 && !is_ord(t)
   # a clean member array too short for the full-chunk floor -- kept only as a
   # trailing partial (see below): no control chars, not a repeated single byte,
   # mostly multi-character values.
@@ -797,8 +797,8 @@ ivt_f2_extract_attr <- function(blocks, groups, slot, n_geo, tnr = FALSE,
 # Two NAME attributes sit at the FRONT of each codebook group, before the schema
 # attributes: a display **Member Name** (the human-readable label StatCan shows,
 # e.g. "0001.00 - Abbotsford - Mission" or "Newfoundland and Labrador") and the
-# schema's GEO_NAME (the short geographic name, which for code-only geographies —
-# census tracts, unnamed dissemination areas — is the bare code "9320001.00").
+# schema's GEO_NAME (the short geographic name, which for code-only geographies --
+# census tracts, unnamed dissemination areas -- is the bare code "9320001.00").
 # Each is stored as a pair of same-attribute block runs, one per language; the two
 # language runs are laid down back to back (G blocks each). We recover both, in
 # English and French.
@@ -806,16 +806,16 @@ ivt_f2_extract_attr <- function(blocks, groups, slot, n_geo, tnr = FALSE,
 # Anchoring is drop-tolerant. The trailing *partial* chunk of a code-valued run
 # (GEO_NAME on a census-tract table) is sometimes lost to the block scanner
 # (special bytes after the last short block), which would shift a fixed offset. So
-# we anchor on GEO_TYPE_DESC's first block (`type0 = d0 - (dguid_slot-1)*2G`) —
+# we anchor on GEO_TYPE_DESC's first block (`type0 = d0 - (dguid_slot-1)*2G`) --
 # reliable because every attribute from GEO_TYPE_DESC through DGUID is full text/
-# code that keeps its partial — and walk BACKWARD through GEO_NAME (2 runs) then
+# code that keeps its partial -- and walk BACKWARD through GEO_NAME (2 runs) then
 # the display pair (2 runs), inspecting each code run's last-block length to detect
 # a dropped partial. The two text display runs are always full.
 IVT_F2_FR_TOK <- paste0("(^|[ '-])(et|de|des|du|de-la|la|le|les|aux?|sur|sous|",
-                        "ouest|est|nord|sud|sainte?|île|rivière|lac|baie)([ '-]|$)")
+                        "ouest|est|nord|sud|sainte?|\u00eele|rivi\u00e8re|lac|baie)([ '-]|$)")
 IVT_F2_EN_TOK <- paste0("(^|[ '-])(and|of|west|east|north|south|saint|island|",
                         "river|lake|bay)([ '-]|$)")
-IVT_F2_ACCENT <- "[^àâäçéèêëîïôöùûüÀÂÄÇÉÈÊËÎÏÔÖÙÛÜœ]"
+IVT_F2_ACCENT <- "[^\u00e0\u00e2\u00e4\u00e7\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c7\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc\u0153]"
 
 # A French-ness score over the members where two candidate name blocks differ:
 # accented-character count + French-connective tokens - English tokens. Used per
@@ -891,7 +891,7 @@ ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
 #
 # The whole codebook is read POSITIONALLY from the file's own metadata block
 # directory (`ivt_f2_geo_block_dir()`), which lists every codebook block in LOGICAL
-# order with its exact offset and length. There are no `d0 ± k*2G` strides, no
+# order with its exact offset and length. There are no `d0 +/- k*2G` strides, no
 # byte-ascending block scan (so the reverse-stored root chunk needs no special
 # override), and no content-location of TNR: every attribute is read by position.
 #
@@ -1065,7 +1065,7 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
 #'
 #' Returns a tibble with one row per geography (1-based member id) and columns for
 #' the decoded codebook attributes: `geo_label` (the human-readable display Member
-#' Name) and `geo_label_fr`, `geo_name` (the schema GEO_NAME — a bare code for
+#' Name) and `geo_label_fr`, `geo_name` (the schema GEO_NAME -- a bare code for
 #' census tracts / unnamed dissemination areas) and `geo_name_fr`, `dguid`,
 #' `geo_level`, `geo_type_abbr`, `prov_abbr`, `alt_geo_code`, `pr_code`,
 #' `dqf_code` (data-quality flag) and `tnr_short_form` (total non-response rate).
@@ -1170,7 +1170,7 @@ ivt_f2_derive_text <- function(raw_vals, key) {
 # bare geographic code (a shortened DGUID without the year and statistical-area-type
 # prefix that 2016+ tables carry; it may be dotted, e.g. a census-tract code
 # "0010001.00", or carry letters, so it is treated as character), an optional
-# <type_abbr> is a short geography-type abbreviation ("T", the accented "MÉ", ...),
+# <type_abbr> is a short geography-type abbreviation ("T", the accented "ME", ...),
 # and <dqf_code> is the data-quality flag. These blocks repeat per chunk and per
 # language; the GEOUID is unique, so first-appearance de-duplication yields the
 # geographies in member order. Crucially the parse is **anchored on the geography
@@ -1184,9 +1184,9 @@ ivt_f2_derive_text <- function(raw_vals, key) {
 
 # Fixed-header field offsets (0-based). The header carries a dimension descriptor
 # pointer and, in the legacy export format, out-of-line title-string pointers.
-IVT_HDR_DESCRIPTOR_PTR <- 32L   # u32 → dimension descriptor block
-IVT_HDR_TITLE_FR_PTR   <- 40L   # u32 → French title (0 in the modern inline format)
-IVT_HDR_TITLE_EN_PTR   <- 48L   # u32 → English title (0 in the modern inline format)
+IVT_HDR_DESCRIPTOR_PTR <- 32L   # u32 -> dimension descriptor block
+IVT_HDR_TITLE_FR_PTR   <- 40L   # u32 -> French title (0 in the modern inline format)
+IVT_HDR_TITLE_EN_PTR   <- 48L   # u32 -> English title (0 in the modern inline format)
 IVT_DESC_GEO_COUNT     <- 52L   # u16 within the descriptor: geography member count
 
 # Fixed header offsets (0-based) that map the file layout. Validated on the modern
@@ -1254,7 +1254,7 @@ ivt_f2_geo_is_inline <- function(raw) {
 # "0010001.00") so GEOUIDs are read as character; the optional type-abbreviation
 # token is any space-delimited run that does NOT start with a digit (so it is the
 # abbreviation, not the numeric flag) -- this admits "T" and the accented Quebec
-# "MÉ"; and an optional trailing parenthesised group carries the non-response rate
+# "ME"; and an optional trailing parenthesised group carries the non-response rate
 # that the 2016 single-census-year tables append (e.g. "Canada (01) 20000 ( 4.0%)").
 IVT_F2_INLINE_PAT <- paste0(
   "^(.*) \\(([0-9A-Za-z.]+)\\)\\s+(?:[^0-9\\s]\\S*\\s+)?([0-9]+)",
@@ -1533,7 +1533,7 @@ ivt_f2_geographies <- function(raw) {
 # --- Header dimension descriptor ----------------------------------------------
 #
 # The fixed header field @32 (u32) points at a descriptor block that explicitly
-# declares the table's dimensions — present in BOTH the modern and legacy formats,
+# declares the table's dimensions -- present in BOTH the modern and legacy formats,
 # so it is the reliable source of dimension metadata (the legacy format has no
 # inline "Variable List" text). Layout of the descriptor:
 #   +16 u16  number of dimensions
@@ -1543,19 +1543,19 @@ ivt_f2_geographies <- function(raw) {
 #            anchor. The count/type framing bytes immediately before the separator
 #            vary by dimension, so we read them relative to the doubled name rather
 #            than scanning for a fixed "<type> 01" marker:
-#            • normal record  `[count][type][01]<name><name>`  (type @ sep-1,
+#            - normal record  `[count][type][01]<name><name>`  (type @ sep-1,
 #              count @ sep-2; geography type 0x10 carries a u16 count at sep-3..-2,
 #              member counts > 255)
-#            • period / facet record  `[type][count][01][01]<name><name>` — the
+#            - period / facet record  `[type][count][01][01]<name><name>` -- the
 #              reference-period dimension (type 0x0e, e.g. "Year (2)" in tables
 #              spanning two censuses) is type-first with a doubled 0x01, which is
 #              exactly why a rigid "<known type> 01 <upper>" scan silently dropped
 #              it (and the table's 7th dimension with it).
-#            • <type> is a storage/classification tag, NOT a fixed dimension
+#            - <type> is a storage/classification tag, NOT a fixed dimension
 #              identity: 0x10/0x08 geography, 0x07 age-type, 0x02 gender/sex-type
 #              or a small categorical, 0x03/0x04/0x05 generic ordinal/categorical,
 #              0x0e reference period. (In 98-10-0241 type 0x02 is "Statistics".)
-#   later    "FACET04" + the English title (the legacy file appends "1991 Census…")
+#   later    "FACET04" + the English title (the legacy file appends "1991 Census...")
 # Validated: dims recovered exact on 98-10-0023 (63404/128/3), 1003011
 # (41859/110/3), 98-10-0241 (166 + 6 data dims) and 98-10-0077 (174 + 6 data dims
 # incl. the "Year (2)" reference period).
@@ -1626,8 +1626,8 @@ ivt_f2_descriptor <- function(raw) {
 
 # Geography is the first descriptor dimension (the page/row dimension) in every
 # observed layout. Identify it positionally, NOT by a magic type byte: the
-# geography descriptor *type* varies by format — 0x10 in the modern 2021 family-2
-# files (count stored as u16) but 0x08 in the family-1 reference table (count u8) —
+# geography descriptor *type* varies by format -- 0x10 in the modern 2021 family-2
+# files (count stored as u16) but 0x08 in the family-1 reference table (count u8) --
 # so a `type == 0x10` filter silently fails on other layouts (it falls through to
 # the wrong fixed-offset count, e.g. 16383 for 98-10-0241). The count's byte width
 # is still handled by `ivt_f2_descriptor()`.

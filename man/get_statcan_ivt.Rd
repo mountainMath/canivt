@@ -58,7 +58,7 @@ memory.
 placed in the ivt cache yourself (as \verb{<id>.ivt} directly in
 \link[=ivt_cache_dir]{ivt_cache_dir("ivt")}, or as the only \code{.ivt} in a \verb{<id>/}
 subfolder). Such files are used directly, with no catalogue lookup or
-download — handy for tables that are not on the public index, or for local
+download -- handy for tables that are not on the public index, or for local
 experiments.
 }
 \seealso{

@@ -9,7 +9,7 @@ statcan_ivt_years()
 \value{
 A tibble with one row per version: \code{temporal} (the URL parameter,
 e.g. \code{"2017"} for the 2016 long-form), \code{census} (the human label, e.g.
-\code{"2016 Census – Part B (long-form questionnaire)"}) and \code{census_year} (the
+\code{"2016 Census - Part B (long-form questionnaire)"}) and \code{census_year} (the
 leading 4-digit year of the label as an integer).
 }
 \description{
