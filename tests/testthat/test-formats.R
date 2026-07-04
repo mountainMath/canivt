@@ -45,9 +45,17 @@ ivt_corpus <- list(
        dims = c(1L, 529L, 4063L)),
   list(id = "95F0170X", file = "95F0170X.IVT", family = 2L,
        dims = c(1L, 529L, 5602L)),
+  # 2001 F-series crosstab: unlocked by the u16 width tag on descriptor type
+  # 0x09 -- its "Selected characteristics" dimension is 282 members (the low
+  # byte alone read 1, which mis-nested the layout and made the pages carry
+  # more presence bits than the layout's cell capacity, so the pre-flight
+  # rejected it). Viewer-validated cell-exact (34,968/34,968 over all 14
+  # geographies and every Number x Earning fixed-dim slice). The same 0x09
+  # fix corrected 98-10-0174's silently mis-decoded Mother tongue(331).
+  list(id = "97F0020XCB2001070", file = "97F0020XCB2001070.IVT", family = 1L,
+       dims = c(14L, 2L, 8L, 282L, 2L)),
   # --- share the signature but are NOT a supported format ------------------
   list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA),
-  list(id = "97F0020XCB2001070", file = "97F0020XCB2001070.IVT", family = NA),
   list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = NA),
   list(id = "cro0172986_ct7_2006", file = "cro0172986_ct.7-2006-population.ivt",       family = NA),
   list(id = "cro0172986_ct8_2006", file = "cro0172986_ct.8-2006_private-households.ivt", family = NA),

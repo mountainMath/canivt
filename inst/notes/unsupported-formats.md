@@ -8,17 +8,20 @@ layout + the page pre-flight) and these files fail it in **two distinct ways**:
   (garbage dimension count, zero data dimensions recovered) — the §2/§3 files;
 - **page-level**: descriptor *and* directory parse cleanly, but the pages are
   inconsistent with the resolved layout and the pre-flight **capacity / span /
-  exact-fit rules** reject them (97F0020X) — these decode *wrong*, not *not at
-  all*, so the structural rejection is what protects against silently
-  misindexed cells. Two former members of this class turned out to be
-  descriptor MISREADS, not different layouts, and are now SUPPORTED
-  (2026-07-04): **97-570-X1981004** (the "Values" placeholder's count read 32
-  instead of 1 — the double-01 framing ambiguity, now reconciled against the
-  codebook; geography is the LAST descriptor dimension, resolved by
-  `ivt_f2_geo_dim_index()`) and **98-400-X2016203** (descriptor type `0x0a`
-  carries a u16 count: 825 Selected characteristics, not 57). Both
-  viewer-validated cell-exact — a reminder that a pre-flight rejection can
-  mean "the descriptor was misread", not only "the container is alien".
+  exact-fit rules** reject them — these decode *wrong*, not *not at all*, so the
+  structural rejection is what protects against silently misindexed cells.
+  **Three** former members of this class turned out to be descriptor MISREADS,
+  not different layouts, and are now SUPPORTED: **97-570-X1981004**
+  (2026-07-04; the "Values" placeholder's count read 32 instead of 1 — the
+  double-01 framing ambiguity, now reconciled against the codebook; geography
+  is the LAST descriptor dimension, resolved by `ivt_f2_geo_dim_index()`),
+  **98-400-X2016203** (2026-07-04; descriptor type `0x0a` carries a u16 count:
+  825 Selected characteristics, not 57) and **97F0020XCB2001070** (2026-07-04;
+  descriptor type `0x09` carries a u16 count: 282 Selected characteristics,
+  not 1 — the "1124 presence bits vs 448-cell capacity" was the mis-nested
+  layout the low-byte count produced). All viewer-validated cell-exact — a
+  reminder that a pre-flight rejection can mean "the descriptor was misread",
+  not only "the container is alien".
 
 This note captures the reconnaissance so a future decode effort is resumable.
 Current per-file status lives in [`coverage.md`](coverage.md); this doc carries
@@ -65,20 +68,22 @@ Same descriptor sub-header as the decoded tables
     container is **not** a drop-in. Decoding needs the page body re-RE'd from
     scratch (the `ee`/`11` byte patterns suggest the whole page may be bit-packed
     rather than presence-then-values).
-- **`97F0020XCB2001070` (2001 F-series crosstab)** — `@32 = 17836` *does* point at
-  the descriptor (`n_dim = 5`); records are
-  `[lead][count u8/u16][type][01][doubled name]`, e.g. Geography type `0x04`
-  count 14, then Income(2), Earning Status(8), … Characteristics(282). Bounded by
-  **`FACET03`** (not `FACET04`). **Its page directory IS locatable** (superseding
-  the earlier "no page directory" note): after the entry-floor fix, header
-  `@558 = 18589` resolves a directory whose entries are in *reverse* offset
-  order, all `84 01 00 08` pages of size 4756 that fit **exactly** under the b2
-  trailer arithmetic. **But the pages carry 1124 presence bits against the
-  layout's 448-real-cell capacity** — the data is nested differently from the
-  power-of-two model the layout derives — so the pre-flight **capacity rule**
-  rejects it. The open problem is the *nesting*, not the container location.
+- ~~**`97F0020XCB2001070` (2001 F-series crosstab)**~~ — **SUPPORTED as of
+  2026-07-04** (viewer-validated cell-exact), moved out of this doc. The
+  "1124 presence bits vs 448-cell capacity" rejection was a **descriptor
+  misread**, not a different nesting: its "Selected characteristics"
+  dimension is `type 0x09` with a **u16** count = **282** (`1a 01` LE), and
+  the u8 read took the low byte and got **1**, which collapsed the data
+  dimensions to Number(2)×Earning(8)×Selected(1)×Years(2) and made the pages
+  look over-capacity. With the true count the ordinary unified layout fits
+  exactly: Earning straddles the 2048-bit record (ipc 2, 4 windows), the
+  presence capacity is 1128 bits, the pre-flight passes, and the decode is
+  viewer-validated **34,968/34,968** cells across all 14 geographies and every
+  Number×Earning fixed-dim slice (b2020 viewer at `Rp-eng.cfm`, PID 60957).
+  The same `0x09` u16 width fix corrected **98-10-0174**'s silently
+  mis-decoded Mother tongue(331) dimension (CSV-validated 14,895/14,895).
   Served by StatCan's legacy `www12` dynamic system, not the modern b2020
-  endpoint.
+  endpoint, but the b2020 HTML viewer still renders it.
 
 ### 2. ~~Profile tables (`"Values"` dimension)~~ — SUPPORTED (2026-07-04)
 
@@ -196,9 +201,9 @@ doubled-name delimiter.
 4. **`ord-08035`** (2021 CT custom export): descriptor + directory decode, but
    the value-page body is a different (un-RE'd) encoding — needs the page body
    RE'd from scratch.
-5. **`97F0020X`** (2001 F crosstab): container fully located, pages exact-fit —
-   the open problem is its different presence **nesting** (1124 bits vs 448
-   cells).
+5. ~~**`97F0020X`** (2001 F crosstab)~~ — **DONE** (2026-07-04: the `0x09` u16
+   width tag; the "1124 bits vs 448 cells" was a descriptor misread of
+   Selected(282), not a different nesting). Viewer-validated cell-exact.
 6. The rest (§3 descriptor-undecoded files) need their header/container located
    first.
 
@@ -214,8 +219,9 @@ geography-dimension-index / `0x0a`-`0x0c` u16 width sweep moved
   dense `0x0_` page variant; the "non-rectangular grid" and the transposed
   value-order model were artifacts of a truncated directory read and the
   pre-fix geography member order) — see §2.
-- `97F0020X` (2001 F crosstab): directory located and pages exact-fit under the
-  b2 arithmetic, but the **presence nesting differs** (capacity-rule reject).
+- `97F0020X` (2001 F crosstab): **SUPPORTED** as of 2026-07-04 (the `0x09` u16
+  width tag — Selected(282) was misread as 1; the "capacity-rule reject" was a
+  symptom of the misread, not a different nesting). Viewer-validated cell-exact.
 - `97-563-XCB2006072` (2006 DA crosstab): **SUPPORTED** as of 2026-07-03 (the
   `b3` head-block rule; directory was at the plain `u16@558`) — see §3.
 - `97-570-X1981004` (1981 profile) and `98-400-X2016203`: **SUPPORTED** as of
@@ -224,7 +230,14 @@ geography-dimension-index / `0x0a`-`0x0c` u16 width sweep moved
   **value-page body is a different (un-RE'd) encoding** — not a drop-in for the
   existing decoder.
 
-All remaining files are rejected **structurally** by
-`ivt_is_supported()` (descriptor gate or page pre-flight — no allow/deny
-lists, no crashes). Each needs further dedicated reverse-engineering; the
-closest to done is `97F0020X` (container located, presence nesting differs).
+Last full pass 2026-07-04, updated after the `0x09` u16 width fix moved
+`97F0020XCB2001070` out (and corrected 98-10-0174's Mother tongue).
+
+All remaining files are rejected **structurally** by `ivt_is_supported()`
+(descriptor gate or page pre-flight — no allow/deny lists, no crashes). Each
+needs further dedicated reverse-engineering; the closest to done is
+`ord-08035` (descriptor + directory decode, but the value-page **body** is a
+different, un-RE'd encoding — the `ee`/`11` byte patterns suggest bit-packing
+rather than presence-then-values). The rest (`97F0015X`, `97-570-X1981002`,
+the `cro` extracts, `98-400-X2016019`) need their header/descriptor located
+first.

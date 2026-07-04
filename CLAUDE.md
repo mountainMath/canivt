@@ -130,6 +130,20 @@ on all six reference tables:
   directories store a 4-byte-ALIGNED second length copy
   (`ivt_f2_read_dir_at()` admits it). Both strict-clean, 1.77M/1.84M cells in
   ~0.4 s.
+- **2001 F-series crosstab 97F0020XCB2001070** (Geography(14) × Number(2) ×
+  Earning(8) × Selected characteristics(282) × Years(2)): formerly rejected
+  on the capacity rule ("1124 presence bits vs 448-cell capacity") — the real
+  bug was reading descriptor type `0x09` as a u8 count (Selected = **282**;
+  the low byte read 1 and collapsed the data dims, over-filling the pages).
+  `0x09` is now a u16 width tag. With the true count the ordinary unified
+  layout fits exactly (Earning straddles the 2048-bit record, ipc 2, 4
+  windows). Viewer-validated cell-exact (34,968/34,968 over all 14
+  geographies + every Number×Earning slice; b2020 viewer `Rp-eng.cfm`, PID
+  60957). **The same `0x09` fix repaired a *silent mis-decode* on the already-
+  supported 98-10-0174** (dissemination areas): its Mother tongue dimension is
+  also `0x09` with **331** members — the u8 read collapsed it to 1, so only
+  member 1's cells had decoded. Now CSV-validated cell-exact (14,895/14,895
+  over 3 geographies: all 331 mother-tongue × 3 gender × 5 knowledge).
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every
@@ -232,16 +246,15 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   marker bytes at the 0241 offsets, bypassing validation). The pre-flight checks
   the first pages: extent within the entry size, **exact fit for `b2 == 0`
   pages**, presence count ≤ the page's **real cell capacity**
-  (`min(ipc1, straddle count) · prod(inner)` — the 2001 variant 97F0020X fits
-  exactly but carries 1124 bits vs 448 real cells: its data is nested
-  differently), and the directory must **span the outer entry cartesian**
-  (highest valid entry in the outer dimension's upper half). A pre-flight
-  rejection can also mean **the descriptor was misread**, not that the
-  container is alien: the span rule flagged 97-570-X1981004 (a bogus
-  Values count of 32 — really 1) and the exact-fit rule flagged
-  98-400-X2016203 (Selected characteristics 825 read as 57) — both decode
-  cell-exact under the corrected descriptors and are SUPPORTED now.
-  97F0020X remains rejected structurally (capacity rule).
+  (`min(ipc1, straddle count) · prod(inner)`), and the directory must **span
+  the outer entry cartesian** (highest valid entry in the outer dimension's
+  upper half). A pre-flight rejection can also mean **the descriptor was
+  misread**, not that the container is alien: the span rule flagged
+  97-570-X1981004 (a bogus Values count of 32 — really 1), the exact-fit rule
+  flagged 98-400-X2016203 (Selected characteristics 825 read as 57), and the
+  **capacity rule flagged 97F0020X** (Selected characteristics 282 read as 1 —
+  the layout collapsed to 1128-bit pages against a 448-cell capacity) — all
+  three decode cell-exact under the corrected descriptors and are SUPPORTED now.
 - Member id columns in `cells` are **1-based**. `cells` data columns are named by a
   **purely generic, name-agnostic slug** (`ivt_dim_slug()`): the geography
   dimension (`ivt_f2_geo_dim_index()`) → `geo`, every other dimension takes the
@@ -269,13 +282,19 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   (large) member count — `0x10` (modern 2021/DGUID family-2 files), `0x0d`
   (the 2011 census-tract table; also the 1981/1991 profile geographies) and
   `0x0a`/`0x0c` (the profile lineage's characteristics/geography dims) carry
-  a **u16** count, `0x08` (the family-1 reference table) a **u8**. The old
-  `type == 0x10` filter silently misread 98-10-0241's geography count as
-  16383; reading 2011's `0x0d` as u8 misread its 5447 geographies as 21;
-  reading `0x0a` as u8 misread 98-400-X2016203's 825-member Selected
-  characteristics as 57 (which mis-nested the layout and faked "non-exact"
-  pages). `ivt_f2_descriptor()` reads u16 for `0x10`/`0x0d`/`0x0a`/`0x0c`, u8
-  otherwise; `ivt_f2_data_dims()` takes "all dims except the geography index".
+  a **u16** count, `0x08` (the family-1 reference table) a **u8**. `0x09` is
+  also a **u16** width tag, but for a *data* dimension: the >256-member
+  detailed-classification dims (97F0020X's Selected(282), 98-10-0174's Mother
+  tongue(331)). The old `type == 0x10` filter silently misread 98-10-0241's
+  geography count as 16383; reading 2011's `0x0d` as u8 misread its 5447
+  geographies as 21; reading `0x0a` as u8 misread 98-400-X2016203's 825-member
+  Selected characteristics as 57 (which mis-nested the layout and faked
+  "non-exact" pages); reading `0x09` as u8 collapsed 97F0020X's Selected to 1
+  (rejected on the capacity rule) and **silently mis-decoded 98-10-0174's
+  cells**. `ivt_f2_descriptor()` reads u16 for `0x10`/`0x0d`/`0x0a`/`0x0c`/`0x09`,
+  u8 otherwise (u16 is safe for a small member of any of these types —
+  count_hi is then 00); `ivt_f2_data_dims()` takes "all dims except the
+  geography index".
 - **Double-01 descriptor records are ambiguous — counts are reconciled against
   the codebook** (`ivt_f2_dim_count_reconcile()`, dimdir.R, called from
   `ivt_f2_descriptor()`): the reference-period record `[type][count][01][01]`
@@ -384,11 +403,19 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   page variant (`ivt_decode_page_dense()`) + three legacy-metadata fixes
   (frscore-assigned `@48`/`@40` titles, the `Footnote(s)` header spelling, the
   4-aligned second length field in `ivt_f2_read_dir_at()`). The page→grid
-  assignment was the ordinary unified walk all along. Next in the unsupported
-  pile (by tractability): **97F0020X** (2001 F-series; container located,
-  pages exact-fit, but 1124 presence bits vs 448-cell capacity — its presence
-  nesting differs), **ord-08035** (custom CT export; page body needs re-RE),
-  then the descriptor-undecoded 97F0015X / 97-570-X1981002 / cro extracts.
+  assignment was the ordinary unified walk all along.
+- **2001 F-series 97F0020XCB2001070 — DONE** (2026-07-04, viewer-validated
+  cell-exact; see "What works today"). The whole delta was the `0x09` u16
+  count width tag: Selected characteristics is 282 members, not 1 — the
+  "1124 presence bits vs 448-cell capacity" was the mis-nested layout the
+  low-byte count produced, not a different nesting. The same fix repaired a
+  silent mis-decode of 98-10-0174's Mother tongue(331). Next in the
+  unsupported pile (by tractability): **ord-08035** (custom CT export;
+  descriptor at `@10417` via scan — `@32` points at a title block — but the
+  value-page **body** is a different, un-RE'd encoding: `ee`/`11` byte
+  patterns suggest bit-packing, no float64 value run, the page-size equation
+  has no integer solution), then the descriptor-undecoded 97F0015X /
+  97-570-X1981002 / 98-400-X2016019 / cro extracts.
 - **Unified cell decode — DONE.** One `ivt_layout()` + `ivt_decode()` (`decode.R`)
   decodes every table, reproducing the two former decoders **byte-identical** on all
   six reference tables (0241/0077/0662 data-dim straddle, 0023/0129/1991 geography
@@ -579,13 +606,15 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   equal to the positional `ivt_f2_geo_attrs_dir()` DGUIDs on 0023 and 0129 (0
   mismatches), and its marker-region bound is now the geography directory's byte
   span.
-- The **2001 "F"-series and remaining 1981/custom** products are **different
+- The **remaining "F"-series and 1981/custom** products are **different
   container variants**, rejected structurally by the page pre-flight or
   descriptor gate: `98-400-X2016019` (descriptor misreads,
-  `ivt_f2_decodable()`), `97F0020XCB2001070` (capacity rule),
-  `97-570-X1981002` (descriptor undecoded). **97-570-X1981004,
-  98-400-X2016203 and the 1991 profiles 98F0172X/95F0170X are SUPPORTED as of
-  2026-07-04** (descriptor misreads / the dense `0x0_` page variant, not alien
+  `ivt_f2_decodable()`), `97F0015XCB2001041` and `97-570-X1981002` (descriptor
+  undecoded), the `cro`/`ord` extracts (page body / descriptor un-RE'd).
+  **97-570-X1981004, 98-400-X2016203, the 1991 profiles 98F0172X/95F0170X and
+  the 2001 F-series 97F0020XCB2001070 are SUPPORTED as of 2026-07-04**
+  (descriptor misreads — `0x0a`/`0x09` u16 count width tags, the "Values"
+  count reconciliation — and the dense `0x0_` page variant, not alien
   containers — see "What works today"). **98-400-X2016387 IS supported** (directory
   complete after the entry-floor fix; geography viewer-validated). **The 2006 DA crosstab
   `97-563-XCB2006072` IS supported** (2026-07-03): its directory was at the

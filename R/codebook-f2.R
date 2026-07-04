@@ -1618,17 +1618,23 @@ ivt_f2_descriptor <- function(raw) {
           type <- v[k - 3L]; count <- v[k - 2L]
         } else {
           type <- v[k - 1L]
-          # the geography descriptor stores its (large) member count as a 16-bit
-          # little-endian value; the type byte tags the storage width: 0x10 (modern
-          # DGUID geography, e.g. 63404 in 98-10-0023; 57523 in the 2006 DA table),
-          # 0x0d (the 2011 census-tract geography, 5447; also the 1981/1991 profile
-          # geographies) and 0x0a / 0x0c (the profile lineage's characteristics /
-          # geography dimensions, e.g. 98F0172X's Profile(529) and Geography(4063))
-          # carry a u16, whereas the small family-1 geography (type 0x08, <=255)
-          # and the data dimensions carry a u8. Reading 0x0d as u8 misread 2011's
-          # 5447 geographies as 21; reading 0x0a/0x0c as u8 misread 98F0172X's
-          # dimensions as Profile(2) / Geography(15).
-          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL))
+          # the descriptor stores a (large) member count as a 16-bit little-endian
+          # value `[count_lo][count_hi][type][01]`; the type byte tags the storage
+          # width. u16 types: 0x10 (modern DGUID geography, e.g. 63404 in
+          # 98-10-0023; 57523 in the 2006 DA table), 0x0d (the 2011 census-tract
+          # geography, 5447; also the 1981/1991 profile geographies), 0x0a / 0x0c
+          # (the profile lineage's characteristics / geography dimensions, e.g.
+          # 98F0172X's Profile(529) and Geography(4063)) and 0x09 (the >256-member
+          # "Selected characteristics"/detailed-classification data dimensions:
+          # 97F0020X's Selected(282) and 98-10-0174's Mother tongue(331), both
+          # chunked >256-member codebooks -- the u8 read took the low byte and got
+          # 1, which mis-nested the layout). The small family-1 geography (type
+          # 0x08, <=255) and the ordinary data dimensions carry a u8 count. Reading
+          # 0x0d as u8 misread 2011's 5447 geographies as 21; 0x0a/0x0c as u8
+          # misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09 as u8
+          # silently mis-decoded 98-10-0174's cells. (u16 is safe for a small
+          # member of any of these types: count_hi is then 00.)
+          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L))
                      v[k - 3L] + v[k - 2L] * 256L
                    else v[k - 2L]
         }

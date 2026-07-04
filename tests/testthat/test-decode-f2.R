@@ -772,18 +772,30 @@ test_that("directory entries with unrecognised page markers are skipped LOUDLY",
   expect_error(ivt_decode(doctored), class = "canivt_skipped_pages_error")
 })
 
-test_that("incompatible same-signature containers fail the page pre-flight", {
-  # The 2001 "F"-series variant (97F0020XCB2001070) parses to a resolvable
-  # layout (all dimensions fit one presence record) and its pages even fit
-  # their directory sizes EXACTLY -- but they carry 1124 presence bits against
-  # a 448-real-cell capacity (the data is nested differently), so the
-  # pre-flight rejects the file instead of decoding garbage.
+test_that("the 2001 F-series variant decodes: type-0x09 u16 count Selected(282)", {
+  # 97F0020XCB2001070 was formerly rejected by the pre-flight capacity rule
+  # ("1124 presence bits vs 448-real-cell capacity") -- but that was a
+  # descriptor MISREAD, not a different nesting. Its "Selected characteristics"
+  # dimension is descriptor type 0x09 with a u16 count = 282; the u8 read took
+  # the low byte and got 1, collapsing the data dimensions and over-filling the
+  # pages. With 0x09 in the u16 width-tag list the count is 282, the ordinary
+  # unified layout fits (Earning straddles the 2048-bit record, ipc 2, 4
+  # windows), and the decode is viewer-validated cell-exact (34,968/34,968
+  # across all 14 geographies + every Number x Earning slice; b2020 viewer
+  # Rp-eng.cfm PID 60957). The same 0x09 fix corrected 98-10-0174's silently
+  # mis-decoded Mother tongue(331).
   p <- locate_sample_ivt("", "97F0020XCB2001070", "97F0020XCB2001070.IVT")
   skip_if(p == "", "no 97F0020XCB2001070 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
-  expect_false(is.null(ivt_layout(raw)))
-  expect_false(ivt_page_preflight(raw))
-  expect_false(ivt_is_supported(raw))
+  d <- ivt_f2_descriptor(raw)
+  expect_equal(vapply(d$dims, `[[`, 1L, "count"), c(14L, 2L, 8L, 282L, 2L))
+  expect_equal(d$dims[[4]]$type, 0x09L)             # u16 width-tag data dim
+  lay <- ivt_layout(raw)
+  expect_equal(lay$straddle, 3L)                    # Earning straddles
+  expect_equal(lay$window_count, 4L)                # ceiling(8 / 2)
+  expect_true(ivt_page_preflight(raw))
+  expect_true(ivt_is_supported(raw))
+  expect_equal(ivt_family(raw), 1L)
 })
 
 test_that("the 1981 profile variant decodes: geography LAST, count-reconciled Values(1)", {

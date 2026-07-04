@@ -136,14 +136,20 @@ geographies** an exact match vs the StatCan CSV; the 3-dim tables (98-10-0023,
   default and probes the dimension slot directories for a geography codebook
   signature (GEO_NAME schema field / inline combined-format member blocks)
   only when dimension 1 has a single member — a real geography can never be a
-  1-member dimension alongside others. Two companion descriptor fixes
+  1-member dimension alongside others. Three companion descriptor fixes
   (2026-07-04): the **u16 count width tags now include types `0x0a`/`0x0c`**
   (98F0172X's Profile(529)/Geography(4063); the u8 read of `0x0a` is what
-  broke 98-400-X2016203 — 825 read as 57), and **double-01-framed record
-  counts are reconciled against the dimension's slot-directory member block**
-  (`ivt_f2_dim_count_reconcile()`: the profile "Values" placeholder shares the
-  facet record's byte shape but stores no count there — 1 member, not 32).
-  All previously supported tables byte-identical through both changes.
+  broke 98-400-X2016203 — 825 read as 57) **and `0x09`** (the >256-member
+  detailed-classification data dimensions: 97F0020X's Selected(282) and
+  98-10-0174's Mother tongue(331), both chunked >256-member codebooks; the u8
+  read got 1, which mis-nested the layout — this rejected 97F0020X on the
+  capacity rule and *silently mis-decoded* 98-10-0174's cells; u16 is safe for
+  a small member of any of these types because count_hi is then 00), and
+  **double-01-framed record counts are reconciled against the dimension's
+  slot-directory member block** (`ivt_f2_dim_count_reconcile()`: the profile
+  "Values" placeholder shares the facet record's byte shape but stores no
+  count there — 1 member, not 32). All previously supported tables
+  byte-identical through these changes.
 
 ## [x] Descriptor markers generalised across family-1 tables (DONE)
 
@@ -495,9 +501,25 @@ corpus table:
 
 ### Rejected same-signature variants (all structural, no allow/deny lists)
 
-- **97F0020XCB2001070** (2001 F-series): layout resolves and its pages fit
-  their directory sizes exactly, but they carry 1124 presence bits against a
-  448-real-cell capacity — the data is nested differently. Capacity rule.
+- ~~**97F0020XCB2001070** (2001 F-series)~~ — **SUPPORTED as of 2026-07-04.**
+  The capacity-rule rejection ("1124 presence bits vs a 448-real-cell
+  capacity") was a symptom of a misread descriptor, not a different nesting:
+  its "Selected Demographic, Educational, Cultural, Language Characteristics"
+  dimension is **type `0x09` with a u16 count = 282** (`1a 01` LE), and the u8
+  read took the low byte and got **1**, collapsing the data dimensions to
+  Number(2)×Earning(8)×Selected(1)×Years(2) so the pages carried more presence
+  bits than the layout's cell capacity. With the true count the ordinary
+  unified layout fits exactly (Earning straddles the 2048-bit record — ipc 2,
+  4 windows — capacity 1128 bits) and every geometry invariant is clean.
+  Viewer-validated cell-exact: **34,968/34,968** cells over all 14
+  geographies (default fixed) plus Canada/Ontario/Nunavut across every
+  Number×Earning fixed-dim slice (b2020 viewer `Rp-eng.cfm`, PID 60957).
+  The **same `0x09` u16 width fix** repaired a *silent mis-decode* on the
+  supported table **98-10-0174** (dissemination areas): its Mother tongue
+  dimension is also `0x09` with **331** members (the u8 read collapsed it to
+  1, so only member 1's cells decoded) — now CSV-validated **14,895/14,895**
+  cells over 3 geographies (all 331 mother-tongue × 3 gender × 5 knowledge).
+  Strict-mode clean.
 - ~~**97-570-X1981004** (1981 profile)~~ — **SUPPORTED as of 2026-07-04.** The
   span-rule rejection was a symptom of a misread descriptor, not a new
   nesting: the "Values" placeholder's count read 32 instead of 1 (the
@@ -612,15 +634,19 @@ Files in the test corpus that are currently unsupported:
   and EN/FR titles assigned by content (`@48`/`@40` are NOT fixed language
   slots — 98F0172X stores FR at `@48`; `ivt_f2_legacy_identity()` now decides
   by `ivt_f2_frscore()`, the `ivt_f2_master_identity()` pick).
-- [ ] **Other "F"-series** (`97F0015XCB2001041`, `97F0020XCB2001070`): 2001-era
-  crosstabs. `inline_geo` header flag varies; descriptor layout differs.
-  `97F0020X`'s page directory **is** locatable after the entry-floor fix (header
-  `@558` = 18589; entries in *reverse* offset order, `84 01 00 08` pages of size
-  4756 that fit **exactly** under the b2-trailer arithmetic) — but its pages
-  carry 1124 presence bits against the layout's 448-real-cell capacity, so the
-  data is nested differently and the pre-flight **capacity rule** rejects it.
-  Served by StatCan's legacy `www12` dynamic system, not the modern b2020
-  endpoint.
+- [x] **2001 F-series crosstab** (`97F0020XCB2001070`): **DECODED — SUPPORTED**
+  (2026-07-04). The "1124 presence bits vs 448-real-cell capacity" rejection
+  was a **descriptor misread**, not a different nesting: its "Selected
+  characteristics" dimension is **type `0x09` with a u16 count = 282**, and the
+  u8 read got 1 (the low byte), collapsing the data dims and over-filling the
+  pages. With the true count the ordinary unified layout fits exactly and the
+  decode is viewer-validated cell-exact (34,968/34,968; PID 60957). The same
+  `0x09` u16 fix corrected 98-10-0174's Mother tongue(331). Served by
+  StatCan's legacy `www12` dynamic system, but its b2020 HTML viewer renders.
+- [ ] **Other "F"-series** (`97F0015XCB2001041`): 2001-era crosstab. `n_dim`
+  garbage (1282), the doubled-name anchor snags on French text bleeding into
+  the truncated names, descriptor layout differs — the least understood 2001
+  file. Served by StatCan's legacy `www12` dynamic system.
 - [x] **2006 census DA crosstab** (`97-563-XCB2006072`): **DECODED — SUPPORTED**
   (2026-07-03). The page directory was at the plain `u16@558 = 45641` all along
   (14,381 entries = ⌈57,523/4⌉ exactly, the geography-straddle layout the
@@ -790,6 +816,11 @@ out to be the ordinary layout with a 1-member outermost placeholder) and
 **98-400-X2016203** (the `0x0a` u16 count width tag: 825 Selected
 characteristics, chunked EN/FR labels; viewer-validated cell-exact), and the
 **1991 profiles 98F0172X / 95F0170X** (the dense `0x0_` page variant — one
-value per grid position, zeros literal; both viewer-validated cell-exact).
-Remaining open items: the 2001 "F"-series products, 1981002 and the custom
-extracts; see the section above.
+value per grid position, zeros literal; both viewer-validated cell-exact),
+and the **2001 F-series crosstab 97F0020XCB2001070** (the `0x09` u16 count
+width tag: Selected characteristics is 282 members, not 1 — the same fix also
+repaired a silent mis-decode of 98-10-0174's Mother tongue(331);
+viewer- and CSV-validated cell-exact respectively).
+Remaining open items: the other 2001 "F"-series product 97F0015X, the 1981
+profile 1981002, the 2016019 variant, and the custom `cro`/`ord` extracts;
+see the section above.
