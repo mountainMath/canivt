@@ -80,64 +80,39 @@ Same descriptor sub-header as the decoded tables
   Served by StatCan's legacy `www12` dynamic system, not the modern b2020
   endpoint.
 
-### 2. Profile tables (`"Values"` dimension) — family-2 int container, geography-minor
+### 2. ~~Profile tables (`"Values"` dimension)~~ — SUPPORTED (2026-07-04)
 
-Layout **cracked** (2026-06): these are 2-D **Geography × Values** profiles whose
-value stream is **characteristic-major, geography-minor** — the transpose of the
-geography-major model the current decoder assumes. Confirmed cell-exact against
-HTML ground truth (the profile scraper, `/profiles/Rp-eng.cfm`).
+**`98F0172X`** and **`95F0170X`** are DECODED and SUPPORTED — moved out of this
+doc (see coverage.md and ivt-format.md "Dense pages"). The resolution, for the
+record, since this section's earlier analysis contained two artifacts:
 
-- **`98F0172X`** (1991 "Profile of Census Tracts - Part B"):
-  - **Geography**: 4,063, decoded **exactly** today by `ivt_f2_geo_inline()`
-    (legacy inline `"name (GEOUID) flag"` codebook; member 3808 = "St. John's",
-    3809 = "St. John's - 002", …). Header `@40`/`@48` titles set ⇒ inline route.
-  - **Values dimension**: ~529 characteristics, each tagged by a StatCan line code
-    (101, 102, 201, …, 3813) — read straight from the profile viewer rows.
-  - **Descriptor** `@32 = 1511`: sub-header `81 01 20 00  f0 28 00 80`, then a
-    doubled-name record `…01 01 "ValuesValues" 11 02 0a 01 "Profile of…"`. Values
-    is **type `0x01`** (`01 01` also frames blocks, so a marker scan can't be
-    trusted here). `n_dim@+16` reads garbage (770) — as elsewhere, the count
-    field is unreliable and only the recovered records count.
-  - **Value order**: **characteristic-major, geography-minor** — within a value run
-    the values are a single characteristic across consecutive geographies in
-    inline-codebook member order (verified: file offset 315512 →
-    `171859, 5850, 4391, 3288, 1971, …` = char 101 for members 3808, 3809, 3810…
-    = St. John's CMA then its CTs; cross-checked exact vs the scraped char-101
-    values).
-  - **Full page directory located**: at the header pointer `u16@558 = 1936`,
-    **1,046 contiguous 8-byte records** `[u32 off][u16 size][u16 size]` whose
-    offsets+sizes tile the value region **100 %** (103624 → 7,306,856;
-    Σsizes = span, zero gaps). The old `off < 1e5` entry floor that hid part of
-    it **has since been fixed package-wide** (floor is now 1024 — the
-    98-400-X2016387 fix); the remaining directory blocker is only that
-    `ivt_f2_is_marker()` accepts page byte0 ∈ {82,84,88,a2,a4,a8} and so
-    rejects this file's `0x0_` dense pages.
-  - **Two page families**, by the byte0 high nibble (low nibble = value width:
-    2→int16, 4→int32, 8→float64):
-    - **Dense `0x02/04/08`** (196+10+16 pages): header `[b0][01][count_u16]` then
-      `count` values, no presence/trailer (payload = count × width exactly, e.g.
-      `04 01 00 08` = int32 × 2048 = 8192-byte payload). St. John's page is `0x04`.
-    - **Sparse `0x82/84/88`** (441+325+58 pages): the **same presence-bitmap +
-      values + trailer framing as the geography-major container we already decode**
-      (e.g. `84 01 40 08  bf ef f7 ff …` — the `bf ef f7…` is the presence bitmap).
-  - **Blockers remaining for a full decode**: (a) accept the `0x0_` dense page
-    markers in the directory validation **without regressing** the supported
-    tables. (b) Decode the **hybrid** page set: dense `0x0_` pages give `count`
-    values directly; sparse `0x8_` pages need the presence-bitmap path. (c) Recover
-    the **page → (characteristic, geo-range) mapping**: page headers carry no
-    coordinate, so the assignment is implicit in page (offset) order. **The grid is
-    not a clean rectangle**: Σ(count over all 1,046 pages) = **2,222,304**, which is
-    **not** divisible by 4063 (=546.96) nor by 529 — so it is not a simple
-    characteristic-major × 4063-geography array. The likely cause is a
-    geography-level-dependent characteristic set (e.g. CMA-level vs CT-level
-    geographies carry different profiles), or per-group sub-blocks; this
-    non-rectangular grouping is the main unknown left. (The flat all-dense
-    reconstruction also conflates the sparse `0x8_` pages, whose `count` is the
-    cell total, not the stored-value count.)
-- **`95F0170X`** (1991 profile, "Census Divisions and Subdivisions - Part B"):
-  legacy out-of-line titles (`@40`/`@48` set, like 1003011); marker `84` int32;
-  the directory is under-detected (same `0x0_`-marker blocker as 98F0172X). Same
-  profile family; decode once 98F0172X is solved.
+- They are the **ordinary unified layout** (`Values(1) × Profile(529) ×
+  Geography`, geography LAST and straddling — the 97-570-X1981004 lineage), NOT
+  a transposed "characteristic-major, geography-minor" model: within a page the
+  values run across the geography positions of one window, and the directory is
+  the standard `(Profile × window)` walk. The **"non-rectangular Σcount =
+  2,222,304" puzzle was an artifact**: at the true directory base
+  (`u16@558 = 1936`) there are **exactly 529 × 2 = 1,058 entries** (the earlier
+  1,046 was a truncated read — the `0x0_` markers were rejected, so `ivt_idx0()`
+  fell back to the 0241 constant), and the dense counts include zero padding
+  past the window (2048/2080/2112/2176), so Σcount was never a cell total.
+  The "member 3808 = St. John's" anchor likewise predated the positional
+  inline-geography fix — St. John's is member 1, and page position 1 = member 1.
+- The one genuinely new piece is the **dense `0x0_` page variant**
+  (`[b0][01][u16 count]` + one value per grid position in grid order, zeros
+  stored literally, exact directory fit `4 + count·width == size`), now
+  admitted by `ivt_f2_is_marker()` / decoded by `ivt_decode_page_dense()` /
+  pre-flighted by the exact-fit rule. The sparse `0x8_` pages were the standard
+  container all along.
+- Viewer-validated cell-exact on both files (11,638 + 10,580 cells over 42
+  geographies, all window boundaries, deep tails, Canada; the 98F0172X viewer
+  re-sorts the Ottawa-Hull dropdown block and the 95F0170X viewer re-sorts +
+  suffixes CSD types — join ground truth by NAME). Also fixed en route: the
+  `@48`/`@40` title blobs are NOT fixed language slots (98F0172X stores FR at
+  `@48`; `ivt_f2_legacy_identity()` now assigns by `ivt_f2_frscore()`), the
+  legacy footnote section header is spelled `Footnote(s)` on this vintage
+  (39 notes each), and their master directories store a 4-byte-ALIGNED copy in
+  the second length field (`ivt_f2_read_dir_at()` admits it).
 - ~~**`97-570-X1981004`** (1981 Census Profile)~~ — **SUPPORTED** (2026-07-04),
   moved out of this doc. The "geography-last nesting" was an illusion: the
   descriptor's "Values" record is a 1-member placeholder whose count byte read
@@ -146,15 +121,10 @@ HTML ground truth (the profile scraper, `/profiles/Rp-eng.cfm`).
   fits the file exactly (geography — the LAST descriptor dimension, identified
   by `ivt_f2_geo_dim_index()` from its codebook — straddles the presence
   record; 3 windows; Profile paged at stride 4). Viewer-validated cell-exact;
-  see coverage.md. **Implication for 98F0172X/95F0170X**: their descriptors
-  now parse the same way (`Values(1) × Profile(529) × Geography(4063/5602)`,
-  u16 counts under the `0x0a`/`0x0c` width tags) — their remaining blocker is
-  ONLY the hybrid dense/sparse page set below, and the "non-rectangular"
-  puzzle should be revisited knowing Values has ONE member, not ~529: the
-  529-member dimension is the Profile characteristics axis, and 1981004's
-  sibling layout (geography straddling, characteristics paged) suggests the
-  1991 profiles may pattern the same way once the dense `0x0_` pages are
-  admitted.
+  see coverage.md. Its implication for 98F0172X/95F0170X proved out exactly:
+  the 1991 profiles pattern the same way (geography straddling, Profile
+  paged), and admitting the dense `0x0_` pages was the whole remaining delta
+  (§2 above — both SUPPORTED).
 
 ### 3. Container not located / descriptor undecoded
 
@@ -220,14 +190,9 @@ doubled-name delimiter.
 2. ~~**`97-570-X1981004`** (1981 profile)~~ and ~~**`98-400-X2016203`**~~ —
    **DONE** (2026-07-04: descriptor count reconciliation +
    `ivt_f2_geo_dim_index()`; the `0x0a` u16 width tag; see §2/§4).
-3. **`98F0172X`** (profile): geography + values + the full 1,046-record
-   directory + both page formats decoded; geographies and spot values confirmed
-   exact vs HTML ground truth; the descriptor now parses correctly
-   (`Values(1) × Profile(529) × Geography(4063)`). Remaining: accept `0x0_`
-   markers, the hybrid dense/sparse assembly, and the **page → grid mapping**
-   (revisit the "non-rectangular" Σcount puzzle knowing Values has 1 member
-   and 1981004's sibling layout — geography straddling, characteristics
-   paged). `95F0170X` is the same family.
+3. ~~**`98F0172X`** / **`95F0170X`** (1991 profiles)~~ — **DONE** (2026-07-04:
+   the dense `0x0_` page variant; the "non-rectangular grid" was a truncated
+   directory read; see §2).
 4. **`ord-08035`** (2021 CT custom export): descriptor + directory decode, but
    the value-page body is a different (un-RE'd) encoding — needs the page body
    RE'd from scratch.
@@ -239,16 +204,16 @@ doubled-name delimiter.
 
 ## Status
 
-Last full pass 2026-07-04 (aligned with coverage.md after the descriptor
-count-reconciliation / geography-dimension-index / `0x0a`-`0x0c` u16 width
-sweep, which moved `97-570-X1981004` and `98-400-X2016203` OUT of this doc).
+Last full pass 2026-07-04 (aligned with coverage.md after the dense `0x0_`
+page-variant sweep, which moved the 1991 profiles `98F0172X`/`95F0170X` OUT of
+this doc; earlier the same day the descriptor count-reconciliation /
+geography-dimension-index / `0x0a`-`0x0c` u16 width sweep moved
+`97-570-X1981004` and `98-400-X2016203` out).
 
-- `98F0172X`/`95F0170X` (profile): geography, values, the full 1,046-record
-  directory, and both page formats (dense `0x0_` / sparse `0x8_`) are decoded,
-  geographies + spot values validate exact vs HTML ground truth, and the
-  descriptor now parses (`Values(1) × Profile(529) × Geography`) — but the
-  **page→grid mapping is unsolved**, so no cell decode yet (revisit knowing
-  the 1981004 sibling layout: geography straddling, characteristics paged).
+- `98F0172X`/`95F0170X` (1991 profiles): **SUPPORTED** as of 2026-07-04 (the
+  dense `0x0_` page variant; the "non-rectangular grid" and the transposed
+  value-order model were artifacts of a truncated directory read and the
+  pre-fix geography member order) — see §2.
 - `97F0020X` (2001 F crosstab): directory located and pages exact-fit under the
   b2 arithmetic, but the **presence nesting differs** (capacity-rule reject).
 - `97-563-XCB2006072` (2006 DA crosstab): **SUPPORTED** as of 2026-07-03 (the
@@ -262,4 +227,4 @@ sweep, which moved `97-570-X1981004` and `98-400-X2016203` OUT of this doc).
 All remaining files are rejected **structurally** by
 `ivt_is_supported()` (descriptor gate or page pre-flight — no allow/deny
 lists, no crashes). Each needs further dedicated reverse-engineering; the
-profile family (`98F0172X`, grid mapping) is the closest to done.
+closest to done is `97F0020X` (container located, presence nesting differs).

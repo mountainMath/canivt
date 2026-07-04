@@ -41,15 +41,24 @@ IVT_F2_PRESENCE_LEN  <- IVT_F2_GEOS_PER_PAGE * IVT_F2_REC_BYTES  # 256
 # census vintage (97-563-XCB2006072) uses `0x0a`/`0x0c` (64/128-byte heads,
 # whose pages also append per-(geo, outer-dim) suppression-mask records AFTER
 # the value run -- see ivt-format.md "The b3 head block and suppression tails").
+#
+# A ZERO high nibble is the DENSE page variant (the 1991 profile tables
+# 98F0172X / 95F0170X): `[b0] 01 [u16 count]` followed immediately by `count`
+# little-endian values, one per in-page grid position in grid order (absent
+# cells stored as literal zeros; `count` may exceed the grid for zero padding).
+# No presence record, no trailer, no head -- bytes 3-4 are the value COUNT, not
+# b2/b3, so the whole-marker test cannot constrain them beyond count > 0.
 ivt_f2_marker_b0 <- c(0x82L, 0x84L, 0x88L, 0xa2L, 0xa4L, 0xa8L)
+ivt_f2_marker_b0_dense <- c(0x02L, 0x04L, 0x08L)
 ivt_f2_marker_b3 <- c(0x08L, 0x09L, 0x0aL, 0x0cL)
 ivt_f2_is_marker_byte0 <- function(b) b %in% ivt_f2_marker_b0
 
 # Whole-marker test at a 0-based page offset.
 ivt_f2_is_marker <- function(raw, off) {
-  as.integer(raw[off + 1L]) %in% ivt_f2_marker_b0 &&
-    as.integer(raw[off + 2L]) == 0x01L &&
-    as.integer(raw[off + 4L]) %in% ivt_f2_marker_b3
+  b0 <- as.integer(raw[off + 1L])
+  if (as.integer(raw[off + 2L]) != 0x01L) return(FALSE)
+  if (b0 %in% ivt_f2_marker_b0_dense) return(rd_u16(raw, off + 2L) > 0L)
+  b0 %in% ivt_f2_marker_b0 && as.integer(raw[off + 4L]) %in% ivt_f2_marker_b3
 }
 
 # The per-page value parameters (value width, trailer, value-run start) are

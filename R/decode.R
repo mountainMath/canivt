@@ -156,6 +156,7 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   }
   width <- w
   is_float <- w == 8L
+  if (b0 < 0x80L) return(ivt_decode_page_dense(raw, off, lay, size, width, is_float))
   vstart <- 4L + lay$rec_bytes + ivt_value_trailer(b0, b2, b3)
 
   pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
@@ -175,6 +176,41 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
     as.numeric(readBin(bytes, "integer", n = nv, size = width, signed = TRUE, endian = "little"))
   }
   list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals)
+}
+
+# The DENSE page variant (marker high nibble 0x0; the 1991 profile tables
+# 98F0172X / 95F0170X): `[b0][01][u16 count]` then `count` values, one per
+# in-page grid position IN GRID ORDER, with absent cells stored as literal
+# zeros -- no presence record, no trailer. `count` covers at least the real
+# grid positions and may run past them as zero padding (observed counts
+# 2048/2080/2112/2176 against a 2048-position window; the trailing extras are
+# all zero, and the last window's positions past the straddle count are zero
+# too). Every dense corpus page fits its directory entry EXACTLY
+# (4 + count*width == size). Zero values are dropped -- the store keeps only
+# non-zero cells, so a dense zero and an absent sparse cell mean the same
+# published 0.
+ivt_decode_page_dense <- function(raw, off, lay, size, width, is_float) {
+  cnt <- rd_u16(raw, off + 2L)
+  vend <- 4L + cnt * width
+  if ((!is.na(size) && vend > size) || off + vend > length(raw)) {
+    cli::cli_abort(c(
+      "IVT dense page at byte {off}: the value run ends at page byte {vend} but the directory allocates {size} bytes.",
+      i = "The page marker ({sprintf('%02x %02x %02x %02x', as.integer(raw[off + 1L]), as.integer(raw[off + 2L]), as.integer(raw[off + 3L]), as.integer(raw[off + 4L]))}) was likely misread."
+    ), class = "canivt_page_overrun")
+  }
+  ngrid <- nrow(lay$grid$tuples)
+  k <- min(cnt, ngrid)
+  if (k == 0L) return(NULL)
+  bytes <- raw[(off + 4L + 1L):(off + 4L + k * width)]
+  vals <- if (is_float) {
+    readBin(bytes, "double", n = k, size = 8L, endian = "little")
+  } else {
+    as.numeric(readBin(bytes, "integer", n = k, size = width, signed = TRUE, endian = "little"))
+  }
+  keep <- vals != 0
+  if (!any(keep)) return(NULL)
+  list(tuples = lay$grid$tuples[seq_len(k), , drop = FALSE][keep, , drop = FALSE],
+       vals = vals[keep])
 }
 
 # Cheap structural pre-flight for the decodability gate: the first few
@@ -211,8 +247,19 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
     b3 <- as.integer(raw[off + 4L])
     w <- bitwAnd(b0, 0x0FL)
+    if (!w %in% c(2L, 4L, 8L)) return(FALSE)
+    if (b0 < 0x80L) {
+      # dense variant: `count` positional values right after the 4-byte header,
+      # and the page fits its directory allocation EXACTLY (every dense corpus
+      # page does); a mismatch means the count field / width was misread.
+      cnt <- rd_u16(raw, off + 2L)
+      if (4L + cnt * w != s1 || off + 4L + cnt * w > n) return(FALSE)
+      seen <- seen + 1L
+      if (seen >= max_pages) break
+      next
+    }
     tr <- tryCatch(ivt_value_trailer(b0, b2, b3), error = function(e) NULL)
-    if (is.null(tr) || !w %in% c(2L, 4L, 8L)) return(FALSE)
+    if (is.null(tr)) return(FALSE)
     nv <- sum(ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit))
     if (nv == 0L) next
     end <- 4L + lay$rec_bytes + tr + nv * w

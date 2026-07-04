@@ -109,6 +109,27 @@ on all six reference tables:
   this table's viewer d0 dropdown re-sorts geographies (provinces first,
   CMAs after) — join viewer ground truth by NAME, not option position.
   Strict-clean.
+- **1991 profiles 98F0172X (CT Part B) + 95F0170X (CD/CSD Part B)** — the
+  hybrid dense/sparse page set, decoded 2026-07-04. Same profile lineage as
+  1981004 (`Values(1) × Profile(529) × Geography(4063/5602)`, geography LAST
+  and straddling: 2/3 windows; the directory is exactly 529 × window_count
+  entries — the old "non-rectangular Σcount" puzzle was a truncated directory
+  read: the `0x0_` markers were rejected so `ivt_idx0()` fell back to the
+  0241 constant). The one new piece is the **dense `0x0_` page variant**
+  (`[b0∈{02,04,08}][01][u16 count]` + one value per grid position in grid
+  order, zeros stored LITERALLY, count zero-padded past the window; exact
+  directory fit `4 + count·width == size` is the preflight rule;
+  `ivt_decode_page_dense()`, decode.R). Sparse pages are the standard
+  container. Viewer-validated cell-exact: 11,638 + 10,580 cells over 42
+  geographies (every window boundary, deep tails, Canada); both viewers
+  re-sort their dropdowns (Ottawa-Hull listed Hull-first; 95F0170X appends
+  CSD-type suffixes) — join by NAME. Also fixed en route: `@48`/`@40` title
+  blobs are NOT fixed language slots (98F0172X stores FR at `@48`;
+  `ivt_f2_legacy_identity()` assigns by frscore), the legacy footnote header
+  is spelled `Footnote(s)` on this vintage (39 notes each), and their master
+  directories store a 4-byte-ALIGNED second length copy
+  (`ivt_f2_read_dir_at()` admits it). Both strict-clean, 1.77M/1.84M cells in
+  ~0.4 s.
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every
@@ -185,7 +206,12 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   `canivt_page_overrun`). Valid entries pointing at unknown markers are skipped
   **loudly** (`canivt_skipped_pages`). The store keeps only **non-zero** cells
   (the CSV publishes the zeros), so a missing cell = 0; entirely empty
-  geographies (zero presence record) are normal.
+  geographies (zero presence record) are normal. A **ZERO high nibble in b0 is
+  the DENSE page variant** (1991 profiles 98F0172X/95F0170X): bytes 3–4 are a
+  u16 value COUNT, not b2/b3 — `[b0][01][u16 count]` + one value per grid
+  position in grid order, zeros stored literally, count zero-padded past the
+  window, exact fit `4 + count·width == size` (the preflight rule;
+  `ivt_decode_page_dense()`).
 - **Fallbacks are LOUD** (`ivt_fallback()`, `fallback.R`): every content-heuristic
   path (stride walk, regex/dedup scans, count-keyed labels, marker-scan directory
   location, fixed slot orders, tail windows) raises a classed `canivt_fallback`
@@ -352,10 +378,17 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   (`ivt_f2_master_identity()`) and the numberless `FOOTNOTE:`/`RENVOI :`
   footnote framing. The unified decoder needed no changes beyond slug/role
   generality — geography-last is the ordinary layout with a 1-member
-  outermost placeholder. Next in this lineage: the **1991 profiles
-  98F0172X/95F0170X** (descriptors now parse; open items are admitting their
-  dense `0x0_` page markers and the page→grid assignment — revisit the old
-  "non-rectangular" puzzle knowing Values(1) and the 1981004 sibling layout).
+  outermost placeholder.
+- **1991 profiles 98F0172X/95F0170X — DONE** (2026-07-04, both viewer-validated
+  cell-exact; see "What works today"). The whole delta was the dense `0x0_`
+  page variant (`ivt_decode_page_dense()`) + three legacy-metadata fixes
+  (frscore-assigned `@48`/`@40` titles, the `Footnote(s)` header spelling, the
+  4-aligned second length field in `ivt_f2_read_dir_at()`). The page→grid
+  assignment was the ordinary unified walk all along. Next in the unsupported
+  pile (by tractability): **97F0020X** (2001 F-series; container located,
+  pages exact-fit, but 1124 presence bits vs 448-cell capacity — its presence
+  nesting differs), **ord-08035** (custom CT export; page body needs re-RE),
+  then the descriptor-undecoded 97F0015X / 97-570-X1981002 / cro extracts.
 - **Unified cell decode — DONE.** One `ivt_layout()` + `ivt_decode()` (`decode.R`)
   decodes every table, reproducing the two former decoders **byte-identical** on all
   six reference tables (0241/0077/0662 data-dim straddle, 0023/0129/1991 geography
@@ -550,12 +583,10 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   container variants**, rejected structurally by the page pre-flight or
   descriptor gate: `98-400-X2016019` (descriptor misreads,
   `ivt_f2_decodable()`), `97F0020XCB2001070` (capacity rule),
-  `97-570-X1981002` (descriptor undecoded). **97-570-X1981004 and
-  98-400-X2016203 are SUPPORTED as of 2026-07-04** (both were descriptor
-  misreads, not alien containers — see "What works today"); the 1991 profiles
-  `98F0172X`/`95F0170X` now parse their descriptors too (`Values(1) ×
-  Profile(529) × Geography`), leaving only their hybrid dense/sparse page set
-  and page→grid mapping open. **98-400-X2016387 IS supported** (directory
+  `97-570-X1981002` (descriptor undecoded). **97-570-X1981004,
+  98-400-X2016203 and the 1991 profiles 98F0172X/95F0170X are SUPPORTED as of
+  2026-07-04** (descriptor misreads / the dense `0x0_` page variant, not alien
+  containers — see "What works today"). **98-400-X2016387 IS supported** (directory
   complete after the entry-floor fix; geography viewer-validated). **The 2006 DA crosstab
   `97-563-XCB2006072` IS supported** (2026-07-03): its directory was at the
   plain `u16@558` all along, rejected only because this vintage's markers

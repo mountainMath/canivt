@@ -35,16 +35,20 @@ ivt_corpus <- list(
   # reconciled against its member block. Viewer-validated cell-exact.
   list(id = "97-570-X1981004", file = "97-570-X1981004.ivt", family = 2L,
        dims = c(1L, 79L, 5989L)),
+  # 1991 profiles: Values(1) x Profile(529) x Geography, geography-LAST and
+  # straddling (2/3 windows of 2048); their page set is a dense/sparse HYBRID --
+  # the `0x0_` dense pages are `[b0][01][u16 count]` + one value per grid
+  # position (zeros stored literally, count zero-padded past the window).
+  # Viewer-validated cell-exact (22 and 20 geographies x all 529 characteristics,
+  # incl. every window boundary and the re-sorted Ottawa-Hull block).
+  list(id = "98F0172X", file = "98F0172X.ivt", family = 2L,
+       dims = c(1L, 529L, 4063L)),
+  list(id = "95F0170X", file = "95F0170X.IVT", family = 2L,
+       dims = c(1L, 529L, 5602L)),
   # --- share the signature but are NOT a supported format ------------------
-  list(id = "95F0170X",          file = "95F0170X.IVT",          family = NA),
   list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA),
   list(id = "97F0020XCB2001070", file = "97F0020XCB2001070.IVT", family = NA),
   list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = NA),
-  # 98F0172X/95F0170X (1991 profiles): the descriptor now parses (Values(1) x
-  # Profile(529) x Geography, u16 counts under the 0x0a/0x0c width tags) but
-  # their page set is a dense/sparse HYBRID (0x0_ dense markers) the container
-  # does not accept -- still rejected structurally.
-  list(id = "98F0172X",          file = "98F0172X.ivt",          family = NA),
   list(id = "cro0172986_ct7_2006", file = "cro0172986_ct.7-2006-population.ivt",       family = NA),
   list(id = "cro0172986_ct8_2006", file = "cro0172986_ct.8-2006_private-households.ivt", family = NA),
   list(id = "ord-08035_ct1_2021",  file = "ord-08035-q7v4p7_ct.1-2021-population_updated.ivt", family = NA)

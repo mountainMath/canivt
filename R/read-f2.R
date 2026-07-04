@@ -132,6 +132,10 @@ ivt_f2_dimension_names <- function(raw) {
 # Table identity for the legacy format, read from the out-of-line title blocks
 # that header u32 @48/@40 point at (framing `01 01 <u16 len>` then
 # "<product_id>\r\n<title>"). The modern format keeps this inline (ivt_table_info).
+# The two pointers are NOT fixed language slots: 1003011 and 95F0170X store the
+# English blob at @48, but 98F0172X stores the French one there -- so the
+# language is assigned per pair by content (`ivt_f2_frscore()` on the titles,
+# the same pick `ivt_f2_master_identity()` uses).
 ivt_f2_legacy_identity <- function(raw) {
   rd <- function(ptr) {
     off <- rd_u32(raw, ptr)
@@ -147,6 +151,10 @@ ivt_f2_legacy_identity <- function(raw) {
       if (length(p) >= 2) trimws(p[2]) else NA_character_)
   }
   e <- split2(rd(IVT_HDR_TITLE_EN_PTR)); f <- split2(rd(IVT_HDR_TITLE_FR_PTR))
+  if (!is.na(e[2]) && !is.na(f[2]) && e[2] != f[2] &&
+      ivt_f2_frscore(e[2]) > ivt_f2_frscore(f[2])) {
+    tmp <- e; e <- f; f <- tmp
+  }
   list(product_id = e[1], title_en = e[2], title_fr = f[2], universe = NA_character_)
 }
 
@@ -188,7 +196,8 @@ ivt_f2_master_identity <- function(raw) {
 # Footnotes for the legacy format. Unlike the modern framed "Footnote N" / "Renvoi
 # N" records, the legacy notes block is one text blob (header `01 01 <u16 len>`)
 # with sections; the footnotes are "(N) <text>" lines under a "Footnotes" section
-# header, ending at the next section header ("Abbreviations"). The blob is located
+# header ("Footnote(s)" on the 1991 profile exports), ending at the next section
+# header ("Abbreviations"). The blob is located
 # from the MASTER directory (dimdir.R): it is the entry the header EN title
 # pointer (`@48`) also addresses, so the parse is bounded to exactly that section;
 # the trailing `tail_bytes` window survives as the fallback when the master
@@ -214,7 +223,7 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
         off <- md[r, "off"]; ln <- md[r, "len"]
         if (ln < 64L || off + ln > length(raw)) next
         txt <- raw_to_latin1(raw[(off + 1L):(off + ln)])
-        if (grepl("(^|\r\n)Footnotes\r\n", txt)) { span <- c(off + 1L, off + ln); break }
+        if (grepl("(^|\r\n)Footnote(s|\\(s\\))\r\n", txt)) { span <- c(off + 1L, off + ln); break }
       }
     }
   }
@@ -222,7 +231,9 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
   if (is.null(span)) span <- c(max(1L, length(raw) - tail_bytes + 1L), length(raw))
   lines <- strsplit(raw_to_latin1(raw[span[1]:span[2]]), "\r\n", fixed = TRUE)[[1]]
   lines <- trimws(lines)
-  fh <- which(lines == "Footnotes")
+  # the section header is "Footnotes" on the 1991 crosstab exports (1003011) but
+  # "Footnote(s)" on the 1991 profile exports (98F0172X / 95F0170X)
+  fh <- which(lines %in% c("Footnotes", "Footnote(s)"))
   if (!length(fh)) return(list())
   out <- list()
   for (i in (fh[length(fh)] + 1L):length(lines)) {

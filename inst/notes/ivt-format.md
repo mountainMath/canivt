@@ -126,7 +126,9 @@ fully decoded):
   per page (`canivt_page_overrun`), so a misread marker aborts rather than
   decoding garbage values. The second copy's purpose (redundancy?) is unproven.
 - **Per-page header bytes.** The page marker is `[b0] 01 [b2] [b3]` with the value-
-  width in `b0`'s low nibble and `b3 ∈ {08,09,0a,0c}`; **`b2` encodes the trailer**:
+  width in `b0`'s low nibble and `b3 ∈ {08,09,0a,0c}` (a ZERO high nibble in `b0`
+  is the dense variant — bytes 3–4 are then a u16 value count, see "Dense pages"
+  below); **`b2` encodes the trailer**:
   `b2 == 0x00` means "no trailer", otherwise
   `trailer = 2·(b2 >> 4) + 2·(low nibble(b2) > 0)` bytes; **`b3` encodes an
   auxiliary head block** of `32·(b3 − 8)` bytes between the trailer and the value
@@ -198,11 +200,44 @@ authoritative. The decoder therefore keys **only** on the presence bitmap and
 the head size: values = the `popcount` ints/floats at the head-adjusted
 start; `b2 == 0` exact-fit is asserted only for `b3 ≤ 0x09`.
 
-98-400-X2016203's 369 undecoded `a2 01 03 0a` pages are (very likely) this
-same layout — the old reader started 32 bytes early there and read head bytes
-(`0xFF…` runs) as int16 `-1` "values" — but that file also carries non-exact
-`b2 == 0, b3 = 0x08` pages the model does not explain, so it stays rejected
-pending viewer validation.
+98-400-X2016203's `a2 01 03 0a` pages are this same layout; its formerly
+"non-exact `b2 == 0` pages" were an artifact of the u8-misread Selected
+characteristics count (825 read as 57) mis-nesting the presence geometry —
+with the u16 width tag the table is SUPPORTED and viewer-validated cell-exact
+(2026-07-04).
+
+## Dense pages (1991 profile exports; marker high nibble 0x0)
+
+The 1991 profile tables (98F0172X "Profile of Census Tracts - Part B",
+95F0170X "Census Divisions and Subdivisions - Part B") mix the sparse pages
+above with a **dense variant** whose marker high nibble is `0x0` (`0x02`/`0x04`/
+`0x08`, low nibble still the value width):
+
+    [b0][01][u16 count]  then  count × width bytes of values
+
+No presence record, no trailer, no head: one value per **in-page grid position
+in grid order**, with absent/zero cells stored as **literal zeros**. `count`
+covers at least the full window (2048 positions on these tables) and may run
+past it as zero padding (observed 2048/2080/2112/2176; every extra value is 0,
+as are the last window's positions past the geography count). Every dense page
+fits its directory entry EXACTLY (`4 + count·width == size`), which is the
+pre-flight rule for the variant (`ivt_page_preflight()`); the whole-marker test
+(`ivt_f2_is_marker()`) accepts `[02|04|08] 01` with a positive count, since
+bytes 3–4 are the count, not `b2`/`b3`.
+
+These tables are otherwise the ordinary unified layout — `Values(1) ×
+Profile(529) × Geography` with geography LAST (the profile lineage,
+cf. 97-570-X1981004) and straddling the presence record: 98F0172X = 2 windows
+of 2048 over 4,063 geographies → exactly 529 × 2 = 1,058 directory entries;
+95F0170X = 3 windows over 5,602 → 529 × 3 with the directory walk identical.
+The historical "non-rectangular Σcount" puzzle was an artifact of a truncated
+directory read (the `0x0_` markers were rejected, so `ivt_idx0()` fell back to
+the wrong base) plus the pre-fix inline-geography member order. The sparse
+pages of these files are the standard container (`82 01 80 08`, `84 01 40 08`,
+`88 01 00|20 08`; the `b2 == 0` ones exact-fit). Viewer-validated cell-exact
+on both files (22 and 20 geographies × all 529 characteristics, incl. every
+window boundary, Canada/deep-tail members, and the Ottawa-Hull block the
+viewer's dropdown re-sorts — join viewer ground truth by NAME).
 
 ## Geography index
 

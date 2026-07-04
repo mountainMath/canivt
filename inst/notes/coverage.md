@@ -586,17 +586,32 @@ Regression-guarded in `tests/testthat/test-formats.R`.
 
 Files in the test corpus that are currently unsupported:
 
-- [~] **Profile tables** (`98F0172X`, `95F0170X`): **structure largely cracked, not
-  yet wired.** 2-D Geography × Values; value order **characteristic-major,
-  geography-minor**. For 98F0172X: 4,063 geographies decode exactly today
-  (`ivt_f2_geo_inline()`); values confirmed exact vs the HTML profile-viewer ground
-  truth (St. John's char 101 = 171,859); the **full page directory** is located
-  (header `u16@558`=1936, 1,046 contiguous records tiling 100 % of the value
-  region). Pages are a **hybrid**: dense `0x0_` (`[b0][01][count]`+values) and
-  sparse `0x8_` (presence-bitmap + values + trailer, the container we already
-  decode). Open: the grid is **non-rectangular** (Σcount=2,222,304 not a multiple of
-  4063/529) — likely geography-level-dependent characteristic sets — plus the
-  Values count/order from the type-`0x01` descriptor. See `unsupported-formats.md` §2.
+- [x] **Profile tables** (`98F0172X`, `95F0170X`) — **DECODED and SUPPORTED**
+  (2026-07-04). They are the ordinary unified layout (`Values(1) × Profile(529)
+  × Geography`, geography LAST and straddling — the 97-570-X1981004 lineage)
+  plus one new page variant: the **dense `0x0_` marker**
+  (`[b0][01][u16 count]` + one value per grid position in grid order, zeros
+  stored literally, `count` zero-padded past the window; exact directory fit
+  `4 + count·width == size` on every dense page). The historical
+  "non-rectangular Σcount = 2,222,304" puzzle dissolved: at the true directory
+  base the entries number **exactly 529 × window_count** (1,058 = 529 × 2 on
+  98F0172X, 529 × 3 on 95F0170X) — the old count was a truncated read (the
+  `0x0_` markers were rejected, `ivt_idx0()` fell back to the 0241 constant),
+  and the "member 3808 = St. John's" anchor predated the positional
+  inline-geography fix (St. John's is member 1). The sparse pages are the
+  standard container, untouched. Viewer-validated cell-exact: **11,638 cells
+  (22 geographies × 529)** on 98F0172X incl. window boundary 2048/2049, deep
+  tail 4,062/4,063 and the Ottawa-Hull block (whose dropdown the viewer
+  re-sorts Hull-first — join by NAME; the codebook order is confirmed by the
+  value↔name pairing), and **10,580 cells (20 geographies × 529)** on 95F0170X
+  incl. boundaries 2048/2049 + 4096/4097, Canada and last member 5,602 (its
+  viewer labels append CSD-type suffixes and re-sort — name-join with type
+  stripped). Both strict-clean, with 39 legacy footnotes each (the
+  `Footnote(s)` section-header spelling; master-directory-bounded after
+  admitting the 4-byte-aligned second length field in `ivt_f2_read_dir_at()`)
+  and EN/FR titles assigned by content (`@48`/`@40` are NOT fixed language
+  slots — 98F0172X stores FR at `@48`; `ivt_f2_legacy_identity()` now decides
+  by `ivt_f2_frscore()`, the `ivt_f2_master_identity()` pick).
 - [ ] **Other "F"-series** (`97F0015XCB2001041`, `97F0020XCB2001070`): 2001-era
   crosstabs. `inline_geo` header flag varies; descriptor layout differs.
   `97F0020X`'s page directory **is** locatable after the entry-floor fix (header
@@ -654,17 +669,12 @@ locations, per-file blockers) is captured in
 [`unsupported-formats.md`](unsupported-formats.md). Summary: near-family-2
 crosstabs (`ord-08035` — its page body turned out NOT to be the 98-10-0023
 container and needs re-RE'ing; `97F0020X` — container located, presence nesting
-differs), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`;
-hybrid page set decoded, the non-rectangular page→grid mapping is the open
-item), and older layouts whose container is not yet located (`97F0015X`, 1981
-`97-570-X1981002`). (`97-563-XCB2006072`, `97-570-X1981004` and
-`98-400-X2016203` — formerly the top open items — are now all SUPPORTED: the
-b3 head-block rule, the descriptor count reconciliation + geography-dimension
-index, and the `0x0a` u16 width tag respectively.) The most tractable
-remaining target: the 98F0172X/95F0170X profile grid mapping — note their
-descriptors now parse correctly (`Values(1) × Profile(529) × Geography`,
-u16 counts), so the open item is only the hybrid dense/sparse page set and
-the page→grid assignment.
+differs) and older layouts whose container is not yet located (`97F0015X`, 1981
+`97-570-X1981002`). (`97-563-XCB2006072`, `97-570-X1981004`,
+`98-400-X2016203` and the 1991 profiles `98F0172X`/`95F0170X` — formerly the
+top open items — are now all SUPPORTED: the b3 head-block rule, the descriptor
+count reconciliation + geography-dimension index, the `0x0a` u16 width tag,
+and the dense `0x0_` page variant respectively.)
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
@@ -778,7 +788,8 @@ tails; viewer-validated cell-exact) and, as of 2026-07-04, the **1981 profile
 reconciliation + `ivt_f2_geo_dim_index()` — the "geography-last" nesting turned
 out to be the ordinary layout with a 1-member outermost placeholder) and
 **98-400-X2016203** (the `0x0a` u16 count width tag: 825 Selected
-characteristics, chunked EN/FR labels; viewer-validated cell-exact). Remaining
-open items: the **1991 profile grid mapping** (98F0172X, 95F0170X — hybrid
-dense/sparse pages, non-rectangular page→grid assignment) and the other 2001
-"F"-series products; see the section above.
+characteristics, chunked EN/FR labels; viewer-validated cell-exact), and the
+**1991 profiles 98F0172X / 95F0170X** (the dense `0x0_` page variant — one
+value per grid position, zeros literal; both viewer-validated cell-exact).
+Remaining open items: the 2001 "F"-series products, 1981002 and the custom
+extracts; see the section above.

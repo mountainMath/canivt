@@ -250,8 +250,12 @@ ivt_f2_dim_member_labels <- function(raw, want = NULL, tail_bytes = 600000L) {
 IVT_F2_DIR_SLOTS <- c(824L, 572L, 712L)
 
 # Decode a metadata block directory that STARTS at absolute offset `ptr`: a run of
-# 8-byte entries `[u32 off][u16 len][u16 len]` (null `(0,0)` slots tolerated). Returns
-# a two-column matrix (off, len), or NULL when `ptr` is not a well-formed table.
+# 8-byte entries `[u32 off][u16 len][u16 len]` (null `(0,0)` slots tolerated). The
+# second length is normally a copy of the first, but the 1991 profile exports
+# (98F0172X / 95F0170X) store the 4-byte-ALIGNED allocation there (205 -> 208,
+# 245 -> 248 in their master directories), so a `len2 == 4*ceiling(len/4)` entry
+# is admitted too; the content length is always the first field. Returns a
+# two-column matrix (off, len), or NULL when `ptr` is not a well-formed table.
 ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L) {
   n <- length(raw)
   if (is.na(ptr) || ptr < 1L || ptr + 8L > n) return(NULL)
@@ -262,7 +266,8 @@ ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L) {
     off <- rd_u32(raw, base); a <- rd_u16(raw, base + 4L); b <- rd_u16(raw, base + 6L)
     if (is.na(off) || is.na(a) || is.na(b)) break
     if (off == 0 && a == 0) next                       # null slot
-    if (a != b || a <= 0L || off < 1 || off > n) break # end of table
+    if ((b != a && b != (a + 3L) %/% 4L * 4L) ||
+        a <= 0L || off < 1 || off > n) break           # end of table
     offs <- c(offs, off); lens <- c(lens, a)
   }
   if (!length(offs)) return(NULL)
