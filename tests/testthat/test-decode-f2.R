@@ -740,18 +740,17 @@ test_that("small files' page directories are not truncated by an offset floor", 
 })
 
 test_that("directory entries with unrecognised page markers are skipped LOUDLY", {
-  # 98-400-X2016203's 369 `a2 01 03 0a` pages are now recognised under the b3
-  # head-block rule (b3 = 0x0a -> a 64-byte auxiliary head), so its direct
-  # decode no longer skips them -- but the file as a whole stays REJECTED (its
-  # b2 == 0, b3 == 08 pages do not fit their directory sizes exactly, so the
-  # pre-flight fails; the decoded values are unvalidated). To exercise the
-  # loud-skip machinery, doctor one page's b3 to the genuinely unknown 0x0b:
-  # the entry must be dropped with a classed warning -- silently missing cells
-  # read as zeros downstream.
+  # 98-400-X2016203 is SUPPORTED since the descriptor type 0x0a u16 width fix
+  # (its "Selected characteristics" dimension is 825 members; the u8 misread 57
+  # mis-nested the layout, which is what had made its b2 == 0 pages look
+  # non-exact-fit) -- viewer-validated cell-exact. To exercise the loud-skip
+  # machinery, doctor one page's b3 to the genuinely unknown 0x0b: the entry
+  # must be dropped with a classed warning -- silently missing cells read as
+  # zeros downstream.
   p <- locate_sample_ivt("", "98-400-X2016203", "98-400-X2016203.IVT")
   skip_if(p == "", "no 98-400-X2016203 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
-  expect_false(ivt_is_supported(raw))
+  expect_true(ivt_is_supported(raw))
   cells <- ivt_decode(raw)                 # a2 01 03 0a pages decode via b3
   expect_gt(nrow(cells), 0L)
   # doctor a LATER entry's page marker (the FIRST entry anchors ivt_idx0()'s
@@ -787,15 +786,41 @@ test_that("incompatible same-signature containers fail the page pre-flight", {
   expect_false(ivt_is_supported(raw))
 })
 
-test_that("the geography-last 1981 profile variant is rejected by the span rule", {
-  # 97-570-X1981004 parses into a geography-first layout whose directory covers
-  # only the first outer member (its data is nested geography-LAST); decoding
-  # would return a fraction of the table with geography mislabelled.
+test_that("the 1981 profile variant decodes: geography LAST, count-reconciled Values(1)", {
+  # 97-570-X1981004's descriptor stores Values(1) x Profile(79) x
+  # Geography(5989) -- geography is the LAST descriptor dimension. The "Values"
+  # placeholder's double-01 record reads a bogus count of 32 unless reconciled
+  # against its slot-directory member block (1 slot, 1 member); with the true
+  # counts the ordinary unified layout describes the file exactly: geography
+  # straddles the presence record (3 windows of 2048), Profile is
+  # directory-paged at stride 4, Values(1) is the trivial outermost entry
+  # dimension. Viewer-validated: all 5,989 geography members in order and
+  # 1,264/1,264 sampled cells exact (incl. the window boundaries 2048/2049 and
+  # 4096/4097 and the last member).
   p <- locate_sample_ivt("", "97-570-X1981004", "97-570-X1981004.ivt")
   skip_if(p == "", "no 97-570-X1981004 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
-  expect_false(ivt_page_preflight(raw))
-  expect_false(ivt_is_supported(raw))
+  d <- ivt_f2_descriptor(raw)
+  expect_equal(vapply(d$dims, `[[`, 1L, "count"), c(1L, 79L, 5989L))
+  expect_equal(ivt_f2_geo_dim_index(raw, d), 3L)
+  lay <- ivt_layout(raw)
+  expect_equal(lay$straddle, 3L)                  # geography straddles ...
+  expect_true(lay$geo_in_page)                    # ... so geo is in-page
+  expect_equal(lay$slugs, c("values", "profile", "geo"))
+  expect_equal(lay$window_count, 3L)              # ceiling(5989 / 2048)
+  expect_true(ivt_page_preflight(raw))
+  expect_true(ivt_is_supported(raw))
+  x <- read_ivt(p)
+  expect_equal(nrow(x$cells), 418400L)
+  # Canada, "Population, 1981" -- the published 1981 census total
+  can <- x$cells[x$cells$geo == 1L & x$cells$profile == 2L, ]
+  expect_equal(can$value, 24343181)
+  g <- x$metadata$geographies
+  expect_equal(length(g$member_id), 5989L)
+  expect_equal(g$geo_name[1], "CANADA")
+  expect_equal(g$geo_uid[1], "00")
+  expect_equal(length(x$metadata$footnotes), 10L) # FOOTNOTE:/RENVOI : framing
+  expect_equal(x$metadata$product_id, "97-570-X1981004")  # master-dir identity
 })
 
 test_that("the header directory pointer unwraps past 64 KiB (98-10-0013 cells)", {

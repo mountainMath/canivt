@@ -89,8 +89,12 @@ ivt_layout <- function(raw) {
     cli::cli_abort("IVT descriptor has too few dimensions to decode.")
   cnt <- vapply(d$dims, `[[`, 1L, "count")
   m <- length(cnt)
+  # the geography dimension (dimension 1 outside the profile lineage) only
+  # determines the "geo" slug and the geo_in_page provenance tag -- the nesting
+  # below treats every dimension identically by position.
+  gd <- ivt_f2_geo_dim_index(raw, d)
   dd <- ivt_f2_data_dims(raw)
-  slugs <- c("geo", dd$slugs)                       # dim 1 = geography (structural)
+  slugs <- character(m); slugs[gd] <- "geo"; slugs[-gd] <- dd$slugs
 
   # Nest innermost (dim m) outward; find the dimension that overflows the record.
   # Dimension 1 (geography) ALWAYS takes the straddle role when nothing inner
@@ -124,11 +128,11 @@ ivt_layout <- function(raw) {
   estride <- integer(length(ent_counts)); eb <- 1L
   for (t in seq_along(ent_counts)) { estride[t] <- eb; eb <- ivt_f2_nextpow2(ent_counts[t] * eb) }
 
-  list(counts = cnt, slugs = slugs, n_dim = m,
+  list(counts = cnt, slugs = slugs, n_dim = m, geo_dim = gd,
        straddle = straddle, ipc = ipc, window_count = win,
        inpage_idx = inpage_idx, grid = grid, rec_bytes = lay$rec_bytes,
        ent_idx = ent_idx, ent_counts = ent_counts, estride = estride,
-       geo_in_page = straddle == 1L)
+       geo_in_page = straddle == gd)
 }
 
 # Decode one page at 0-based byte offset `off`: returns the present cells' in-page
@@ -249,9 +253,10 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
 
 #' Decode every cell of an IVT into a tibble of one value per row.
 #'
-#' Columns: `geo` (1-based geography member id) plus one 1-based member-id column
-#' per data dimension (named by its structural slug, descriptor order), and
-#' `value`. Only non-zero cells are stored.
+#' One 1-based member-id column per dimension in descriptor order (named by the
+#' structural slugs; the geography dimension's column is `geo`, which need not
+#' be first -- the 1981 profile stores geography last), and `value`. Only
+#' non-zero cells are stored.
 #' @keywords internal
 #' @noRd
 ivt_decode <- function(raw, lay = NULL) {
@@ -313,14 +318,14 @@ ivt_decode <- function(raw, lay = NULL) {
   }
 
   if (ci == 0L) {
-    out <- tibble::tibble(geo = integer(0))
-    for (j in 2:m) out[[lay$slugs[j]]] <- integer(0)
+    out <- tibble::tibble(.rows = 0L)
+    for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
     out$value <- numeric(0)
     return(out)
   }
   cols <- do.call(rbind, md_acc[seq_len(ci)])
-  out <- tibble::tibble(geo = cols[, 1L])
-  for (j in 2:m) out[[lay$slugs[j]]] <- cols[, j]
+  out <- tibble::tibble(.rows = nrow(cols))
+  for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
   out$value <- unlist(v_acc[seq_len(ci)], use.names = FALSE)
   out
 }

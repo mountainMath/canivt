@@ -145,7 +145,8 @@ ivt_f2_match_dim <- function(name, dims) {
 # of list(name, count, labels), one per matched dimension, in codebook order.
 ivt_f2_marker_labels <- function(raw, tail_bytes = 600000L) {
   d <- ivt_f2_descriptor(raw)
-  data_dims <- if (!is.null(d) && length(d$dims) > 1L) d$dims[-1L] else list()
+  data_dims <- if (!is.null(d) && length(d$dims) > 1L)
+    d$dims[-ivt_f2_geo_dim_index(raw, d)] else list()
   if (!length(data_dims)) return(list())
   start <- max(0L, length(raw) - tail_bytes)
   markers <- ivt_f2_codebook_dim_markers(raw, start)
@@ -299,7 +300,7 @@ ivt_f2_dir_has_geo <- function(raw, d) {
 # block). Returns the (off, len) matrix, or NULL. This logical order is what
 # lets us read the reverse-stored root chunk positionally (`ivt_f2_geo_root_dir`).
 ivt_f2_geo_block_dir <- function(raw) {
-  d <- ivt_f2_dim_dir(raw, 1L)                         # geography = dimension 1
+  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))  # the geography dimension
   if (!is.null(d)) return(d)
   for (slot in IVT_F2_DIR_SLOTS) {
     ptr <- rd_u32(raw, slot)
@@ -1272,7 +1273,7 @@ IVT_F2_INLINE_PAT <- paste0(
 ivt_f2_geo_marker_region <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(NULL)
-  geo <- ivt_f2_geo_dim(d$dims)
+  geo <- ivt_f2_geo_dim(d$dims, ivt_f2_geo_dim_index(raw, d))
   if (is.null(geo) || is.null(geo$name) || is.na(geo$name)) return(NULL)
   is_geo_mk <- function(nm) {
     if (is.na(nm)) return(FALSE)
@@ -1332,7 +1333,7 @@ ivt_f2_geo_marker_region <- function(raw) {
 # falls back to the regex scan. Returns the `ivt_f2_geo_inline()` tibble or NULL.
 ivt_f2_geo_inline_dir <- function(raw) {
   if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern layout: not inline
-  d <- ivt_f2_dim_dir(raw, 1L)
+  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
   if (is.null(d)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw)
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
@@ -1607,21 +1608,28 @@ ivt_f2_descriptor <- function(raw) {
         # count of 110 reads as "n").
         nm_run <- run[1:half]
         if (half >= 14L && rl > 2L * half) nm_run <- run[(half + 1L):rl]
-        if (v[k - 1L] == 0x01L) {                  # period/facet double-01 framing
+        double01 <- v[k - 1L] == 0x01L
+        if (double01) {                            # period/facet double-01 framing
           type <- v[k - 3L]; count <- v[k - 2L]
         } else {
           type <- v[k - 1L]
           # the geography descriptor stores its (large) member count as a 16-bit
           # little-endian value; the type byte tags the storage width: 0x10 (modern
-          # DGUID geography, e.g. 63404 in 98-10-0023; 57523 in the 2006 DA table)
-          # and 0x0d (the 2011 census-tract geography, 5447) carry a u16, whereas
-          # the small family-1 geography (type 0x08, <=255) and the data dimensions
-          # carry a u8. Reading 0x0d as u8 misread 2011's 5447 geographies as 21.
-          count <- if (type %in% c(0x10L, 0x0dL)) v[k - 3L] + v[k - 2L] * 256L
+          # DGUID geography, e.g. 63404 in 98-10-0023; 57523 in the 2006 DA table),
+          # 0x0d (the 2011 census-tract geography, 5447; also the 1981/1991 profile
+          # geographies) and 0x0a / 0x0c (the profile lineage's characteristics /
+          # geography dimensions, e.g. 98F0172X's Profile(529) and Geography(4063))
+          # carry a u16, whereas the small family-1 geography (type 0x08, <=255)
+          # and the data dimensions carry a u8. Reading 0x0d as u8 misread 2011's
+          # 5447 geographies as 21; reading 0x0a/0x0c as u8 misread 98F0172X's
+          # dimensions as Profile(2) / Geography(15).
+          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL))
+                     v[k - 3L] + v[k - 2L] * 256L
                    else v[k - 2L]
         }
         dims[[length(dims) + 1L]] <- list(name = trimws(intToUtf8(nm_run)),
-                                          count = count, type = type)
+                                          count = count, type = type,
+                                          double01 = double01)
         k <- e; next
       }
     }
@@ -1630,17 +1638,31 @@ ivt_f2_descriptor <- function(raw) {
 
   title <- regmatches(txt, regexpr("FACET04[^.]*", txt))
   title <- if (length(title)) trimws(sub("FACET04", "", title)) else NA_character_
+  # The double-01-framed records are AMBIGUOUS: the genuine reference-period
+  # record is [type][count][01][01]<name> ("Year (2)": 0e 02 01 01), but the
+  # profile lineage's placeholder "Values" dimension shares the byte shape
+  # (00 20 01 01 "ValuesValues") while its count is NOT at that position -- its
+  # codebook stores exactly ONE member, and reading 0x20 as a count of 32 made
+  # the whole layout mis-nest (97-570-X1981004 was rejected by the span rule as
+  # "geography-last" when it is the ordinary layout with a 1-member outermost
+  # dimension). Only the dimension's own slot-directory member block can decide,
+  # so reconcile those counts against the codebook (dimdir.R); counts the
+  # codebook cannot contradict (count <= stored member slots) are kept.
+  dims <- ivt_f2_dim_count_reconcile(raw, dims)
   list(n_dim = ndim, dims = dims, title = title)
 }
 
-# Geography is the first descriptor dimension (the page/row dimension) in every
-# observed layout. Identify it positionally, NOT by a magic type byte: the
+# The geography descriptor dimension record. Identified positionally as
+# dimension `gd` (`ivt_f2_geo_dim_index()`, dimdir.R: dimension 1 in every
+# layout except the profile-table lineage, which stores a 1-member "Values"
+# placeholder first and geography LAST), NOT by a magic type byte: the
 # geography descriptor *type* varies by format -- 0x10 in the modern 2021 family-2
 # files (count stored as u16) but 0x08 in the family-1 reference table (count u8) --
 # so a `type == 0x10` filter silently fails on other layouts (it falls through to
 # the wrong fixed-offset count, e.g. 16383 for 98-10-0241). The count's byte width
 # is still handled by `ivt_f2_descriptor()`.
-ivt_f2_geo_dim <- function(dims) if (length(dims)) dims[[1L]] else NULL
+ivt_f2_geo_dim <- function(dims, gd = 1L)
+  if (length(dims) >= gd) dims[[gd]] else NULL
 
 # Geography member count, from the descriptor's geography record. Reliable for any
 # dimensionality; the fixed-offset u16 `ivt_f2_header_geo_count()` is only correct
@@ -1649,40 +1671,43 @@ ivt_f2_geo_dim <- function(dims) if (length(dims)) dims[[1L]] else NULL
 # parsed.
 ivt_f2_geo_count <- function(raw) {
   d <- ivt_f2_descriptor(raw)
-  geo <- ivt_f2_geo_dim(if (is.null(d)) NULL else d$dims)
+  geo <- if (is.null(d)) NULL
+         else ivt_f2_geo_dim(d$dims, ivt_f2_geo_dim_index(raw, d))
   if (is.null(geo)) return(ivt_f2_header_geo_count(raw))
   as.integer(geo$count)
 }
 
 # The non-geography data dimensions, in descriptor (outer -> inner) order: their
 # member `counts` (which drive the presence-bitmap nesting and the dense value
-# order) and a short column `slug` for each. Geography is the first dimension
-# (`ivt_f2_geo_dim()`, identified positionally), so the data dimensions are simply
-# the rest. Slugs are a purely structural convenience: each is the lower-cased
-# leading word of the dimension's metadata name (e.g. "Marital status" ->
-# "marital"), falling back to "dim<i>", made unique. No code branches on a
-# dimension's name or descriptor type byte -- dimensions are interchangeable and
-# everything the decoder needs (geography position, member counts, value layout)
-# is derived structurally. The human-readable labels come from the codebook at
-# `tidy` time. Returns empty vectors when no descriptor / no data dimensions.
+# order) and a short column `slug` for each. Geography is dimension
+# `ivt_f2_geo_dim_index()` (dimension 1 outside the profile lineage), so the data
+# dimensions are simply the rest. Slugs are a purely structural convenience: each
+# is the lower-cased leading word of the dimension's metadata name (e.g.
+# "Marital status" -> "marital"), falling back to "dim<i>", made unique. No code
+# branches on a dimension's name or descriptor type byte -- dimensions are
+# interchangeable and everything the decoder needs (geography position, member
+# counts, value layout) is derived structurally. The human-readable labels come
+# from the codebook at `tidy` time. Returns empty vectors when no descriptor /
+# no data dimensions.
 ivt_f2_data_dims <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || length(d$dims) < 2L) return(list(counts = integer(0), slugs = character(0)))
-  data <- d$dims[-1L]
+  gd <- ivt_f2_geo_dim_index(raw, d)
+  idx <- setdiff(seq_along(d$dims), gd)
+  data <- d$dims[idx]
   if (!length(data)) return(list(counts = integer(0), slugs = character(0)))
   counts <- vapply(data, `[[`, 1L, "count")
-  slugs <- vapply(seq_along(data), function(i) ivt_dim_slug(data[[i]]$name, i + 1L), "")
+  slugs <- vapply(seq_along(data), function(i) ivt_dim_slug(data[[i]]$name, idx[i]), "")
   if (anyDuplicated(slugs)) slugs <- make.unique(slugs, sep = "")
   list(counts = as.integer(counts), slugs = slugs)
 }
 
-# Generic, name-agnostic column slug for a dimension at 1-based descriptor position
-# `i`: dimension 1 is geography (the structural outermost dimension) -> "geo"; any
-# other dimension takes the lower-cased leading alphabetic word of its metadata
-# name, or "dim<i>" when that is not a clean word. This is presentation only -- no
-# decoder logic depends on the result.
+# Generic, name-agnostic column slug for a data dimension at 1-based descriptor
+# position `i` (the geography dimension's "geo" slug is assigned by the caller,
+# which knows which dimension that is): the lower-cased leading alphabetic word
+# of its metadata name, or "dim<i>" when that is not a clean word. This is
+# presentation only -- no decoder logic depends on the result.
 ivt_dim_slug <- function(name, i) {
-  if (i == 1L) return("geo")
   w <- tolower(sub("^[^A-Za-z]*([A-Za-z]+).*$", "\\1", name))
   if (!nzchar(w) || !grepl("^[a-z]+$", w)) paste0("dim", i) else w
 }

@@ -326,6 +326,40 @@ the StatCan metadata `Note` text exactly. Footnotes are returned in file order
 within each language (`number` = that position), since the IVT order differs from
 the metadata Note IDs (footnotes are stored next to their dimensions).
 
+**A second framing coexists across vintages**: `FOOTNOTE:<text>` /
+`RENVOI :<text>` — all-caps, colon-terminated, **no number**. It is the 1981
+profile's only footnote form, and it turns out to also carry real notes on the
+1996/2006/2011/2016 tables that the numbered scan had silently missed (e.g.
+98-400-X2016328's four commuting notes, the 2006 DA table's total-income
+definition, twelve immigrant-status notes on 95F0223XDB96001).
+`ivt_footnote_texts()` accepts both markers (case-sensitively, so the two
+shapes cannot cross-match); numbering remains the caller's job.
+
+### Chunked member-label blocks (data dimensions > 256 members)
+
+A data dimension with more than 256 members stores its label blocks **chunked
+exactly like the chunked geography codebook**: 256-member chunks in growing
+groups of `G` chunks (`ivt_f2_geo_group_sizes()`: 1, 1, 2, 4, …), each group
+laid down as its `G` English chunk blocks then its `G` French blocks, in slot-
+directory order after the dimension's doubled-name marker; a trailing partial
+chunk can be a **dense** `81 01` block (the strict parser handles both).
+`ivt_f2_dim_dir_label_chunks()` (dimdir.R) assembles the runs, consuming a
+candidate entry only when its record count equals the next expected chunk size
+(interleaved framing blocks are skipped structurally). First instance:
+98-400-X2016203's "Selected characteristics (825)" — groups 1/1/2, runs of
+256 + 256 + 256 + 57 per language, all 825 EN labels exact against the B2020
+viewer's row list.
+
+### Identity via the master directory
+
+The modern tables carry an inline `Product ID: … Title: …` text and the legacy
+exports out-of-line title blocks at header `@40`/`@48`. The 1981 profile has
+**neither** (both pointers zero) but stores the same `01 01 <u16 len>`-framed
+`"<product_id>\r\n<title>"` blobs as **master-directory entries** (EN and FR).
+`ivt_f2_master_identity()` (read-f2.R) reads them when both other sources come
+up empty — this also fills the previously-NA identity on the 1996 and 2016
+`98-400-X` tables.
+
 ## Validation
 
 `tests/testthat/test-decode.R` checks (against the StatCan CSV/known values):
@@ -424,6 +458,51 @@ Decoded exact for both tables: counts `63404/128/3` (98-10-0023) and
 file its **census year**). Names are the truncated display form; full names come
 from the Variable List (2021) or the codebook. `ivt_f2_descriptor()` returns
 `n_dim`, per-dimension `name`/`count`/`type`, and `title`.
+
+Two refinements (2026-07, the profile-lineage / 2016203 unlock):
+
+- **Count width is tagged by the type byte**: `0x10`, `0x0d`, `0x0a` and `0x0c`
+  carry a **u16** count, everything else a u8. The last two were found on the
+  profile lineage (98F0172X's Profile(529) `11 02 0a 01`, Geography(4063)
+  `df 0f 0c 01`) — and reading `0x0a` as u8 was exactly what had broken
+  98-400-X2016203: its "Selected characteristics" dimension is **825** members
+  (`0x0339`); the u8 read took the low byte (57), mis-nested the whole layout,
+  and made its `b2 == 0` pages look non-exact-fit. With the true count the
+  file is an ordinary supported container (viewer-validated cell-exact).
+- **Double-01 records are ambiguous and get reconciled against the codebook**
+  (`ivt_f2_dim_count_reconcile()`, dimdir.R). The reference-period record is
+  `[type][count][01][01]<name>` ("Year (2)": `0e 02 01 01`), but the profile
+  lineage's 1-member "Values" placeholder shares the byte shape
+  (`00 20 01 01 ValuesValues`) while its count is NOT at that position — the
+  naive read produced 32. For every double-01-framed record, the dimension's
+  own slot-directory member block decides: the descriptor count can never
+  exceed the block's stored slot count (slots only pad upward to the next
+  power of two), so a larger count is replaced by the block's real (last
+  non-empty) member count. Counts the codebook cannot contradict are left
+  untouched — every previously validated table is byte-identical through this.
+
+#### The geography dimension is not always dimension 1 (`ivt_f2_geo_dim_index()`)
+
+Geography is the FIRST descriptor dimension in every layout **except the
+profile-table lineage** (97-570-X1981004, 98F0172X, 95F0170X), which stores a
+1-member "Values" placeholder first and **geography LAST**:
+`Values(1) × Profile(79) × Geography(5989)` on the 1981 profile. The
+identification stays metadata-driven (`ivt_f2_geo_dim_index()`, dimdir.R):
+dimension 1 is accepted outright unless its count is 1 (a real geography can
+never be a 1-member dimension alongside others); then each dimension's slot
+directory is probed for a **geography codebook signature** — the geography
+attribute schema (a dictionary block naming `GEO_NAME`, modern DGUID tables) or
+inline combined-format member blocks (`"<name> (<code>) <flag>"`,
+`IVT_F2_INLINE_PAT`) — and the matching dimension takes the geography role
+(slug/labels/codebook anchoring). Nothing else changes: the cell decode is
+dimension-agnostic, and "geography-last" needs **no new nesting** — with the
+reconciled counts the ordinary unified layout describes the 1981 profile
+exactly (geography straddles the presence record, 3 windows of 2048 bits;
+Profile directory-paged at stride 4; Values(1) the trivial outermost entry
+dimension; the directory's period-4 valid/invalid entry pattern is the
+pow-2-padded window count). Viewer-validated: all 5,989 geography members in
+order, 1,264/1,264 sampled cells exact (incl. the 2048/2049 and 4096/4097
+window boundaries and member 5,989), absent cells render 0.
 
 #### Metadata-driven geography parser (`ivt_f2_geographies()`)
 

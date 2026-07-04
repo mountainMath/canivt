@@ -38,14 +38,19 @@ IVT_HDR_DIM_STRIDE <- 14L   # 14-byte slot records
 
 # The per-dimension slot records, one per descriptor dimension. Returns a list of
 # list(dim, slot, ptr, n_entries), or NULL when there is no descriptor / the
-# header is too short.
-ivt_f2_dim_slots <- function(raw) {
-  d <- ivt_f2_descriptor(raw)
-  # the 32-dim cap mirrors ivt_f2_decodable(): unsupported container variants
-  # misread the descriptor as hundreds of dimensions. Judge by the recovered
-  # dimension records, not the header count field (unreliable on some vintages,
-  # e.g. 95F0200XDB96003 reads 1026 with 4 clean dimensions).
-  m <- if (is.null(d)) 0L else length(d$dims)
+# header is too short. `m` (the dimension count) can be passed by callers that
+# already hold the descriptor -- REQUIRED for the calls made from inside
+# `ivt_f2_descriptor()` itself (the count reconciliation), which must not
+# re-enter the descriptor parse.
+ivt_f2_dim_slots <- function(raw, m = NULL) {
+  if (is.null(m)) {
+    d <- ivt_f2_descriptor(raw)
+    # the 32-dim cap mirrors ivt_f2_decodable(): unsupported container variants
+    # misread the descriptor as hundreds of dimensions. Judge by the recovered
+    # dimension records, not the header count field (unreliable on some vintages,
+    # e.g. 95F0200XDB96003 reads 1026 with 4 clean dimensions).
+    m <- if (is.null(d)) 0L else length(d$dims)
+  }
   if (m < 1L || m > 32L) return(NULL)
   n <- length(raw)
   out <- vector("list", m)
@@ -134,20 +139,30 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   nm <- dim$name
   if (is.null(nm) || is.na(nm) || !nzchar(nm)) return(NULL)
   # locate the doubled-name marker entry (81 02 02 00 + this dimension's name)
-  mk <- 0L
-  for (r in seq_len(nrow(dir))) {
-    len <- dir[r, "len"]
-    if (len < 12L || len > 4000L) next
-    win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
-    m <- ivt_f2_codebook_dim_markers(win, 0L)
-    hit <- which(vapply(m$name, function(x) {
-      if (is.na(x)) return(FALSE)
-      j <- min(nchar(x), nchar(nm))
-      j >= 4L && substr(x, 1L, j) == substr(nm, 1L, j)
-    }, logical(1)))
-    if (length(hit)) { mk <- r; break }
-  }
+  mk <- ivt_f2_dir_marker_entry(raw, nm, dir)
   if (mk == 0L || mk >= nrow(dir)) return(NULL)
+  # a data dimension with more than 256 members stores its label blocks CHUNKED,
+  # exactly like the chunked geography codebook (98-400-X2016203's 825-member
+  # "Selected characteristics": 256-member chunks in growing groups, per group
+  # the EN chunk run then the FR chunk run, the trailing partial chunk as a
+  # dense block) -- the single-block read below cannot assemble those.
+  if (cnt > 256L) {
+    ck <- ivt_f2_dim_dir_label_chunks(raw, cnt, dir, mk)
+    if (!is.null(ck)) {
+      en_first <- ivt_f2_dim_dict_en_first(raw, dir)
+      if (is.na(en_first)) {
+        diff <- which(ck[[1L]] != ck[[2L]])
+        en_first <- ivt_f2_frscore(ck[[1L]][diff]) <= ivt_f2_frscore(ck[[2L]][diff])
+        ivt_fallback(paste(
+          "Dimension {.val {nm}} carries no English Desc/Desc Fran schema block;",
+          "its English vs French label blocks were told apart by content score,",
+          "not the schema order."))
+      }
+      en <- if (en_first) ck[[1L]] else ck[[2L]]
+      fr <- if (en_first) ck[[2L]] else ck[[1L]]
+      return(list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr)))
+    }
+  }
   # the EN/FR member blocks are the first two member-array entries after it
   cand <- list()
   for (r in (mk + 1L):nrow(dir)) {
@@ -182,6 +197,196 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   en <- if (en_first) cand[[1L]] else cand[[2L]]
   fr <- if (en_first) cand[[2L]] else cand[[1L]]
   list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr))
+}
+
+# Index of the directory entry holding a dimension's doubled-name marker block
+# (`81 02 02 00` + the dimension's name; prefix-matched because the descriptor's
+# first name copy may be truncated). 0 when no entry matches -- the caller then
+# treats the directory as not resolving this dimension.
+ivt_f2_dir_marker_entry <- function(raw, nm, dir) {
+  for (r in seq_len(nrow(dir))) {
+    len <- dir[r, "len"]
+    if (len < 12L || len > 4000L) next
+    win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
+    m <- ivt_f2_codebook_dim_markers(win, 0L)
+    hit <- which(vapply(m$name, function(x) {
+      if (is.na(x)) return(FALSE)
+      j <- min(nchar(x), nchar(nm))
+      j >= 4L && substr(x, 1L, j) == substr(nm, 1L, j)
+    }, logical(1)))
+    if (length(hit)) return(r)
+  }
+  0L
+}
+
+# The stored member-slot count and real (non-empty) member count of one
+# dimension, read from its slot directory: the first member-array entry
+# (`[01 01][u16 payload][u16 n_slots]`) after the dimension's doubled-name
+# marker, strict-parsed (`ivt_f2_dir_entry_members()`). `slots` is the block's
+# slot count (power-of-two padded at the tail, padding slots are explicit empty
+# records -> NA), `count` the last non-empty slot. Used by the descriptor's
+# count reconciliation: a descriptor count can never exceed `slots`, so a
+# larger one was misread from framing bytes. list(slots, count), NA when the
+# directory stores no such block.
+ivt_f2_dir_member_count <- function(raw, nm, dir) {
+  none <- list(slots = NA_integer_, count = NA_integer_)
+  if (is.null(nm) || is.na(nm) || !nzchar(nm)) return(none)
+  mk <- ivt_f2_dir_marker_entry(raw, nm, dir)
+  if (mk == 0L || mk >= nrow(dir)) return(none)
+  for (r in (mk + 1L):nrow(dir)) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + len > length(raw)) next
+    if (as.integer(raw[off + 1L]) != 0x01L || as.integer(raw[off + 2L]) != 0x01L)
+      next
+    mem <- tryCatch(ivt_f2_dir_entry_members(raw, off, len),
+                    error = function(e) NULL)
+    v <- mem$values
+    if (is.null(v) || !length(v)) next
+    real <- if (all(is.na(v))) 0L else max(which(!is.na(v)))
+    return(list(slots = length(v), count = real))
+  }
+  none
+}
+
+# Reconcile descriptor dimension counts against the codebook (called from
+# `ivt_f2_descriptor()`). Only the double-01-framed records are reconciled:
+# their byte shape is shared between the reference-period record
+# [type][count][01][01] ("Year (2)": 0e 02 01 01) and the profile lineage's
+# 1-member "Values" placeholder (00 20 01 01), whose count is NOT stored at
+# that position -- reading 32 there made 97-570-X1981004's layout mis-nest.
+# The dimension's own slot-directory member block decides: when the descriptor
+# count exceeds the block's stored slot count (impossible -- slots only pad
+# upward), the real member count replaces it. Dimensions whose directory does
+# not resolve, and counts the codebook cannot contradict, are left untouched,
+# so every validated table is byte-identical through this.
+ivt_f2_dim_count_reconcile <- function(raw, dims) {
+  amb <- which(vapply(dims, function(d) isTRUE(d$double01), logical(1)))
+  if (!length(amb)) return(dims)
+  slots <- ivt_f2_dim_slots(raw, m = length(dims))
+  if (is.null(slots)) return(dims)
+  for (k in amb) {
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (is.null(dir)) next
+    mc <- ivt_f2_dir_member_count(raw, dims[[k]]$name, dir)
+    if (is.na(mc$slots) || mc$slots < 1L) next
+    if (dims[[k]]$count <= mc$slots) next        # codebook cannot contradict it
+    if (!is.na(mc$count) && mc$count >= 1L) dims[[k]]$count <- mc$count
+  }
+  dims
+}
+
+# Which descriptor dimension is geography? Dimension 1 in every layout except
+# the profile-table lineage (97-570-X1981004 / 98F0172X / 95F0170X), which
+# stores a 1-member "Values" placeholder first and geography LAST. The
+# identification stays metadata-driven: a real geography can never have a
+# single member alongside other dimensions, so dimension 1 is accepted outright
+# unless its count is 1 -- then each dimension's slot directory is probed for a
+# geography codebook signature (`ivt_f2_dir_is_geo()`): the geography attribute
+# schema (a dictionary block naming GEO_NAME, modern DGUID tables) or inline
+# combined-format member blocks ("<name> (<code>) <flag>", the pre-DGUID
+# codebook). Falls back to dimension 1 (the positional rule) when nothing
+# resolves. No decoder logic branches on this beyond which dimension gets the
+# geography role (slug/labels/codebook); the cell decode itself is
+# dimension-agnostic.
+ivt_f2_geo_dim_index <- function(raw, d = NULL) {
+  if (is.null(d)) d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || !length(d$dims)) return(1L)
+  cnt1 <- suppressWarnings(as.integer(d$dims[[1L]]$count))
+  if (is.na(cnt1) || cnt1 > 1L || length(d$dims) == 1L) return(1L)
+  slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
+  if (is.null(slots)) return(1L)
+  for (k in seq_along(d$dims)) {
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (!is.null(dir) && ivt_f2_dir_is_geo(raw, dir)) return(k)
+  }
+  1L
+}
+
+# Does this dimension slot directory hold a GEOGRAPHY codebook? TRUE when it
+# lists (a) a dictionary/schema block naming the GEO_NAME attribute (the modern
+# DGUID layout's geography attribute schema -- data-dimension dictionaries name
+# Code / English Desc / Desc Francais instead), or (b) a member array whose
+# records parse as the inline combined geography format ("<name> (<code>)
+# [<type>] <flag>", IVT_F2_INLINE_PAT). Only the first few member arrays are
+# strict-parsed; name/code sibling arrays that do not match the pattern are
+# skipped, not disqualifying.
+ivt_f2_dir_is_geo <- function(raw, dir, max_member_entries = 6L) {
+  n <- length(raw); tried <- 0L
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off < 0 || off + len > n) next
+    b0 <- as.integer(raw[off + 1L]); b1 <- as.integer(raw[off + 2L])
+    if (b0 == 0x81L && b1 == 0x02L && len <= 4000L) {
+      txt <- raw_to_latin1(raw[(off + 1L):(off + len)])
+      if (grepl("GEO_NAME", txt, fixed = TRUE)) return(TRUE)
+    } else if (b0 == 0x01L && b1 == 0x01L && len >= 24L &&
+               tried < max_member_entries) {
+      tried <- tried + 1L
+      mem <- tryCatch(ivt_f2_dir_entry_members(raw, off, len),
+                      error = function(e) NULL)
+      v <- mem$values
+      v <- if (is.null(v)) character(0) else trimws(v[!is.na(v)])
+      v <- v[nzchar(v)]
+      if (length(v) >= 3L) {
+        probe <- utils::head(v, 32L)
+        if (sum(grepl(IVT_F2_INLINE_PAT, probe)) >= max(3L, 0.6 * length(probe)))
+          return(TRUE)
+      }
+    }
+  }
+  FALSE
+}
+
+# Assemble a >256-member data dimension's two label runs from its slot
+# directory: chunks of 256 members (last partial) in growing groups of G chunks
+# (`ivt_f2_geo_group_sizes()`, the same 1, 1, 2, 4, ... sequence the chunked
+# geography codebook uses), each group storing its G language-A chunk blocks
+# then its G language-B blocks, in directory order after the doubled-name
+# marker entry. Blocks are strict-parsed (`ivt_f2_dir_entry_members()`; the
+# trailing partial chunk is a dense `81 01` block, which the parser also
+# handles); a candidate entry is consumed only when its record count equals
+# the next expected chunk size, so interleaved framing blocks are skipped
+# structurally. Returns list(a, b) (the two runs in storage order; language
+# assignment is the caller's job) or NULL when the chunk walk does not close.
+# Validated on 98-400-X2016203's "Selected characteristics (825)": 3 groups
+# (1, 1, 2 chunks), EN/FR runs of 256 + 256 + 256 + 57, every label exact
+# against the B2020 viewer's row list.
+ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
+  sizes <- ivt_f2_geo_group_sizes(cnt)
+  chunk_len <- function(k) min(256L, cnt - 256L * (k - 1L))
+  vals <- list()
+  for (r in (mk + 1L):nrow(dir)) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 12L || off + len > length(raw)) next
+    b0 <- as.integer(raw[off + 1L]); b1 <- as.integer(raw[off + 2L])
+    if (!(b1 == 0x01L && (b0 == 0x01L || b0 == 0x81L))) next
+    mem <- tryCatch(ivt_f2_dir_entry_members(raw, off, len),
+                    error = function(e) NULL)
+    if (is.null(mem$values) || !length(mem$values)) next
+    vals[[length(vals) + 1L]] <- mem$values
+  }
+  a <- character(0); b <- character(0)
+  ei <- 1L; k <- 0L
+  take_run <- function(need) {
+    # consume the next blocks whose record counts match `need` (in order),
+    # skipping non-matching framing entries between runs
+    run <- character(0)
+    for (want in need) {
+      while (ei <= length(vals) && length(vals[[ei]]) != want) ei <<- ei + 1L
+      if (ei > length(vals)) return(NULL)
+      run <- c(run, vals[[ei]]); ei <<- ei + 1L
+    }
+    run
+  }
+  for (G in sizes) {
+    need <- vapply(k + seq_len(G), chunk_len, 1L)
+    ra <- take_run(need); if (is.null(ra)) return(NULL)
+    rb <- take_run(need); if (is.null(rb)) return(NULL)
+    a <- c(a, ra); b <- c(b, rb)
+    k <- k + G
+  }
+  if (length(a) != cnt || length(b) != cnt) return(NULL)
+  list(a, b)
 }
 
 # The member-ordinal block for one data dimension, read positionally from its
@@ -228,8 +433,9 @@ ivt_f2_dim_dir_ordinals <- function(raw) {
   if (is.null(d) || length(d$dims) < 2L) return(NULL)
   slots <- ivt_f2_dim_slots(raw)
   if (is.null(slots)) return(NULL)
+  gd <- ivt_f2_geo_dim_index(raw, d)
   out <- vector("list", length(d$dims))
-  for (k in 2:length(d$dims)) {
+  for (k in setdiff(seq_along(d$dims), gd)) {
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) next
     out[[k]] <- ivt_f2_dim_dir_ordinal1(raw, d$dims[[k]], dir)
@@ -247,8 +453,9 @@ ivt_f2_dim_dir_labels <- function(raw) {
   if (is.null(d) || length(d$dims) < 2L) return(NULL)
   slots <- ivt_f2_dim_slots(raw)
   if (is.null(slots)) return(NULL)
+  gd <- ivt_f2_geo_dim_index(raw, d)
   out <- vector("list", length(d$dims))
-  for (k in 2:length(d$dims)) {
+  for (k in setdiff(seq_along(d$dims), gd)) {
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) next
     out[[k]] <- ivt_f2_dim_dir_label1(raw, d$dims[[k]], dir)
@@ -261,9 +468,9 @@ ivt_f2_dim_dir_labels <- function(raw) {
 # ids, ordinals, marker, label/attribute blocks, footnotes). Used to bound the
 # content scans (`ivt_f2_geo_marker_region()`, and through it the DGUID byte scan)
 # by the file's own metadata instead of a marker-to-marker window. Returns
-# c(start, end) or NULL when dimension 1's directory does not resolve.
+# c(start, end) or NULL when the geography dimension's directory does not resolve.
 ivt_f2_geo_dir_span <- function(raw) {
-  d <- ivt_f2_dim_dir(raw, 1L)
+  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
   if (is.null(d)) return(NULL)
   c(min(d[, "off"]), min(length(raw), max(d[, "off"] + d[, "len"])))
 }
@@ -381,9 +588,12 @@ ivt_f2_dir_footnotes <- function(raw, dim_names = NULL) {
       if (len < 24L) next                          # too short to frame a footnote
       win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
       # cheap byte prefilter: the text-run isolation is too slow to run over every
-      # entry of a 6,000-block geography directory.
+      # entry of a 6,000-block geography directory. Both footnote framings: the
+      # modern "Footnote N"/"Renvoi N" and the 1981 profile "FOOTNOTE:"/"RENVOI :".
       if (!length(grepRaw("Footnote", win, fixed = TRUE)) &&
-          !length(grepRaw("Renvoi", win, fixed = TRUE))) next
+          !length(grepRaw("Renvoi", win, fixed = TRUE)) &&
+          !length(grepRaw("FOOTNOTE", win, fixed = TRUE)) &&
+          !length(grepRaw("RENVOI", win, fixed = TRUE))) next
       fns <- ivt_footnote_texts(raw, dir[r, "off"], dir[r, "off"] + len)
       for (f in fns) {
         counts[f$language] <- counts[f$language] + 1L

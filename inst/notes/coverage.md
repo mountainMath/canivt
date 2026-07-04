@@ -32,7 +32,13 @@ exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate. (Covers every StatCan geo attribute key 3,4,5,9,10,12-17.)
 - [x] Dimension member labels (Age/Gender/Sex), counts, type markers.
-- [x] Footnote text (modern framed `Footnote N`/`Renvoi N`; legacy `(N) text`).
+- [x] Footnote text (modern framed `Footnote N`/`Renvoi N`; legacy `(N) text`;
+  the numberless all-caps `FOOTNOTE:`/`RENVOI :` framing, 1981–2016 — its
+  addition surfaced real notes the numbered scan had missed on the
+  1996/2006/2011/2016 tables). Identity falls back to the master-directory
+  blobs (`ivt_f2_master_identity()`) when the inline text and the `@40`/`@48`
+  title blocks are both absent — this filled the previously-NA product
+  id/titles on the 1996 and 2016 `98-400-X` tables too.
 - [x] Header layout pointers (`ivt_f2_header_layout()`); format/version indicator.
 
 ## [~] Read but not surfaced (recoverable, just not exposed)
@@ -124,6 +130,20 @@ geographies** an exact match vs the StatCan CSV; the 3-dim tables (98-10-0023,
   modern family-2 files (count u16) but `0x08` in the family-1 reference tables
   (count u8). The old `type == 0x10` filter silently misread 98-10-0241's geography
   count as 16383.
+- [x] **… except on the profile lineage, where geography is the LAST descriptor
+  dimension** (97-570-X1981004: `Values(1) × Profile(79) × Geography(5989)`).
+  `ivt_f2_geo_dim_index()` (dimdir.R) keeps dimension 1 as the fast-path
+  default and probes the dimension slot directories for a geography codebook
+  signature (GEO_NAME schema field / inline combined-format member blocks)
+  only when dimension 1 has a single member — a real geography can never be a
+  1-member dimension alongside others. Two companion descriptor fixes
+  (2026-07-04): the **u16 count width tags now include types `0x0a`/`0x0c`**
+  (98F0172X's Profile(529)/Geography(4063); the u8 read of `0x0a` is what
+  broke 98-400-X2016203 — 825 read as 57), and **double-01-framed record
+  counts are reconciled against the dimension's slot-directory member block**
+  (`ivt_f2_dim_count_reconcile()`: the profile "Values" placeholder shares the
+  facet record's byte shape but stores no count there — 1 member, not 32).
+  All previously supported tables byte-identical through both changes.
 
 ## [x] Descriptor markers generalised across family-1 tables (DONE)
 
@@ -478,17 +498,38 @@ corpus table:
 - **97F0020XCB2001070** (2001 F-series): layout resolves and its pages fit
   their directory sizes exactly, but they carry 1124 presence bits against a
   448-real-cell capacity — the data is nested differently. Capacity rule.
-- **97-570-X1981004** (1981 profile): parses into a geography-first layout
-  whose directory covers only outer member 1 of 32 — the data is nested
-  geography-LAST (the profile-table variant). Span rule.
-- **98-400-X2016203**: non-exact `b2 == 0` pages (exactness holds on every
-  validated table) plus **369 undecoded `a2 01 03 0a` pages** (`b3 = 0x0a`;
-  int16 values all `-1`, presumably suppression sentinels). A direct
-  `ivt_decode()` still runs with a loud `canivt_skipped_pages` warning, but the
-  file is unsupported: its cells were never ground-truthed and its metadata
-  needs two heuristic fallbacks. To revisit: validate a `0x0a` page against a
-  B2020 viewer slice. Note 2016203 is the odd one out, not the 2016 norm: the
-  large crosstabs 98-400-X2016328 (5-dim, 4,868 geos), 98-400-X2016261
+- ~~**97-570-X1981004** (1981 profile)~~ — **SUPPORTED as of 2026-07-04.** The
+  span-rule rejection was a symptom of a misread descriptor, not a new
+  nesting: the "Values" placeholder's count read 32 instead of 1 (the
+  double-01 framing ambiguity), which made the layout expect 32 outer entry
+  members. With the reconciled counts (`Values(1) × Profile(79) ×
+  Geography(5989)`, geography the LAST descriptor dimension via
+  `ivt_f2_geo_dim_index()`) the ordinary unified layout fits exactly:
+  geography straddles (3 windows of 2048 presence bits), Profile pages the
+  directory at stride 4, and the observed period-4 valid-entry pattern is the
+  pow-2-padded window count. Viewer-validated: 5,989/5,989 geography members
+  in order; 1,264/1,264 sampled cells exact over 16 geographies (incl. the
+  2048/2049 and 4096/4097 window boundaries and member 5,989); 217
+  absent-as-zero. Identity via the master directory
+  (`ivt_f2_master_identity()`; the `@40`/`@48` pointers are zero), 10
+  footnotes under the `FOOTNOTE:`/`RENVOI :` framing, inline geography
+  names + GEOUIDs positional. Strict-mode clean.
+- ~~**98-400-X2016203**~~ — **SUPPORTED as of 2026-07-04.** Both anomalies were
+  one bug: descriptor type `0x0a` carries a **u16** count, and the u8 read had
+  taken the low byte of "Selected characteristics (825)" (= 57), mis-nesting
+  the whole layout — the "non-exact `b2 == 0` pages" were an artifact of the
+  wrong presence geometry (the `a2 01 03 0a` pages had already been explained
+  by the b3 head rule). With the true count every page fits, the pre-flight
+  passes, and the decode (49.6M cells, ~23 s) is **viewer-validated
+  cell-exact**: 39,516/39,516 on multi-fixed slices over Canada/Montréal/
+  Toronto/Victoria (incl. the last member of every fixed dimension) plus
+  ~25k more single-fixed cells over 9 further geographies, absent-as-zero
+  confirmed throughout; all 825 chunked EN/FR member labels exact vs the
+  viewer row list (`ivt_f2_dim_dir_label_chunks()`); 51 geographies named.
+  NOTE the viewer's d0 dropdown re-sorts geographies (provinces first, CMAs
+  after) on this table — join ground truth by NAME, not option position.
+  Strict-mode clean. The 2016 vintage is now fully supported in the corpus:
+  the large crosstabs 98-400-X2016328 (5-dim, 4,868 geos), 98-400-X2016261
   (6-dim, 86.8 MB, 14.4M cells) and the income table 98-400-X2016120
   (all-float64 pages) are ordinary supported-container tables — every geometry
   invariant clean, cells viewer-exact (360/360, 154/154 and 510/510 on leading
@@ -595,12 +636,14 @@ Files in the test corpus that are currently unsupported:
   when the first hits the ~15-byte cap, which also completes the
   1996/2011/2016 descriptor names); geography (already viewer-validated)
   names + uids flow through the standard inline reader.
-- [ ] **1981 census** (`97-570-X1981002` profile, descriptor undecoded;
-  `97-570-X1981004` parses — Values(32) × Profile(79) × Geography(5989),
-  geography stored LAST — but its directory covers only the first outer member
-  under the geography-first layout, so the pre-flight **span rule** rejects it;
-  decoding this lineage means supporting geography-last nesting, i.e. the
-  profile-table variant).
+- [x] **1981 profile `97-570-X1981004` — SUPPORTED** (2026-07-04; see the
+  Rejected-variants section above for the full story: descriptor count
+  reconciliation + `ivt_f2_geo_dim_index()`, no new nesting needed).
+- [ ] **1981 census `97-570-X1981002`** (CMA/CA profile, Part A): descriptor
+  still undecoded (`n_dim` garbage, out-of-line title-first block layout —
+  its `@32` points at a title block, with small pointer tables after it).
+  Note its sibling 1981004 turned out to be an ordinary supported container,
+  so this vintage is *not* inherently alien — the header indirection differs.
 - [ ] **Custom CT / "cro"/"ord" extracts** (`cro0172986_ct.*-2006-*`,
   `ord-08035-…_ct.1-2021-population`): Beyond 20/20 desktop exports (not StatCan
   table downloads); single-page-ish directories, descriptor undecoded.
@@ -611,13 +654,17 @@ locations, per-file blockers) is captured in
 [`unsupported-formats.md`](unsupported-formats.md). Summary: near-family-2
 crosstabs (`ord-08035` — its page body turned out NOT to be the 98-10-0023
 container and needs re-RE'ing; `97F0020X` — container located, presence nesting
-differs), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`,
-plus the geography-last `97-570-X1981004`; hybrid page set decoded, the
-non-rectangular page→grid mapping is the open item), and older layouts whose
-container is not yet located (`97F0015X`, 1981 `97-570-X1981002`). (The 2006
-crosstab `97-563-XCB2006072`, formerly the top open container hunt, is now
-SUPPORTED — the b3 head-block rule.) The most tractable targets: the profile
-grid mapping, and a 98-400-X2016203 revisit under the b3 rule.
+differs), profile tables with a `"Values"` dimension (`98F0172X`, `95F0170X`;
+hybrid page set decoded, the non-rectangular page→grid mapping is the open
+item), and older layouts whose container is not yet located (`97F0015X`, 1981
+`97-570-X1981002`). (`97-563-XCB2006072`, `97-570-X1981004` and
+`98-400-X2016203` — formerly the top open items — are now all SUPPORTED: the
+b3 head-block rule, the descriptor count reconciliation + geography-dimension
+index, and the `0x0a` u16 width tag respectively.) The most tractable
+remaining target: the 98F0172X/95F0170X profile grid mapping — note their
+descriptors now parse correctly (`Values(1) × Profile(529) × Geography`,
+u16 counts), so the open item is only the hybrid dense/sparse page set and
+the page→grid assignment.
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
@@ -724,10 +771,14 @@ tables 94F0009XDB96078 / 95F0250XDB96001 / 95F0223XDB96001 /
 95F0200XDB96003 (13 → 43,234 geographies, all B2020-viewer-validated), the tiny
 one-page 98-10-0044 (the trivial geography-straddle, StatCan-CSV-exact),
 98-10-0013 (whose cell decode had been silently empty; now CSV-exact — the
-source of the b2 trailer formula and the `@558` pointer unwrap) and, as of
-2026-07-03, the **2006 DA crosstab 97-563-XCB2006072** (the b3 head-block rule
-+ suppression tails; viewer-validated cell-exact). Remaining open items: the
-**profile-table lineage** (98F0172X, 95F0170X, 1981 `97-570-X`:
-geography-last / `Values`-dimension layout), the other 2001 "F"-series
-products, and a **98-400-X2016203 revisit** under the b3 rule; see the section
-above.
+source of the b2 trailer formula and the `@558` pointer unwrap), the **2006 DA
+crosstab 97-563-XCB2006072** (2026-07-03: the b3 head-block rule + suppression
+tails; viewer-validated cell-exact) and, as of 2026-07-04, the **1981 profile
+97-570-X1981004** (geography stored LAST, resolved by descriptor count
+reconciliation + `ivt_f2_geo_dim_index()` — the "geography-last" nesting turned
+out to be the ordinary layout with a 1-member outermost placeholder) and
+**98-400-X2016203** (the `0x0a` u16 count width tag: 825 Selected
+characteristics, chunked EN/FR labels; viewer-validated cell-exact). Remaining
+open items: the **1991 profile grid mapping** (98F0172X, 95F0170X — hybrid
+dense/sparse pages, non-rectangular page→grid assignment) and the other 2001
+"F"-series products; see the section above.

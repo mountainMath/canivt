@@ -111,14 +111,27 @@ ivt_footnote_texts <- function(raw, from, to = length(raw)) {
   starts <- ends - r$lengths + 1L
   marker <- "^[[:space:]]*(Footnote|Renvoi)[[:space:]]*([0-9]+)[[:space:]]*"
   langs <- c(Footnote = "en", Renvoi = "fr")
+  # the 1981 profile vintage frames its footnotes "FOOTNOTE:<text>" /
+  # "RENVOI :<text>" -- all-caps, colon-terminated, no number (numbering is the
+  # caller's job under both forms). Case-sensitive on purpose so the two shapes
+  # cannot cross-match.
+  marker2 <- "^[[:space:]]*(FOOTNOTE|RENVOI)[[:space:]]*:[[:space:]]*"
+  langs2 <- c(FOOTNOTE = "en", RENVOI = "fr")
   out <- list()
   for (i in which(r$values)) {
     if (r$lengths[i] < 12L) next  # too short to be a footnote
     s <- raw_to_latin1(raw[search_start + starts[i]:ends[i]])
+    use <- marker
     m <- regmatches(s, regexec(marker, s))[[1]]
-    if (length(m) < 3L) next
-    lang <- unname(langs[m[2]])
-    body <- trimws(gsub("\u00a0", " ", sub(marker, "", s)))
+    if (length(m) >= 3L) {
+      lang <- unname(langs[m[2]])
+    } else {
+      m <- regmatches(s, regexec(marker2, s))[[1]]
+      if (length(m) < 2L) next
+      use <- marker2
+      lang <- unname(langs2[m[2]])
+    }
+    body <- trimws(gsub("\u00a0", " ", sub(use, "", s)))
     body <- gsub("[[:space:]]+", " ", body)
     if (!nzchar(body)) next
     out[[length(out) + 1L]] <- list(language = lang, text = body)

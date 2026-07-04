@@ -21,15 +21,29 @@ ivt_corpus <- list(
   # records after it). Viewer-validated cell-exact.
   list(id = "97-563-XCB2006072", file = "97-563-XCB2006072.IVT", family = 2L,
        dims = c(57523L, 5L, 9L, 3L)),
+  # 2016203: unlocked by the u16 width tag on descriptor type 0x0a -- its
+  # "Selected characteristics" dimension is 825 members (the low byte alone
+  # read 57, which mis-nested the layout and made the b2 == 0 pages look
+  # non-exact-fit). Viewer-validated cell-exact incl. the chunked 825-member
+  # label read (256+256+256+57, dense trailing block).
+  list(id = "98-400-X2016203", file = "98-400-X2016203.IVT", family = 1L,
+       dims = c(51L, 47L, 11L, 7L, 825L, 3L)),
+  # 1981 profile: descriptor order Values(1) x Profile(79) x Geography(5989) --
+  # geography is the LAST descriptor dimension (ivt_f2_geo_dim_index resolves
+  # it from the codebook) and straddles the presence record (3 windows);
+  # "Values" is a 1-member placeholder whose count byte reads 32 unless
+  # reconciled against its member block. Viewer-validated cell-exact.
+  list(id = "97-570-X1981004", file = "97-570-X1981004.ivt", family = 2L,
+       dims = c(1L, 79L, 5989L)),
   # --- share the signature but are NOT a supported format ------------------
-  # 2016203 stays rejected under the extended b3 marker set: its a2 01 03 0a
-  # pages now pass the marker gate, but its non-exact b2 == 0, b3 == 08 pages
-  # still fail the pre-flight exact-fit rule.
-  list(id = "98-400-X2016203",   file = "98-400-X2016203.IVT",   family = NA),
   list(id = "95F0170X",          file = "95F0170X.IVT",          family = NA),
   list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA),
   list(id = "97F0020XCB2001070", file = "97F0020XCB2001070.IVT", family = NA),
   list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = NA),
+  # 98F0172X/95F0170X (1991 profiles): the descriptor now parses (Values(1) x
+  # Profile(529) x Geography, u16 counts under the 0x0a/0x0c width tags) but
+  # their page set is a dense/sparse HYBRID (0x0_ dense markers) the container
+  # does not accept -- still rejected structurally.
   list(id = "98F0172X",          file = "98F0172X.ivt",          family = NA),
   list(id = "cro0172986_ct7_2006", file = "cro0172986_ct.7-2006-population.ivt",       family = NA),
   list(id = "cro0172986_ct8_2006", file = "cro0172986_ct.8-2006_private-households.ivt", family = NA),

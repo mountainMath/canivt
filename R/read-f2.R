@@ -68,6 +68,7 @@ ivt_f2_dim_name <- function(dim, is_geo, vl) {
 ivt_f2_dimensions <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(list())
+  gd <- ivt_f2_geo_dim_index(raw, d)
   # primary: read each dimension's label pair positionally from its header slot
   # directory (dimdir.R) -- keyed by dimension INDEX, so same-name and same-count
   # dimensions cannot collide, and no tail-window scan is needed.
@@ -81,12 +82,11 @@ ivt_f2_dimensions <- function(raw) {
   # e.g. 98-10-0662's 6-member "French used at work" / "English used at work" --
   # get their own labels rather than collapsing onto one count key), then the
   # count-keyed block heuristics.
-  miss <- if (length(d$dims) > 1L)
-    which(vapply(2:length(d$dims), function(i)
-      is.null(dirlab) || length(dirlab) < i || is.null(dirlab[[i]]) ||
-        is.null(dirlab[[i]]$en),
-      logical(1))) + 1L
-  else integer(0)
+  data_idx <- setdiff(seq_along(d$dims), gd)
+  miss <- data_idx[vapply(data_idx, function(i)
+    is.null(dirlab) || length(dirlab) < i || is.null(dirlab[[i]]) ||
+      is.null(dirlab[[i]]$en),
+    logical(1))]
   labels <- list(); name_lut <- list()
   if (length(miss)) {
     miss_names <- vapply(d$dims[miss], `[[`, "", "name")
@@ -94,7 +94,7 @@ ivt_f2_dimensions <- function(raw) {
       "Member labels for {length(miss_names)} dimension{?s} ({.val {miss_names}})",
       "did not resolve from the header slot directories; falling back to the",
       "codebook marker / count-keyed label scans."))
-    want <- vapply(d$dims[-1L], `[[`, 1L, "count")
+    want <- vapply(d$dims[data_idx], `[[`, 1L, "count")
     labels <- ivt_f2_dim_member_labels(raw, want = want)      # count-keyed fallback
     by_name <- ivt_f2_marker_labels(raw)
     name_lut <- stats::setNames(lapply(by_name, `[[`, "labels"),
@@ -103,7 +103,7 @@ ivt_f2_dimensions <- function(raw) {
   vl <- ivt_f2_vl_pairs(raw)
   lapply(seq_along(d$dims), function(i) {
     dim <- d$dims[[i]]
-    is_geo <- i == 1L                       # geography is the first dimension
+    is_geo <- i == gd                       # the geography dimension (dimdir.R)
     dl <- if (!is.null(dirlab) && length(dirlab) >= i) dirlab[[i]] else NULL
     members <- if (is_geo) NULL else {
       m <- dl$en                            # slot-directory English labels (primary)
@@ -148,6 +148,41 @@ ivt_f2_legacy_identity <- function(raw) {
   }
   e <- split2(rd(IVT_HDR_TITLE_EN_PTR)); f <- split2(rd(IVT_HDR_TITLE_FR_PTR))
   list(product_id = e[1], title_en = e[2], title_fr = f[2], universe = NA_character_)
+}
+
+# Identity read from the MASTER directory (dimdir.R) when neither the inline
+# "Product ID:" text (modern tables) nor the out-of-line `@40`/`@48` title blocks
+# (legacy exports) exist: the 1981 profile vintage zeroes both header pointers
+# but stores the same `01 01 <u16 len>`-framed "<product_id>\r\n<title>" blobs
+# as master-directory entries (EN and FR -- entries 4 and 11 on
+# 97-570-X1981004). Candidates are the multi-line framed text entries whose
+# first line is short (the product id); EN vs FR by `ivt_f2_frscore()` on the
+# title line. Returns the `ivt_f2_legacy_identity()` shape, or NULL when the
+# master directory is absent or lists no identity blob.
+ivt_f2_master_identity <- function(raw) {
+  md <- ivt_f2_master_dir(raw)
+  if (is.null(md)) return(NULL)
+  cand <- list()
+  for (r in seq_len(nrow(md))) {
+    off <- md[r, "off"]; len <- md[r, "len"]
+    if (len < 12L || off + 4L > length(raw)) next
+    if (as.integer(raw[off + 1L]) != 0x01L ||
+        as.integer(raw[off + 2L]) != 0x01L) next
+    tl <- rd_u16(raw, off + 2L)
+    if (is.na(tl) || tl < 8L || off + 4L + tl > length(raw)) next
+    t <- raw_to_latin1(raw[(off + 5L):(off + 4L + tl)])
+    p <- trimws(strsplit(t, "\r\n", fixed = TRUE)[[1]])
+    p <- p[nzchar(p)]
+    if (length(p) < 2L || nchar(p[1]) > 40L) next  # "<product id>" then "<title>"
+    cand[[length(cand) + 1L]] <- p
+  }
+  if (!length(cand)) return(NULL)
+  sc <- vapply(cand, function(p) ivt_f2_frscore(p[2]), 0)
+  en <- cand[[which.min(sc)]]
+  fr <- if (length(cand) > 1L) cand[[which.max(sc)]] else NULL
+  list(product_id = en[1], title_en = en[2],
+       title_fr = if (!is.null(fr) && !identical(fr, en)) fr[2] else NA_character_,
+       universe = NA_character_)
 }
 
 # Footnotes for the legacy format. Unlike the modern framed "Footnote N" / "Renvoi
@@ -225,6 +260,12 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   # in modern-export files (e.g. the 2006/2011 census tables).
   inline <- ivt_f2_geo_is_inline(raw)
   info <- if (inline) ivt_f2_legacy_identity(raw) else ivt_table_info(raw)
+  if (is.na(info$product_id) && is.na(info$title_en)) {
+    # the 1981 profile vintage: no inline identity text and zeroed @40/@48 title
+    # pointers -- the identity blobs are master-directory entries instead
+    mi <- ivt_f2_master_identity(raw)
+    if (!is.null(mi)) info <- mi
+  }
   dims <- ivt_f2_dimensions(raw)
   n_geo <- ivt_f2_geo_count(raw)
   g <- ivt_f2_geo_light(raw, n_geo)

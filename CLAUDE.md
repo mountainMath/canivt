@@ -79,6 +79,36 @@ on all six reference tables:
   caps at ~15 bytes; `ivt_f2_descriptor()` prefers the tail when the first
   copy hits the cap and the tail strictly extends it — this also completes
   the 1996/2011/2016 descriptor names whose Variable List is absent).
+- **1981 census profile 97-570-X1981004** (5,989 geos, `Values(1) × Profile(79)
+  × Geography(5989)`, 418,400 cells): the profile lineage stores a 1-member
+  "Values" placeholder FIRST and **geography LAST**. Two descriptor fixes
+  unlocked it (2026-07-04): double-01-framed record counts are **reconciled
+  against the dimension's slot-directory member block**
+  (`ivt_f2_dim_count_reconcile()` — the "Values" record's count byte reads a
+  bogus 32; its codebook stores 1 member), and the geography dimension is
+  identified from its codebook (`ivt_f2_geo_dim_index()`, dimdir.R: dim 1
+  unless dim 1 has a single member, then the slot directories are probed for
+  a GEO_NAME schema / inline combined-block signature). With the true counts
+  the **ordinary unified layout fits exactly** — geography straddles (3
+  windows of 2048), Profile pages the directory at stride 4 — no new nesting.
+  Viewer-validated: 5,989/5,989 geography member order; 1,264/1,264 sampled
+  cells exact (incl. window boundaries 2048/2049, 4096/4097 and member 5,989).
+  Identity via the master directory (`ivt_f2_master_identity()`; `@40`/`@48`
+  are zero), 10 footnotes under the numberless `FOOTNOTE:`/`RENVOI :` framing
+  (1981–2016; adding it also surfaced missed notes on 1996/2006/2011/2016
+  tables). Strict-clean.
+- **98-400-X2016203** (49.6M cells in ~23 s; 51 geos × Admission(47) ×
+  Immigrant(11B) × Age(7A) × Selected characteristics(825) × Sex(3)): formerly
+  rejected for "non-exact `b2 == 0` pages" — the real bug was reading
+  descriptor type `0x0a` as a u8 count (Selected = **825** members; the low
+  byte read 57 and mis-nested the layout). Viewer-validated cell-exact
+  (39,516/39,516 on multi-fixed slices over 4 geographies incl. the last
+  member of every fixed dim, plus ~25k single-fixed cells over 9 more) and
+  all 825 chunked EN/FR member labels exact (`ivt_f2_dim_dir_label_chunks()`:
+  256-chunks in 1,1,2 groups, EN-then-FR runs, dense trailing block). NOTE:
+  this table's viewer d0 dropdown re-sorts geographies (provinces first,
+  CMAs after) — join viewer ground truth by NAME, not option position.
+  Strict-clean.
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every
@@ -179,16 +209,19 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   (`min(ipc1, straddle count) · prod(inner)` — the 2001 variant 97F0020X fits
   exactly but carries 1124 bits vs 448 real cells: its data is nested
   differently), and the directory must **span the outer entry cartesian**
-  (highest valid entry in the outer dimension's upper half — the 1981 profile
-  variant 97-570-X1981004 parses geography-FIRST but stores geography LAST;
-  its directory covers only outer member 1 of 32). All three same-signature
-  variants (97F0020X, 1981004, 2016203 with its non-exact `b2 == 0` pages and
-  369 unknown-marker `a2 01 03 0a` pages) are rejected structurally.
+  (highest valid entry in the outer dimension's upper half). A pre-flight
+  rejection can also mean **the descriptor was misread**, not that the
+  container is alien: the span rule flagged 97-570-X1981004 (a bogus
+  Values count of 32 — really 1) and the exact-fit rule flagged
+  98-400-X2016203 (Selected characteristics 825 read as 57) — both decode
+  cell-exact under the corrected descriptors and are SUPPORTED now.
+  97F0020X remains rejected structurally (capacity rule).
 - Member id columns in `cells` are **1-based**. `cells` data columns are named by a
-  **purely generic, name-agnostic slug** (`ivt_dim_slug()`): dimension 1 is
-  geography → `geo` (structural), every other dimension takes the lower-cased
-  leading word of its metadata name (`marital`, `tenure`, `single`, …), made
-  unique. **No code branches on dimension names or type bytes** — dimensions are
+  **purely generic, name-agnostic slug** (`ivt_dim_slug()`): the geography
+  dimension (`ivt_f2_geo_dim_index()`) → `geo`, every other dimension takes the
+  lower-cased leading word of its metadata name (`marital`, `tenure`, `single`,
+  …), made unique. Columns stay in descriptor order, so `geo` need not be
+  first (1981004: `values, profile, geo`). **No code branches on dimension names or type bytes** — dimensions are
   interchangeable; everything the decoder needs is structural (positions, counts,
   the 2048-bit cap). Human-readable labels come from the codebook at `tidy` time.
   **`ivt_tidy()`/parquet output** defaults to the **slug** column names
@@ -199,15 +232,34 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
 - Use `ivt_f2_geo_count()` (descriptor geography record), **not**
   `ivt_f2_header_geo_count()` (the fixed-offset u16 reads a wrong 16320 for 4-dim
   descriptors), for any geography sizing.
-- **Geography is the first descriptor dimension** (`ivt_f2_geo_dim()`), identified
-  **positionally, not by a type byte**: the geography descriptor *type* differs by
-  format and is a **storage-width tag** for the (large) member count — `0x10` (modern
-  2021/DGUID family-2 files) and `0x0d` (the 2011 census-tract table) carry a **u16**
-  count, `0x08` (the family-1 reference table) a **u8**. The old `type == 0x10` filter
-  silently misread 98-10-0241's geography count as 16383; reading 2011's `0x0d` as u8
-  misread its 5447 geographies as 21. `ivt_f2_descriptor()` reads u16 for `0x10`/`0x0d`,
-  u8 otherwise; `ivt_f2_data_dims()` likewise takes "all dims after the first" rather
-  than filtering by type.
+- **Geography is the first descriptor dimension in every layout EXCEPT the
+  profile lineage** (`ivt_f2_geo_dim_index()`, dimdir.R — 97-570-X1981004 /
+  98F0172X / 95F0170X store a 1-member "Values" placeholder first and
+  geography LAST): dimension 1 is the fast-path default, and only when dim 1
+  has a single member are the dimension slot directories probed for a
+  geography codebook signature (GEO_NAME schema field / inline combined-block
+  members). Identification is **never by a type byte**: the geography
+  descriptor *type* differs by format and is a **storage-width tag** for the
+  (large) member count — `0x10` (modern 2021/DGUID family-2 files), `0x0d`
+  (the 2011 census-tract table; also the 1981/1991 profile geographies) and
+  `0x0a`/`0x0c` (the profile lineage's characteristics/geography dims) carry
+  a **u16** count, `0x08` (the family-1 reference table) a **u8**. The old
+  `type == 0x10` filter silently misread 98-10-0241's geography count as
+  16383; reading 2011's `0x0d` as u8 misread its 5447 geographies as 21;
+  reading `0x0a` as u8 misread 98-400-X2016203's 825-member Selected
+  characteristics as 57 (which mis-nested the layout and faked "non-exact"
+  pages). `ivt_f2_descriptor()` reads u16 for `0x10`/`0x0d`/`0x0a`/`0x0c`, u8
+  otherwise; `ivt_f2_data_dims()` takes "all dims except the geography index".
+- **Double-01 descriptor records are ambiguous — counts are reconciled against
+  the codebook** (`ivt_f2_dim_count_reconcile()`, dimdir.R, called from
+  `ivt_f2_descriptor()`): the reference-period record `[type][count][01][01]`
+  ("Year (2)": `0e 02 01 01`) shares its byte shape with the profile "Values"
+  placeholder (`00 20 01 01`), whose count is NOT stored there (1 member, not
+  32). For such records the dimension's slot-directory member block decides:
+  a descriptor count exceeding the block's slot count (slots only pad upward)
+  is replaced by the block's real member count. All previously validated
+  tables are byte-identical through this (their double-01 dims — Year(2),
+  Years(2) — reconcile to themselves).
 - **`ivt_f2_descriptor()` anchors dimension records on the doubled name**, not on a
   fixed `<type> 01 <upper>` marker (the type list is gone). Each record stores its
   name twice back-to-back after a `0x01` — the **first copy may be truncated**
@@ -242,7 +294,14 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   - the data dims fit ≤2048 bits → **geography itself straddles**: `gpp = 2048 /
     data_bits` geographies share each page's presence record and the directory is a
     flat list of geography-window pages (former "family 2": 98-10-0023 4 geos/page,
-    98-10-0129 2/page, 1991 4/page). `ivt_layout()$geo_in_page` is the discriminator.
+    98-10-0129 2/page, 1991 4/page). `ivt_layout()$geo_in_page` is the discriminator
+    (now `straddle == geo_dim`, since geography need not be dimension 1).
+  The nesting itself is purely POSITIONAL (dimension 1 outermost, dimension m
+  fastest) and never asks which dimension is geography: on the 1981 profile
+  (geography = dim 3, LAST) the same walk puts geography in the presence
+  record (3 windows of 2048 bits, `ipc` uncapped by any inner dim), Profile at
+  directory stride 4, and the 1-member Values as the trivial outermost entry
+  dimension — the layout `slugs` just carry "geo" at the identified index.
 - Per-page value width/type and value-start come from the marker (`ivt_value_trailer()`):
   trailer 0 when the marker's third byte is `0x00`, else the per-marker family-2
   constant (`0x82`→16, `0x84`→8, `0xa2`→34, `0xa4`→18, …). Some tables realise the
@@ -283,6 +342,20 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
 
 ## Likely next tasks
 
+- **Profile lineage (geography-last) + 2016203 — DONE** (2026-07-04, both
+  viewer-validated cell-exact; see "What works today"). The delta was entirely
+  in the descriptor/metadata layer: u16 width tags `0x0a`/`0x0c`, double-01
+  count reconciliation against the slot-directory member blocks
+  (`ivt_f2_dim_count_reconcile()`), the codebook-driven geography-dimension
+  index (`ivt_f2_geo_dim_index()`), chunked >256-member data-dim labels
+  (`ivt_f2_dim_dir_label_chunks()`), master-directory identity
+  (`ivt_f2_master_identity()`) and the numberless `FOOTNOTE:`/`RENVOI :`
+  footnote framing. The unified decoder needed no changes beyond slug/role
+  generality — geography-last is the ordinary layout with a 1-member
+  outermost placeholder. Next in this lineage: the **1991 profiles
+  98F0172X/95F0170X** (descriptors now parse; open items are admitting their
+  dense `0x0_` page markers and the page→grid assignment — revisit the old
+  "non-rectangular" puzzle knowing Values(1) and the 1981004 sibling layout).
 - **Unified cell decode — DONE.** One `ivt_layout()` + `ivt_decode()` (`decode.R`)
   decodes every table, reproducing the two former decoders **byte-identical** on all
   six reference tables (0241/0077/0662 data-dim straddle, 0023/0129/1991 geography
@@ -473,15 +546,17 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   equal to the positional `ivt_f2_geo_attrs_dir()` DGUIDs on 0023 and 0129 (0
   mismatches), and its marker-region bound is now the geography directory's byte
   span.
-- The older **2016-census `98-400-X` / 2001 "F"-series / 1981 profile** products
-  are **different container variants**, all rejected structurally by the page
-  pre-flight or descriptor gate: `98-400-X2016019` (descriptor misreads,
-  `ivt_f2_decodable()`), `97F0020XCB2001070` (capacity rule), `97-570-X1981004`
-  (span rule — geography stored LAST), `98-400-X2016203` (non-exact
-  `b2 == 0, b3 == 08` pages; its 369 `a2 01 03 0a` pages are likely ordinary
-  64-byte-head pages under the b3 rule below — revisit with viewer ground
-  truth). **98-400-X2016387 IS supported** (directory complete after the
-  entry-floor fix; geography viewer-validated). **The 2006 DA crosstab
+- The **2001 "F"-series and remaining 1981/custom** products are **different
+  container variants**, rejected structurally by the page pre-flight or
+  descriptor gate: `98-400-X2016019` (descriptor misreads,
+  `ivt_f2_decodable()`), `97F0020XCB2001070` (capacity rule),
+  `97-570-X1981002` (descriptor undecoded). **97-570-X1981004 and
+  98-400-X2016203 are SUPPORTED as of 2026-07-04** (both were descriptor
+  misreads, not alien containers — see "What works today"); the 1991 profiles
+  `98F0172X`/`95F0170X` now parse their descriptors too (`Values(1) ×
+  Profile(529) × Geography`), leaving only their hybrid dense/sparse page set
+  and page→grid mapping open. **98-400-X2016387 IS supported** (directory
+  complete after the entry-floor fix; geography viewer-validated). **The 2006 DA crosstab
   `97-563-XCB2006072` IS supported** (2026-07-03): its directory was at the
   plain `u16@558` all along, rejected only because this vintage's markers
   carry `b3 = 0x0a/0x0c` — **the marker's fourth byte encodes an auxiliary
