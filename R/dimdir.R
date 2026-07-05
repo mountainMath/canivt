@@ -209,20 +209,29 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
 
 # Index of the directory entry holding a dimension's doubled-name marker block
 # (`81 02 02 00` + the dimension's name; prefix-matched because the descriptor's
-# first name copy may be truncated). 0 when no entry matches -- the caller then
-# treats the directory as not resolving this dimension.
+# first name copy may be truncated). The cro custom exports store the marker
+# name as a SHORT/LONG pair ("Characteristics" `01 03 32` "Selected
+# Characteristics"): the first printable run is the short copy, so when no
+# run prefix-matches, a verbatim full-name hit anywhere inside a marker-bearing
+# entry also matches (>= 8 chars, and only entries that DO carry the
+# `81 02 02 00` marker -- label blocks containing "Total - <name>" cannot
+# qualify). 0 when no entry matches -- the caller then treats the directory as
+# not resolving this dimension.
 ivt_f2_dir_marker_entry <- function(raw, nm, dir) {
   for (r in seq_len(nrow(dir))) {
     len <- dir[r, "len"]
     if (len < 12L || len > 4000L) next
     win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
     m <- ivt_f2_codebook_dim_markers(win, 0L)
+    if (!nrow(m)) next
     hit <- which(vapply(m$name, function(x) {
       if (is.na(x)) return(FALSE)
       j <- min(nchar(x), nchar(nm))
       j >= 4L && substr(x, 1L, j) == substr(nm, 1L, j)
     }, logical(1)))
     if (length(hit)) return(r)
+    if (nchar(nm) >= 8L && grepl(nm, raw_to_latin1(win), fixed = TRUE))
+      return(r)
   }
   0L
 }

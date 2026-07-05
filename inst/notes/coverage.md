@@ -765,7 +765,17 @@ Files in the test corpus that are currently unsupported:
   flag), tried only after the flag-trailing `IVT_F2_INLINE_PAT` so 1991/2006/2011
   are byte-identical (geo_name/geouid/dqf verified unchanged on all three). The
   two combined runs are near-identical EN/FR (BC names untranslated bar the
-  province), surfaced as `geo_name`/`geo_name_fr`.
+  province), surfaced as `geo_name`/`geo_name_fr`. **ct8's "Selected
+  Characteristics" labels read positionally too** (2026-07-05, strict-clean):
+  its codebook marker block stores the name as a SHORT/LONG pair
+  (`"Characteristics" 01 03 32 "Selected Characteristics"`), and the first
+  printable run — the short copy — failed `ivt_f2_dir_marker_entry()`'s prefix
+  match, dropping the dimension to the count-keyed scan (English only). The
+  matcher now also accepts a verbatim full-name hit inside a marker-bearing
+  entry (≥ 8 chars; entries without the `81 02 02 00` marker cannot qualify,
+  so label blocks containing `Total - <name>` never match). Corpus-diffed:
+  the ONLY output change on all 28 supported tables is ct8 dim 3 gaining
+  `members_fr`/`name_fr` (its EN labels are identical to the old fallback's).
 
 Decoding the remaining files is future work — each likely needs its
 descriptor/codebook layout reverse-engineered. Reconnaissance (sub-format
