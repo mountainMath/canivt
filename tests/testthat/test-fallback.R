@@ -50,6 +50,20 @@ test_that("strict mode turns fallbacks into classed errors", {
                class = "canivt_skipped_pages_error")
 })
 
+test_that("a geography count mismatch is a classed fallback condition", {
+  # a raw header whose geography record cannot be read yields want = NA -> silent
+  expect_no_warning(ivt_f2_check_geo_count(raw(64L), 10L))
+  # subclass first so callers can distinguish it; still a canivt_fallback so
+  # detection probes muffle it and strict mode upgrades it
+  fake <- structure(list(), class = "fake")
+  local_mocked_bindings(ivt_f2_geo_count = function(raw) 5447L)
+  expect_warning(ivt_f2_check_geo_count(fake, 5191L), class = "canivt_geo_count")
+  expect_warning(ivt_f2_check_geo_count(fake, 5191L), class = "canivt_fallback")
+  expect_no_warning(ivt_f2_check_geo_count(fake, 5447L))
+  withr::local_options(canivt.strict = TRUE)
+  expect_error(ivt_f2_check_geo_count(fake, 5191L), class = "canivt_geo_count_error")
+})
+
 test_that("ivt_quietly muffles fallback conditions for detection probes", {
   expect_no_warning(v <- ivt_quietly({ ivt_fallback("probe"); 42L }))
   expect_equal(v, 42L)

@@ -1798,14 +1798,18 @@ ivt_f2_geo_inline <- function(raw) {
 # Validate a decoded geography count against the header's declared count. The
 # header dimension descriptor states the geography member count explicitly
 # (`ivt_f2_header_geo_count()`), so we never have to trust the parser's own tally:
-# a mismatch means the codebook stitch dropped or duplicated a chunk.
+# a mismatch means the codebook stitch dropped or duplicated a chunk. Raised
+# through `ivt_fallback()` (subclass `canivt_geo_count`) so a short/duplicated
+# read is an ERROR under `options(canivt.strict = TRUE)` -- 98-10-0013's scan
+# path delivered 5,191 of 5,447 members with only a plain warning before this
+# was classed.
 ivt_f2_check_geo_count <- function(raw, got) {
   want <- ivt_f2_geo_count(raw)
   if (!is.na(want) && !is.na(got) && got != want) {
-    cli::cli_warn(c(
+    ivt_fallback(c(
       "Decoded {got} geographies but the header declares {want}.",
       i = "The geography codebook stitch may have dropped or duplicated a chunk."
-    ))
+    ), class = c("canivt_geo_count", "canivt_fallback"))
   }
   invisible(want)
 }
