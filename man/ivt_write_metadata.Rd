@@ -17,7 +17,12 @@ ivt_write_metadata(x, dir = NULL)
 The output directory, invisibly.
 }
 \description{
-Emits the parts of an IVT that are not the data table itself: the dimension
-members, the geographic identifiers (names + DGUIDs) and the footnotes, as a
-set of CSV files in \code{dir}.
+Emits the parts of an IVT that are not the data table itself, as a set of
+CSV files in \code{dir}: the dimension members (\code{dimension_members.csv}), the
+geography table (\code{geographies.csv} -- bilingual labels/names, uid, and
+whatever attributes the vintage stores: aggregation level, geography type /
+municipal status, data-quality flag + note, total non-response rate),
+the footnotes (\code{footnotes.csv}), the data-quality-flag legend
+(\code{dqf_legend.csv}, when the table carries one) and the table identity
+(\code{table_info.csv}).
 }

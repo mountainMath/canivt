@@ -9,17 +9,28 @@ read_ivt(path, geo_attributes = FALSE)
 \arguments{
 \item{path}{Path to an \code{.ivt} file.}
 
-\item{geo_attributes}{For family-2 tables only: if \code{TRUE}, decode the full
-geography attribute table (names, level/type, geocodes, data-quality flag,
-non-response rate) from the codebook so \code{\link[=ivt_tidy]{ivt_tidy()}} can label geographies by
-name. This adds a codebook block-scan (tens of seconds); the default \code{FALSE}
-keeps geographies keyed by DGUID. Ignored for family-1 tables.}
+\item{geo_attributes}{For the large chunked family-2 tables only: if \code{TRUE},
+decode the full geography attribute table (names, level/type, geocodes,
+data-quality flag, non-response rate) from the codebook so \code{\link[=ivt_tidy]{ivt_tidy()}}
+can label geographies by name. This adds a codebook block-scan (tens of
+seconds); the default \code{FALSE} keeps those tables keyed by DGUID. Small
+schema'd tables and the pre-DGUID (inline-codebook) tables already carry
+their full attribute set on the default metadata path. Ignored for
+family-1 tables.}
 }
 \value{
 An object of class \code{ivt}: a list with \code{cells} (a tibble of one value
 per row, keyed by 1-based member-id columns matching the StatCan metadata
-Member IDs), and \code{metadata} (table identity, \code{dimensions}, \code{geographies}
-with names and DGUIDs, and \code{footnotes}).
+Member IDs), and \code{metadata} (table identity, \code{dimensions}, \code{geographies},
+and \code{footnotes}). \code{metadata$geographies} carries, per member and where the
+vintage stores them: the bilingual display label (\code{geo_label},
+\code{geo_label_fr}) and name (\code{geo_name}, \code{geo_name_fr} -- on pre-DGUID tables
+the EN/FR halves of the stored bilingual label), \code{geo_uid} (DGUID, or the
+bare GEOUID on pre-DGUID tables), the aggregation level (\code{geo_level}), the
+geography type / municipal status (\code{geo_type}, \code{geo_type_abbr}), province
+abbreviation and codes (\code{prov_abbr}, \code{alt_geo_code}, \code{pr_code}), the
+data-quality flag (\code{dqf_code}, with \code{dqf_note} and the table-level
+\code{dqf_legend}), and the total non-response rate (\code{tnr_short_form}).
 
 The value store keeps only non-zero cells, so a cell absent from \code{cells}
 is a \strong{zero} -- \emph{within a geography that carries any data}. A geography

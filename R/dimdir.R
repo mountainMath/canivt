@@ -337,7 +337,8 @@ ivt_f2_dir_is_geo <- function(raw, dir, max_member_entries = 6L) {
       v <- v[nzchar(v)]
       if (length(v) >= 3L) {
         probe <- utils::head(v, 32L)
-        if (sum(grepl(IVT_F2_INLINE_PAT, probe)) >= max(3L, 0.6 * length(probe)))
+        if (sum(grepl(IVT_F2_INLINE_PAT, probe, perl = TRUE)) >=
+            max(3L, 0.6 * length(probe)))
           return(TRUE)
       }
     }

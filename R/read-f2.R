@@ -361,11 +361,23 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   n_geo <- ivt_f2_geo_count(raw)
   g <- ivt_f2_geo_light(raw, n_geo)
   ivt_f2_check_geo_count(raw, length(g$geo_uid))
+  # pack every decoded per-member geography column (bilingual labels/names, uid,
+  # aggregation level, geography type / municipal status, quality flag + note,
+  # non-response rate, ...), member_id first and all-NA columns dropped -- the
+  # attribute set varies by vintage and only what the file stores is exposed.
+  # `geo_name`/`geo_uid` slots stay present (NULL when undecoded) so callers can
+  # test them without guarding for absence.
+  geo_cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr",
+                "geo_uid", "geo_level", "geo_type", "geo_type_abbr",
+                "prov_abbr", "alt_geo_code", "pr_code", "dqf_code", "dqf_note",
+                "tnr_short_form")
   geographies <- list(geo_name = g$geo_name, geo_uid = g$geo_uid,
                       member_id = seq_along(g$geo_uid))
-  if (!is.null(g$geo_name_fr) && !all(is.na(g$geo_name_fr)))
-    geographies$geo_name_fr <- g$geo_name_fr
-  if (!is.null(g$dqf_code)) geographies$dqf_code <- g$dqf_code
+  for (col in c(intersect(geo_cols, names(g)), setdiff(names(g), geo_cols))) {
+    if (col %in% c("geo_name", "geo_uid")) next
+    v <- g[[col]]
+    if (!is.null(v) && !all(is.na(v))) geographies[[col]] <- v
+  }
   list(
     product_id        = info$product_id,
     title_en          = info$title_en,

@@ -451,21 +451,30 @@ test_that("1991 inline geography codebook decodes GEOUIDs and bilingual names", 
 
   g <- ivt_f2_geo_inline(raw)
   expect_equal(nrow(g), 41859L)
-  expect_equal(names(g), c("member_id", "geo_name", "geouid", "dqf_code"))
+  expect_equal(names(g), c("member_id", "geo_label", "geo_name", "geo_name_fr",
+                           "geouid", "geo_type_abbr", "dqf_code",
+                           "tnr_short_form"))
 
-  # GEOUIDs are bare codes (no year/area-type DGUID prefix); names are bilingual.
+  # GEOUIDs are bare codes (no year/area-type DGUID prefix); the stored display
+  # label is the bilingual combined string, split into its EN/FR halves.
   expect_equal(g$geouid[1], "00")
+  expect_equal(g$geo_label[1], "Canada")
   expect_equal(g$geo_name[1], "Canada")
+  expect_equal(g$geo_name_fr[1], "Canada")
   expect_equal(g$geouid[2], "10")
-  expect_equal(g$geo_name[2], "Newfoundland | Terre-Neuve")
+  expect_equal(g$geo_label[2], "Newfoundland | Terre-Neuve")
+  expect_equal(g$geo_name[2], "Newfoundland")
+  expect_equal(g$geo_name_fr[2], "Terre-Neuve")
   # an enumeration area: name equals its code
   ea <- g[g$geouid == "10002257", ]
+  expect_equal(ea$geo_label, "10002257")
   expect_equal(ea$geo_name, "10002257")
 
   # the unified, metadata-driven dispatcher returns the same leading schema as the
-  # 2021 path (member_id, geo_name, geo_uid) and matches the header-declared count
+  # 2021 path (member_id, geo_label, geo_name, geo_uid) and matches the
+  # header-declared count
   gg <- ivt_f2_geographies(raw)
-  expect_equal(names(gg)[1:3], c("member_id", "geo_name", "geo_uid"))
+  expect_equal(names(gg)[1:4], c("member_id", "geo_label", "geo_name", "geo_uid"))
   expect_equal(nrow(gg), ivt_f2_header_geo_count(raw))
   expect_equal(gg$geo_uid[1:2], c("00", "10"))
 
@@ -495,11 +504,14 @@ test_that("1991 inline geography is read positionally from the block directory",
   expect_equal(g$geouid[39432], "59020151")
   expect_equal(g$geouid[41859], "61002216")
   # display names keep their accents (parsed from the combined block, not the
-  # accent-stripped search-name array)
-  expect_equal(g$geo_name[904],
+  # accent-stripped search-name array); the EN/FR halves split off the label
+  expect_equal(g$geo_label[904],
                "Prince Edward Island | Île-du-Prince-Édouard")
+  expect_equal(g$geo_name[904], "Prince Edward Island")
+  expect_equal(g$geo_name_fr[904], "Île-du-Prince-Édouard")
   expect_equal(g$dqf_code[1], "00000")
   expect_false(anyNA(g$geo_name))
+  expect_false(anyNA(g$geo_label))
 })
 
 test_that("1991 cell decode is exact (int32 dense and int16 sparse pages)", {
@@ -540,10 +552,12 @@ test_that("read_ivt() handles the legacy 1991 table end-to-end", {
   expect_equal(vapply(fn, function(f) f$number, 1L), 1:40)
   expect_match(fn[[1]]$text, "first five months")
 
-  # default tidy now labels geography from the marker-anchored inline codebook
-  # (name + character GEOUID), the same content-free path used for 2006/2011
+  # default tidy now labels geography from the marker-anchored inline codebook:
+  # the stored combined display string (geo_label), its English half (geo_name)
+  # and the character GEOUID -- the same content-free path used for 2006/2011
   td <- ivt_tidy(x, dim_names = "slug")
-  expect_equal(names(td), c("geo_name", "geo_uid", "single", "sex", "value"))
+  expect_equal(names(td),
+               c("geo_label", "geo_name", "geo_uid", "single", "sex", "value"))
   expect_type(td$geo_uid, "character")
   ca <- td[td$geo_name == "Canada", ]
   expect_equal(ca$value[ca$single == "Total - Age Groups" & ca$sex == "Total - Sex"], 27296860)

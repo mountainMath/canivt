@@ -65,9 +65,14 @@ ivt_write_csv <- function(x, path = NULL, labels = TRUE,
 
 #' Write the table metadata (codebook + footnotes) to disk
 #'
-#' Emits the parts of an IVT that are not the data table itself: the dimension
-#' members, the geographic identifiers (names + DGUIDs) and the footnotes, as a
-#' set of CSV files in `dir`.
+#' Emits the parts of an IVT that are not the data table itself, as a set of
+#' CSV files in `dir`: the dimension members (`dimension_members.csv`), the
+#' geography table (`geographies.csv` -- bilingual labels/names, uid, and
+#' whatever attributes the vintage stores: aggregation level, geography type /
+#' municipal status, data-quality flag + note, total non-response rate),
+#' the footnotes (`footnotes.csv`), the data-quality-flag legend
+#' (`dqf_legend.csv`, when the table carries one) and the table identity
+#' (`table_info.csv`).
 #'
 #' @param x An `ivt` object or a metadata list from [ivt_metadata()].
 #' @param dir Output directory (created if needed). Defaults to
@@ -99,13 +104,20 @@ ivt_write_metadata <- function(x, dir = NULL) {
   }))
   wr(members, "dimension_members.csv")
 
+  # every decoded geography column travels: bilingual labels/names, uid, then
+  # whatever attributes the vintage stores (aggregation level, geography type /
+  # municipal status, quality flag + note, non-response rate, presence). The
+  # `geo_` prefix is dropped for the name-like columns (established file schema);
+  # attribute columns keep their metadata names.
   geos <- meta$geographies
   geo_df <- data.frame(member_id = geos$member_id)
-  if (!is.null(geos$geo_label))    geo_df$label    <- geos$geo_label
-  if (!is.null(geos$geo_label_fr)) geo_df$label_fr <- geos$geo_label_fr
-  if (!is.null(geos$geo_name))     geo_df$name     <- geos$geo_name
-  if (!is.null(geos$geo_name_fr))  geo_df$name_fr  <- geos$geo_name_fr
-  if (!is.null(geos$geo_uid))      geo_df$uid      <- geos$geo_uid
+  renames <- c(geo_label = "label", geo_label_fr = "label_fr",
+               geo_name = "name", geo_name_fr = "name_fr", geo_uid = "uid")
+  for (col in names(renames))
+    if (!is.null(geos[[col]])) geo_df[[renames[[col]]]] <- geos[[col]]
+  for (col in setdiff(names(geos), c("member_id", names(renames))))
+    if (!is.null(geos[[col]]) && length(geos[[col]]) == nrow(geo_df))
+      geo_df[[col]] <- geos[[col]]
   wr(geo_df, "geographies.csv")
 
   if (length(meta$footnotes)) {
@@ -113,6 +125,10 @@ ivt_write_metadata <- function(x, dir = NULL) {
       data.frame(language = f$language, number = f$number, text = f$text)))
     wr(fn, "footnotes.csv")
   }
+
+  # the data-quality-flag legend (code -> EN/FR text), when the table carries one
+  if (!is.null(meta$dqf_legend) && nrow(meta$dqf_legend))
+    wr(meta$dqf_legend, "dqf_legend.csv")
 
   wr(data.frame(field = c("product_id", "title_en", "title_fr", "universe"),
                 value = c(meta$product_id, meta$title_en, meta$title_fr,

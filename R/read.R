@@ -46,15 +46,26 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' most likely to misread silently.
 #'
 #' @param path Path to an `.ivt` file.
-#' @param geo_attributes For family-2 tables only: if `TRUE`, decode the full
-#'   geography attribute table (names, level/type, geocodes, data-quality flag,
-#'   non-response rate) from the codebook so [ivt_tidy()] can label geographies by
-#'   name. This adds a codebook block-scan (tens of seconds); the default `FALSE`
-#'   keeps geographies keyed by DGUID. Ignored for family-1 tables.
+#' @param geo_attributes For the large chunked family-2 tables only: if `TRUE`,
+#'   decode the full geography attribute table (names, level/type, geocodes,
+#'   data-quality flag, non-response rate) from the codebook so [ivt_tidy()]
+#'   can label geographies by name. This adds a codebook block-scan (tens of
+#'   seconds); the default `FALSE` keeps those tables keyed by DGUID. Small
+#'   schema'd tables and the pre-DGUID (inline-codebook) tables already carry
+#'   their full attribute set on the default metadata path. Ignored for
+#'   family-1 tables.
 #' @return An object of class `ivt`: a list with `cells` (a tibble of one value
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
-#'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`
-#'   with names and DGUIDs, and `footnotes`).
+#'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`,
+#'   and `footnotes`). `metadata$geographies` carries, per member and where the
+#'   vintage stores them: the bilingual display label (`geo_label`,
+#'   `geo_label_fr`) and name (`geo_name`, `geo_name_fr` -- on pre-DGUID tables
+#'   the EN/FR halves of the stored bilingual label), `geo_uid` (DGUID, or the
+#'   bare GEOUID on pre-DGUID tables), the aggregation level (`geo_level`), the
+#'   geography type / municipal status (`geo_type`, `geo_type_abbr`), province
+#'   abbreviation and codes (`prov_abbr`, `alt_geo_code`, `pr_code`), the
+#'   data-quality flag (`dqf_code`, with `dqf_note` and the table-level
+#'   `dqf_legend`), and the total non-response rate (`tnr_short_form`).
 #'
 #'   The value store keeps only non-zero cells, so a cell absent from `cells`
 #'   is a **zero** -- *within a geography that carries any data*. A geography

@@ -582,55 +582,67 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
        dguid = if (!is.null(ga$dguids)) ga$dguids$texts else NULL)
 }
 
-# Light geography labels (name + uid) for the metadata path, family-agnostic and
-# located from the metadata, not the content. Layouts, in priority order:
-#   1. the inline "name (code) flag" codebook -> the pre-DGUID tables (1991, 2006,
-#      2011, 2016); positional from the dim-1 block directory, else marker-anchored;
-#      bilingual names + character GEOUIDs;
-#   2. single-chunk schema'd tables (98-10-0241/0077) -> the directory-driven
-#      positional attribute read (`ivt_f2_geo_attrs_dir()`, untrimmed), with the
-#      single-block schema/content readers (`ivt_f2_geo_simple()`) as fallback;
-#      names + DGUIDs;
+# Light geography table for the metadata path, family-agnostic and located from
+# the metadata, not the content. Returns a list of per-member columns (each may
+# be NULL/absent) keyed by the metadata column names: `geo_label(_fr)` /
+# `geo_name(_fr)` / `geo_uid` plus whatever attributes the layout stores
+# (`geo_level`, `geo_type(_abbr)`, `prov_abbr`, `alt_geo_code`, `pr_code`,
+# `dqf_code`, `dqf_note`, `tnr_short_form`). Layouts, in priority order:
+#   1. the inline "name (code) [type] flag [(pct%)]" codebook -> the pre-DGUID
+#      tables (1991-2016, cro/ord); positional from the dim-1 block directory,
+#      else marker-anchored; bilingual names (split from the combined label) +
+#      character GEOUIDs + type abbreviation / quality flag / non-response rate
+#      where the vintage stores them;
+#   2. single-chunk schema'd tables (98-10-0241/0077/0662) -> the FULL
+#      directory-driven positional attribute read (`ivt_f2_geo_attrs_dir()`,
+#      untrimmed): bilingual names, DGUID, level, type, quality flag + note,
+#      non-response rate; the single-block schema/content readers
+#      (`ivt_f2_geo_simple()`) as fallback (names + DGUIDs only);
 #   3. the fast DGUID scan -> the large chunked modern tables (98-10-0023/0129):
-#      uid only (names need the slower read_ivt(geo_attributes = TRUE) path).
-# Returns list(geo_name, geo_uid) where either element may be NULL.
+#      uid only (the full table needs the slower read_ivt(geo_attributes = TRUE)
+#      path).
 ivt_f2_geo_light <- function(raw, n_geo) {
-  # 2. the marker-anchored combined-block parser is tried before the content-based
+  # 1. the marker-anchored combined-block parser is tried before the content-based
   #    single-block detector: it returns NULL for the schema'd DGUID tables (no
   #    combined block), so they fall through to the schema/content path below, but
   #    it wins for the schema-absent tables (1991/2006/2011/2016) -- including the
   #    single-block 2016 case whose uid the content detector cannot recover (no
   #    DGUID array; the uid is the bare code inside the combined block).
   inl <- ivt_f2_geo_inline(raw)
-  if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo))
-    return(list(geo_name = inl$geo_name, geo_name_fr = inl$geo_name_fr,
-                geo_uid = inl$geouid,
-                dqf_code = inl$dqf_code))   # the per-geography flag: on the
-                                            # 2016 tables its last digit marks
-                                            # wholly-suppressed geographies
-  # 1. single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
+  if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo)) {
+    out <- as.list(inl[setdiff(names(inl), "member_id")])
+    names(out)[names(out) == "geouid"] <- "geo_uid"
+    return(out)     # incl. dqf_code: on the 2016 tables its last digit marks
+                    # wholly-suppressed geographies
+  }
+  # 2. single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
   #    positional attribute read is cheap here (one group of one chunk) and fully
   #    metadata-addressed; trim = FALSE keeps the hierarchy indentation the
-  #    single-block reader preserves. GEO_NAME can carry legitimate NA holes
-  #    (98-10-0662's derived aggregate member has no attributes at all) -- label
-  #    by the display Member Name then, which every member carries. Larger tables
+  #    single-block reader preserves. The whole attribute table is returned --
+  #    level, type, quality flag, non-response rate and the bilingual names all
+  #    come from the same positional read. GEO_NAME can carry legitimate NA
+  #    holes (98-10-0662's derived aggregate member has no attributes at all);
+  #    the display Member Name (`geo_label`), which every member carries, must be
+  #    complete for the read to be accepted. Larger tables
   #    skip this (the full read costs ~20 s on a 63k-geography codebook; the DGUID
   #    scan below is 3x faster).
   if (!is.na(n_geo) && n_geo <= 256L) {
     at <- ivt_f2_geo_attrs_dir(raw, trim = FALSE)
-    if (!is.null(at) && nrow(at) == n_geo) {
-      nm <- if (!anyNA(at$geo_name)) at$geo_name else at$geo_label
-      if (!anyNA(nm)) return(list(geo_name = nm, geo_uid = at$dguid))
+    if (!is.null(at) && nrow(at) == n_geo &&
+        (!anyNA(at$geo_label) || !anyNA(at$geo_name))) {
+      out <- as.list(at[setdiff(names(at), "member_id")])
+      names(out)[names(out) == "dguid"] <- "geo_uid"
+      return(out)
     }
   }
-  # 1b. schema-named single block (2021 DGUID) or the content-based array detector
+  # 2b. schema-named single block (2021 DGUID) or the content-based array detector
   simple <- ivt_f2_geo_simple(raw, n_geo)
   if (!is.null(simple)) {
     geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
                else ivt_f2_geo_dguids(raw)
     return(list(geo_name = simple$name, geo_uid = geo_uid))
   }
-  # 4. chunked DGUID tables (0023/0129): uid only via the fast DGUID scan
+  # 3. chunked DGUID tables (0023/0129): uid only via the fast DGUID scan
   list(geo_name = NULL, geo_uid = ivt_f2_geo_dguids(raw))
 }
 
@@ -826,8 +838,9 @@ ivt_f2_extract_attr <- function(blocks, groups, slot, n_geo, tnr = FALSE,
 # the display pair (2 runs), inspecting each code run's last-block length to detect
 # a dropped partial. The two text display runs are always full.
 IVT_F2_FR_TOK <- paste0("(^|[ '-])(et|de|des|du|de-la|la|le|les|aux?|sur|sous|",
-                        "ouest|est|nord|sud|sainte?|\u00eele|rivi\u00e8re|lac|baie)([ '-]|$)")
-IVT_F2_EN_TOK <- paste0("(^|[ '-])(and|of|west|east|north|south|saint|island|",
+                        "ouest|est|nord|sud|sainte?|nouveau|nouvelle|colombie|",
+                        "\u00eele|rivi\u00e8re|lac|baie)([ '-]|$)")
+IVT_F2_EN_TOK <- paste0("(^|[ '-])(and|of|new|west|east|north|south|saint|island|",
                         "river|lake|bay)([ '-]|$)")
 IVT_F2_ACCENT <- "[^\u00e0\u00e2\u00e4\u00e7\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c7\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc\u0153]"
 
@@ -1273,9 +1286,14 @@ ivt_f2_geo_is_inline <- function(raw) {
 # A comma may follow the code group: a few unorganised CSDs in the ord custom
 # export invert the order to "<name> (<code>), <type_abbr> <flag>" (e.g. "Central
 # Kootenay D (5903039), CSD 01010 ( 14.4%)"), so the code/name still resolve.
+# The type-abbreviation token and the trailing group are CAPTURED (groups 3 and
+# 5): the type is the geography's municipal / census-subdivision status and the
+# trailing group, when it is a percentage, the total non-response rate -- both
+# structural token positions of the combined record, exposed as geo_type_abbr /
+# tnr_short_form.
 IVT_F2_INLINE_PAT <- paste0(
-  "^(.*) \\(([0-9A-Za-z.]+)\\)(?:,\\s*|\\s+)(?:[^0-9\\s]\\S*\\s+)?([0-9]+)",
-  "(?:\\s*\\([^)]*\\))?\\s*$")
+  "^(.*) \\(([0-9A-Za-z.]+)\\)(?:,\\s*|\\s+)(?:([^0-9\\s]\\S*)\\s+)?([0-9]+)",
+  "(?:\\s*\\(([^)]*)\\))?\\s*$")
 
 # A second inline layout stores the code LAST, inside the trailing parentheses, with
 # NO data-quality flag: "<name>[, <type_abbr>] (<code>)" -- the 2006 custom-order
@@ -1286,28 +1304,121 @@ IVT_F2_INLINE_PAT <- paste0(
 # so those vintages are unaffected.
 IVT_F2_INLINE_PAT2 <- "^(.*?)\\s*\\(([0-9A-Za-z.]+)\\)\\s*$"
 
-# Parse a vector of inline geography member strings into name / code / flag columns,
-# trying the flag-trailing form (`IVT_F2_INLINE_PAT`) first and the code-trailing form
-# (`IVT_F2_INLINE_PAT2`) for whatever it misses. Returns a list of three character
-# vectors (NA where neither pattern matched; `flag` is always NA for the second form).
+# A geography-type abbreviation stored as a NAME SUFFIX: the custom-order
+# exports (cro/ord) append it to the display name as ", <ABBR>" ("East Kootenay,
+# RD", "Elkford, DM", "British Columbia, PR") instead of the token position the
+# census tables use. The abbreviation is a short upper-case token (accented
+# caps admitted for the Quebec types, hyphen for "S-E"-style forms); the suffix is only
+# READ, never stripped -- the stored display name (which StatCan shows with the
+# suffix) stays the join key.
+IVT_F2_TYPE_SUFFIX_PAT <- ",\\s*([A-Z\u00c0-\u00dc][A-Z\u00c0-\u00dc-]{0,3})$"
+
+# The trailing parenthesised group as a total non-response rate: "  4.0%" /
+# "  4,0 %" (the French copies use a comma decimal) -> "4.0" (the decimal-point
+# form the modern schema'd tables store in TNR_SHORT_FORM). NA when the group is
+# not a percentage.
+ivt_f2_parse_tnr <- function(g) {
+  m <- regmatches(g, regexec("^\\s*([0-9]+(?:[.,][0-9]+)?)\\s*%\\s*$", g,
+                             perl = TRUE))
+  vapply(m, function(x)
+    if (length(x) >= 2L) gsub(",", ".", x[2], fixed = TRUE) else NA_character_, "")
+}
+
+# Parse a vector of inline geography member strings into name / code / flag /
+# type / tnr columns, trying the flag-trailing form (`IVT_F2_INLINE_PAT`) first
+# and the code-trailing form (`IVT_F2_INLINE_PAT2`) for whatever it misses.
+# `type` is the geography-type abbreviation (municipal / CSD status), from the
+# token position when present, else the ", <ABBR>" name suffix of the custom
+# exports; `tnr` the trailing percentage (total non-response rate, 2016+).
+# Returns a list of five character vectors (NA where a pattern / field is
+# absent; `flag` and `tnr` are always NA for the second form).
 ivt_f2_parse_inline <- function(v) {
-  nm <- code <- fl <- rep(NA_character_, length(v))
-  m1 <- regmatches(v, regexec(IVT_F2_INLINE_PAT, v))
-  ok1 <- vapply(m1, function(g) length(g) >= 4L, logical(1))
+  nm <- code <- fl <- ty <- tnr <- rep(NA_character_, length(v))
+  # perl = TRUE: under the default TRE engine `\s` inside a bracket class is not
+  # a whitespace escape ("[^0-9\\s]" reads as not-digit/backslash/'s'), which let
+  # a leading space into the captured type token.
+  m1 <- regmatches(v, regexec(IVT_F2_INLINE_PAT, v, perl = TRUE))
+  ok1 <- vapply(m1, function(g) length(g) >= 6L, logical(1))
   if (any(ok1)) {
     nm[ok1]   <- vapply(m1[ok1], `[`, "", 2L)
     code[ok1] <- vapply(m1[ok1], `[`, "", 3L)
-    fl[ok1]   <- vapply(m1[ok1], `[`, "", 4L)
+    ty[ok1]   <- trimws(vapply(m1[ok1], `[`, "", 4L))
+    fl[ok1]   <- vapply(m1[ok1], `[`, "", 5L)
+    tnr[ok1]  <- ivt_f2_parse_tnr(vapply(m1[ok1], `[`, "", 6L))
   }
   miss <- !ok1 & !is.na(v)
   if (any(miss)) {
-    m2 <- regmatches(v[miss], regexec(IVT_F2_INLINE_PAT2, v[miss]))
+    m2 <- regmatches(v[miss], regexec(IVT_F2_INLINE_PAT2, v[miss], perl = TRUE))
     ok2 <- vapply(m2, function(g) length(g) >= 3L, logical(1))
     idx <- which(miss)[ok2]
     nm[idx]   <- vapply(m2[ok2], `[`, "", 2L)
     code[idx] <- vapply(m2[ok2], `[`, "", 3L)
   }
-  list(name = nm, code = code, flag = fl)
+  ty[!is.na(ty) & ty == ""] <- NA_character_
+  # suffix-stored type (cro/ord): fill only where the token position carried none
+  sfx <- is.na(ty) & !is.na(nm) & grepl(IVT_F2_TYPE_SUFFIX_PAT, nm, perl = TRUE)
+  if (any(sfx))
+    ty[sfx] <- sub(paste0("^.*", IVT_F2_TYPE_SUFFIX_PAT), "\\1", nm[sfx],
+                   perl = TRUE)
+  list(name = nm, code = code, flag = fl, type = ty, tnr = tnr)
+}
+
+# Split the inline vintages' bilingual display names into their English and
+# French halves. The combined block stores ONE display string per member, and
+# geographies whose two official names differ carry both, joined by the
+# vintage's separator -- " | " on the 1991 exports, " / " on the 1996-2016 ones
+# ("Newfoundland | Terre-Neuve", "Prince Edward Island / Ile-du-Prince-Edouard").
+# A name is a split candidate only when it carries exactly ONE separator outside
+# parentheses (parenthesised qualifiers embed slashes: "(Ontario part / partie
+# de l'Ontario)"). The two separators differ in how much they prove:
+#   " | " is the 1991 exports' dedicated language separator -- a candidate
+#         always splits;
+#   " / " also joins DUAL English place names ("Kootenay Boundary B / Lower
+#         Columbia-Old-Glory" is one official CSD name, not a language pair), so
+#         a candidate splits only when its French half actually reads French --
+#         `ivt_f2_frscore(fr) > frscore(en)` per member. Language-neutral pairs
+#         ("Greater Sudbury / Grand Sudbury") stay combined, which matches how
+#         a dual official name should be treated when the file gives no
+#         language signal.
+# Which half is English is decided ONCE PER RUN by `ivt_f2_frscore()` over all
+# candidates (the halves' order is a property of the export, not of a member),
+# so a single short name cannot flip languages. Returns list(en, fr); members
+# that do not split return the whole string for both languages.
+ivt_f2_split_bilingual <- function(nm) {
+  en <- fr <- nm
+  # positions of " | " / " / " at parenthesis depth 0, per name
+  halves <- lapply(nm, function(s) {
+    if (is.na(s) || !grepl(" [|/] ", s)) return(NULL)
+    cs <- strsplit(s, "", fixed = TRUE)[[1]]
+    depth <- cumsum((cs == "(") - (cs == ")"))
+    sep <- which(cs %in% c("|", "/"))
+    sep <- sep[sep > 1L & sep < length(cs) & cs[sep - 1L] == " " &
+               cs[sep + 1L] == " " & depth[sep] == 0L]
+    if (length(sep) != 1L) return(NULL)
+    a <- trimws(substr(s, 1L, sep - 1L)); b <- trimws(substr(s, sep + 1L, nchar(s)))
+    if (!nzchar(a) || !nzchar(b)) return(NULL)
+    c(a, b, cs[sep])
+  })
+  hit <- which(!vapply(halves, is.null, logical(1)))
+  if (!length(hit)) return(list(en = en, fr = fr))
+  a <- vapply(halves[hit], `[`, "", 1L)
+  b <- vapply(halves[hit], `[`, "", 2L)
+  bar <- vapply(halves[hit], `[`, "", 3L) == "|"
+  first_en <- ivt_f2_frscore(a) <= ivt_f2_frscore(b)   # per run, not per member
+  ea <- if (first_en) a else b
+  fb <- if (first_en) b else a
+  # per-member acceptance: "|" always; "/" needs POSITIVE French evidence in
+  # the FR half (accents / French tokens), not merely a less-English EN half --
+  # "Kootenay Boundary E / West Boundary" must not split just because "West"
+  # reads English. Language-neutral dual names stay combined (conservative:
+  # e.g. "British Columbia / Colombie-Britannique" carries no scoring signal).
+  keep <- bar | vapply(seq_along(ea), function(i) {
+    s <- ivt_f2_frscore(fb[i])
+    s > 0 && s > ivt_f2_frscore(ea[i])
+  }, logical(1))
+  en[hit[keep]] <- ea[keep]
+  fr[hit[keep]] <- fb[keep]
+  list(en = en, fr = fr)
 }
 
 # Byte range [start, end) of the geography dimension's codebook region, anchored on
@@ -1478,8 +1589,8 @@ ivt_f2_geo_inline_dir <- function(raw) {
     }
   }
   pe <- ivt_f2_parse_inline(runs[[en_i]])
-  nm <- pe$name; cd <- pe$code; fl <- pe$flag
-  length(nm) <- length(cd) <- length(fl) <- n_geo
+  nm <- pe$name; cd <- pe$code; fl <- pe$flag; ty <- pe$type; tnr <- pe$tnr
+  length(nm) <- length(cd) <- length(fl) <- length(ty) <- length(tnr) <- n_geo
   nm_fr <- if (!is.na(fr_i)) ivt_f2_parse_inline(runs[[fr_i]])$name
            else rep(NA_character_, n_geo)
   length(nm_fr) <- n_geo
@@ -1492,17 +1603,47 @@ ivt_f2_geo_inline_dir <- function(raw) {
     ok <- okm & !is.na(v)
     if (sum(ok) && all(v[ok] == cd[ok])) { codes <- v; break }
   }
-  g <- tibble::tibble(member_id = seq_len(n_geo), geo_name = trimws(nm),
-                      geo_name_fr = trimws(nm_fr), geouid = codes, dqf_code = fl)
+  g <- ivt_f2_inline_table(nm, nm_fr, codes, fl, ty, tnr)
   ivt_f2_check_geo_count(raw, nrow(g))
   g
+}
+
+# Assemble the inline geography tibble from the parsed combined-record fields:
+#   geo_label      the stored combined display string, verbatim apart from
+#                  whitespace trim (what the B2020 viewer shows -- the
+#                  member-order join key for viewer validation);
+#   geo_name(_fr)  its English / French halves (`ivt_f2_split_bilingual()`; the
+#                  same string in both when the member has one name). When a
+#                  DISTINCT French combined run exists AND its differing names
+#                  actually read French, its split French half wins for
+#                  geo_name_fr -- the aggregate-frscore gate keeps the custom
+#                  exports' second run (an alternate ENGLISH display copy, e.g.
+#                  cro's type-suffix-less duplicate) out of the French column;
+#   geouid / dqf_code / geo_type_abbr / tnr_short_form  as parsed (the last two
+#                  all-NA on vintages that store neither).
+ivt_f2_inline_table <- function(nm, nm_fr, codes, fl, ty, tnr) {
+  label <- trimws(nm)
+  sp <- ivt_f2_split_bilingual(label)
+  name_fr <- sp$fr
+  lab_fr <- trimws(nm_fr)
+  d <- which(!is.na(lab_fr) & !is.na(label) & lab_fr != label)
+  if (length(d) && ivt_f2_frscore(lab_fr[d]) > ivt_f2_frscore(label[d]))
+    name_fr[d] <- ivt_f2_split_bilingual(lab_fr[d])$fr
+  tibble::tibble(member_id = seq_along(label), geo_label = label,
+                 geo_name = sp$en, geo_name_fr = name_fr, geouid = codes,
+                 geo_type_abbr = ty, dqf_code = fl, tnr_short_form = tnr)
 }
 
 #' Geography table for an inline-codebook (pre-DGUID) family-2 IVT.
 #'
 #' Returns a tibble with one row per geography (member order) and columns
-#' `geo_name` (often a bilingual "EN | FR" label), `geouid` (bare geographic code,
-#' character) and `dqf_code` (data-quality flag). Primary read: positionally from
+#' `geo_label` (the stored display string, often a bilingual "EN | FR" /
+#' "EN / FR" combined label), `geo_name` / `geo_name_fr` (its English and
+#' French halves, split per run by `ivt_f2_split_bilingual()`), `geouid` (bare
+#' geographic code, character), `geo_type_abbr` (the geography-type /
+#' municipal-status abbreviation, where the vintage stores one), `dqf_code`
+#' (data-quality flag) and `tnr_short_form` (the total non-response rate the
+#' 2016+ exports append). Primary read: positionally from
 #' the geography dimension's block directory (`ivt_f2_geo_inline_dir()` -- true
 #' member order, no dedup). Fallback: the marker-region block scan + regex parse
 #' with first-appearance dedup (which can misorder chunks stored out of byte
@@ -1523,17 +1664,19 @@ ivt_f2_geo_inline <- function(raw) {
   blocks <- blocks[order(vapply(blocks, function(b) b$start, 1))]
   pat <- IVT_F2_INLINE_PAT
   is_inline <- vapply(blocks, function(b)
-    length(b$texts) >= 16L && mean(grepl(pat, b$texts)) > 0.8, logical(1))
+    length(b$texts) >= 16L && mean(grepl(pat, b$texts, perl = TRUE)) > 0.8,
+    logical(1))
   seen <- new.env(hash = TRUE, parent = emptyenv())
   nm <- character(0); cd <- character(0); fl <- character(0)
+  ty <- character(0); tnr <- character(0)
   for (b in blocks[is_inline]) {
-    m <- regmatches(b$texts, regexec(pat, b$texts))
-    for (gg in m) {
-      if (length(gg) < 4L) next
-      code <- gg[3]
+    p <- ivt_f2_parse_inline(b$texts)
+    for (i in which(!is.na(p$code))) {
+      code <- p$code[i]
       if (!is.null(seen[[code]])) next
       seen[[code]] <- TRUE
-      nm <- c(nm, gg[2]); cd <- c(cd, code); fl <- c(fl, gg[4])
+      nm <- c(nm, p$name[i]); cd <- c(cd, code); fl <- c(fl, p$flag[i])
+      ty <- c(ty, p$type[i]); tnr <- c(tnr, p$tnr[i])
     }
   }
   if (!length(cd)) return(NULL)
@@ -1545,8 +1688,7 @@ ivt_f2_geo_inline <- function(raw) {
     "The inline geography codebook was parsed by the marker-region regex scan,",
     "not read positionally from the block directory; the member order of",
     "byte-order + dedup scans has been wrong before on chunked codebooks."))
-  g <- tibble::tibble(member_id = seq_along(cd), geo_name = trimws(nm),
-                      geo_name_fr = NA_character_, geouid = cd, dqf_code = fl)
+  g <- ivt_f2_inline_table(nm, rep(NA_character_, length(nm)), cd, fl, ty, tnr)
   ivt_f2_check_geo_count(raw, nrow(g))
   g
 }

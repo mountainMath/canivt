@@ -157,6 +157,30 @@ on all six reference tables:
   dqf are byte-identical. Internal-consistency validated (owner+renter+band =
   total per geography, ±random rounding). The inline reader now returns
   `geo_name_fr` alongside `geo_name` for all inline vintages.
+- **Enriched geography metadata on the DEFAULT path** (2026-07-05):
+  `metadata$geographies` packs **every decoded per-member column**, all-NA
+  columns dropped. Small schema'd tables (≤256 geos: 0241/0077/0662/0044) get
+  the full positional attribute table by default (bilingual labels/names,
+  DGUID, level, type, prov/geocodes, DQF, TNR); the inline vintages expose the
+  formerly-DISCARDED combined-record captures `geo_type_abbr` (the municipal /
+  CSD-status token — 2006/2016 `T`/`MÉ`/`IRI`…, 1981 `SUN`, 1996 `COM`, the
+  cro/ord `", CSD"` name suffix) and `tnr_short_form` (the 2016+ trailing
+  `( 4.0%)`, normalised to the modern decimal form), plus `dqf_code`. The
+  stored combined display string stays verbatim as **`geo_label`** (the viewer
+  member-order join key = the OLD `geo_name`); `geo_name`/`geo_name_fr` are
+  its EN/FR halves (`ivt_f2_split_bilingual()`: `" | "` — 1991's dedicated
+  language separator — always splits; `" / "` needs **positive French
+  evidence** (frscore > 0 and > EN half) so dual English names ("Kootenay
+  Boundary E / West Boundary") and neutral pairs ("Greater Sudbury / Grand
+  Sudbury") stay combined; the language order is fixed once per run). The
+  inline parse runs under **PCRE** (`perl = TRUE`): TRE reads `[^0-9\s]` as
+  not-digit/backslash/'s' and let a leading space into the captured type
+  token. cro's second combined run is an alternate ENGLISH display copy (type
+  suffixes stripped), so a distinct FR run only feeds `geo_name_fr` when its
+  differing names actually score French. `ivt_write_metadata()` writes every
+  decoded column (geographies.csv) + `dqf_legend.csv`. Corpus-validated:
+  geo_uid order byte-identical on all 26 supported tables; old `geo_name` ==
+  new `geo_label` everywhere.
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every
@@ -449,8 +473,11 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   single-block codebook (`ivt_f2_geo_simple()`, small/family-1 tables) or the fast
   DGUID scan + optional `geo_attributes` (large family-2 tables). `geographies` is
   now uniformly keyed `geo_name`/`geo_uid`/`member_id` for both families (was
-  `name`/`dguid` for family 1), and `ivt_tidy()` emits `geo_name`/`geo_uid` columns
-  for all tables. **All six reference tables now label every data dimension**,
+  `name`/`dguid` for family 1) **plus every other decoded attribute column the
+  vintage stores** (geo_label(_fr), geo_name_fr, geo_level, geo_type(_abbr),
+  prov_abbr, alt_geo_code, pr_code, dqf_code/dqf_note, tnr_short_form; all-NA
+  columns dropped), and `ivt_tidy()` emits `geo_label`/`geo_name`/`geo_uid`/
+  `geo_level` columns where decoded. **All six reference tables now label every data dimension**,
   byte-identical to the old output where it existed; the marker anchor closed the
   last gaps: 98-10-0077 `Ages`(18) (EN block carries 2 leading framing records) and
   `Year`(2) (a 2-member reference period with no ordinal block, `2020`/`2015`), and
@@ -478,10 +505,15 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
     schema slot/name, no `"2021"`/`"Canada"` sniffing; `GEO_NAME` is the canonical short
     name, DGUID byte-identical to the legacy scan.
   - **Combined-block (1991/2006/2011/2016):** `ivt_f2_geo_inline()` anchors on
-    `ivt_f2_geo_marker_region()` and parses **only** that region; name/uid/flag come
-    from the block's **structural format**. The uid is **character** — a bare code
+    `ivt_f2_geo_marker_region()` and parses **only** that region; label/uid/flag/
+    type/tnr come
+    from the block's **structural format** (`ivt_f2_parse_inline()`, PCRE). The
+    uid is **character** — a bare code
     (2016 `01`, 2006 `1001105`), a dotted census-tract code (2011 `0010001.00`), never
-    a DGUID here. Admits accented type abbrevs (`MÉ`) and the 2016 trailing `(pct%)`.
+    a DGUID here. The type token (accented abbrevs admitted, `MÉ`) is captured as
+    `geo_type_abbr` and the 2016 trailing `(pct%)` as `tnr_short_form`; the stored
+    combined string is `geo_label` and `ivt_f2_split_bilingual()` derives
+    `geo_name`/`geo_name_fr`.
     Exact member counts (each viewer-validated; see the member-ordering bullet
     below): 1991 41,859 (the former scan misordered the last 2,435), 2006 57,523
     (R=3 runs, no code array, partial chunk stored first per run; scan misordered

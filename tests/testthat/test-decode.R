@@ -175,11 +175,14 @@ test_that("Canada decodes to the published tenure totals", {
   expect_equal(nrow(tab$cells), 7489464L)
   # by default data columns are named by the terse structural slug (descriptor order)
   td <- ivt_tidy(tab)
-  expect_equal(setdiff(names(td), c("geo_name", "geo_uid", "value")),
+  geo_cols <- c("geo_label", "geo_name", "geo_uid", "geo_level", "value")
+  expect_equal(setdiff(names(td), geo_cols),
                c("age", "household", "period", "statistics", "housing", "tenure"))
+  # the light metadata path carries the full attribute table for the small
+  # schema'd tables, so tidy fronts the display label and aggregation level too
+  expect_true(all(c("geo_label", "geo_level") %in% names(td)))
   # dim_names = "label" uses the full English dimension labels
-  expect_equal(setdiff(names(ivt_tidy(tab, dim_names = "label")),
-                       c("geo_name", "geo_uid", "value")),
+  expect_equal(setdiff(names(ivt_tidy(tab, dim_names = "label")), geo_cols),
                c("Age of primary household maintainer",
                  "Household type including census family structure",
                  "Period of construction", "Statistics", "Housing indicators",
@@ -274,7 +277,10 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   expect_equal(length(m$geographies$geo_uid), 91L)
   expect_equal(length(m$geographies$geo_name), 91L)
   expect_true(is.na(m$geographies$geo_uid[26]))
-  expect_equal(m$geographies$geo_name[26], "Canada outside Quebec and New Brunswick")
+  # member 26 carries no attributes at all, so its GEO_NAME is a true NA hole;
+  # the display Member Name (geo_label), which every member carries, has it
+  expect_true(is.na(m$geographies$geo_name[26]))
+  expect_equal(m$geographies$geo_label[26], "Canada outside Quebec and New Brunswick")
   expect_equal(m$geographies$geo_uid[27], "2021A000210")  # Newfoundland and Labrador
   at <- ivt_f2_geo_attributes(raw)
   expect_equal(nrow(at), 91L)

@@ -31,6 +31,29 @@ exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
 - [x] Geography: all 11 attributes — name, DGUID/GEOUID, level, type +
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate. (Covers every StatCan geo attribute key 3,4,5,9,10,12-17.)
+- [x] **Geography attributes on the DEFAULT metadata path** (2026-07-05):
+  `ivt_metadata()$geographies` now packs every decoded per-member column, not
+  just name+uid. Small schema'd tables (≤256 geos, e.g. 98-10-0241/0077/0662)
+  return the full positional attribute table (bilingual labels/names, DGUID,
+  `geo_level`, `geo_type(_abbr)`, `prov_abbr`, `alt_geo_code`, `pr_code`,
+  `dqf_code`/`dqf_note`, `tnr_short_form`); the pre-DGUID inline vintages
+  return what their combined record stores — the previously **discarded**
+  captures `geo_type_abbr` (the municipal / CSD-status token: 2006/2016 `T`,
+  `MÉ`, `IRI`, …; the 1981/1996 `SUN`/`COM` styles; the cro/ord `", CSD"` name
+  suffix) and `tnr_short_form` (the 2016+ trailing `( 4.0%)` percentage,
+  normalised to the modern decimal-point form), alongside `dqf_code`. The
+  stored combined display string is kept verbatim as `geo_label` (the viewer
+  join key) and its EN/FR halves are split into `geo_name`/`geo_name_fr`
+  (`ivt_f2_split_bilingual()`: `" | "` — 1991's dedicated language separator —
+  always splits; `" / "` splits only with **positive French evidence** in the
+  French half, so dual English names like `Kootenay Boundary E / West
+  Boundary` and language-neutral pairs like `Greater Sudbury / Grand Sudbury`
+  stay combined). All-NA columns are dropped (only what the vintage stores is
+  exposed); large chunked tables stay uid-only by default (the full table via
+  `read_ivt(geo_attributes = TRUE)` as before). `ivt_write_metadata()` writes
+  every decoded column to geographies.csv plus the DQF legend
+  (`dqf_legend.csv`). Corpus-validated: geo_uid order byte-identical on all 26
+  supported tables, old `geo_name` recoverable as the new `geo_label`.
 - [x] Dimension member labels (Age/Gender/Sex), counts, type markers.
 - [x] Footnote text (modern framed `Footnote N`/`Renvoi N`; legacy `(N) text`;
   the numberless all-caps `FOOTNOTE:`/`RENVOI :` framing, 1981–2016 — its
