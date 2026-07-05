@@ -420,6 +420,22 @@ Family-2 integration tests in `tests/testthat/test-decode-f2.R` likewise need
 pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
 `CANIVT_SAMPLE_IVT_1991` at `1003011.IVT`.
 
+**The corpus regression ledger** (`tests/testthat/test-corpus.R` +
+`fixtures/corpus-ledger.csv`) runs the WHOLE local corpus (one folder per table
+under `CANIVT_IVT_CACHE`) through `read_ivt()` and asserts, per table: the
+`ivt_is_supported()` verdict, strict-mode cleanliness (`strict_clean = FALSE`
+rows are the KNOWN fallbacks — they must warn `canivt_fallback`, not error, so
+both a vanished warning and a new failure trip the test) and the exact non-zero
+cell count (the cheapest whole-pipeline invariant — a collapsed dimension
+changes it). It decodes ~150M cells in ~4 min, so it is **opt-in**:
+
+```sh
+CANIVT_CORPUS_TESTS=1 Rscript -e 'devtools::test(filter = "corpus")'
+```
+
+When a gap is closed or a table is onboarded, update the ledger row (and
+`inst/notes/coverage.md`) in the same commit.
+
 `.ivt` and large `.csv` files are git-ignored; never commit them.
 
 ## Likely next tasks
