@@ -711,20 +711,30 @@ Files in the test corpus that are currently unsupported:
   fallback, since this export carries no binary `81 02 02 00` member codebook —
   Tenure 4/4, characteristics 76/79 (the text under-lists the 3 tail members
   the cube stores).
-- [~] **2006 custom-order crosstabs `cro0172986_ct.7/8-2006` — cells + dimensions
-  DECODED** (2026-07-04, via the same `@32` relocation). `Geography(581) ×
-  Tenure/Housing × Characteristics`; owner+renter=total holds. Their pre-DGUID
-  geography combined block (stored `"<name>, <type> (<code>)"` with no dqf flag,
-  near the title block ~795 KB) is not yet located by `ivt_f2_geo_marker_region()`
-  (which resolves ~150 KB too high), so `geo_name` is empty — the remaining gap.
+- [x] **2006 custom-order crosstabs `cro0172986_ct.7/8-2006` — cells + dimensions
+  + geography DECODED** (cells 2026-07-04 via the `@32` relocation; geography
+  2026-07-04). `Geography(581, BC CDs+CSDs) × Tenure/Housing(4) ×
+  Characteristics`; owner+renter+band = total holds per geography (±random
+  rounding). Geography now reads **positionally from dimension 1's slot
+  directory** (`ivt_f2_geo_inline_dir()`), all 581 EN **and** FR names + GEOUIDs,
+  via two format/reader fixes: (a) `ivt_f2_read_dir_at(relaxed = TRUE)` admits the
+  `len2 > len` **allocated** size these exports store (content 3024 → allocation
+  3078), used only as `ivt_f2_dim_dir()`'s bounded fallback so it never over-reads
+  garbage on other tables; (b) `IVT_F2_INLINE_PAT2` + `ivt_f2_parse_inline()` parse
+  the **code-in-trailing-parens** combined form `"<name>, <type> (<code>)"` (no dqf
+  flag), tried only after the flag-trailing `IVT_F2_INLINE_PAT` so 1991/2006/2011
+  are byte-identical (geo_name/geouid/dqf verified unchanged on all three). The
+  two combined runs are near-identical EN/FR (BC names untranslated bar the
+  province), surfaced as `geo_name`/`geo_name_fr`.
 
 Decoding the remaining files is future work — each likely needs its
 descriptor/codebook layout reverse-engineered. Reconnaissance (sub-format
 taxonomy, descriptor locations, per-file blockers) is captured in
 [`unsupported-formats.md`](unsupported-formats.md). Summary: the still-open items
 are older layouts whose container/descriptor is not yet located (`97F0015X`,
-1981 `97-570-X1981002`, the 2016019 variant) and the cro geography codebook
-(cells decode, names pending). (`ord-08035` — its "different page encoding" was
+1981 `97-570-X1981002`, the 2016019 variant). (The `cro0172986_ct.7/8` custom
+crosstabs are now fully SUPPORTED incl. bilingual geography names — see above.
+`ord-08035` — its "different page encoding" was
 just a misread descriptor from a relocated `@32` pointer; `97F0020X`,
 `97-563-XCB2006072`, `97-570-X1981004`, `98-400-X2016203` and the 1991 profiles
 `98F0172X`/`95F0170X` — formerly the top open items — are now all SUPPORTED via

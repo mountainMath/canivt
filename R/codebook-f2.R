@@ -251,12 +251,18 @@ IVT_F2_DIR_SLOTS <- c(824L, 572L, 712L)
 
 # Decode a metadata block directory that STARTS at absolute offset `ptr`: a run of
 # 8-byte entries `[u32 off][u16 len][u16 len]` (null `(0,0)` slots tolerated). The
-# second length is normally a copy of the first, but the 1991 profile exports
-# (98F0172X / 95F0170X) store the 4-byte-ALIGNED allocation there (205 -> 208,
-# 245 -> 248 in their master directories), so a `len2 == 4*ceiling(len/4)` entry
-# is admitted too; the content length is always the first field. Returns a
-# two-column matrix (off, len), or NULL when `ptr` is not a well-formed table.
-ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L) {
+# second length is normally a copy of the first; the 1991 profile exports (98F0172X
+# / 95F0170X) store the 4-byte-ALIGNED allocation there (205 -> 208). That
+# `len2 == len || len2 == 4*ceiling(len/4)` rule is the default: it doubles as the
+# end-of-table sentinel (random trailing bytes rarely satisfy it), so relaxing it
+# globally over-reads garbage on some tables. `relaxed = TRUE` accepts any `len2 >=
+# len` (the block's true ALLOCATED size, which the 2006 custom-order crosstabs
+# cro0172986_ct.7/8 store larger than the content: 3024 -> 3078, 367 -> 903) --
+# used only by `ivt_f2_dim_dir()` as a bounded fallback (capped to the slot's
+# declared entry count) when the strict read comes up short. The content length is
+# always the first field. Returns a two-column matrix (off, len), or NULL when
+# `ptr` is not a well-formed table.
+ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L, relaxed = FALSE) {
   n <- length(raw)
   if (is.na(ptr) || ptr < 1L || ptr + 8L > n) return(NULL)
   offs <- integer(0); lens <- integer(0)
@@ -266,8 +272,9 @@ ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L) {
     off <- rd_u32(raw, base); a <- rd_u16(raw, base + 4L); b <- rd_u16(raw, base + 6L)
     if (is.na(off) || is.na(a) || is.na(b)) break
     if (off == 0 && a == 0) next                       # null slot
-    if ((b != a && b != (a + 3L) %/% 4L * 4L) ||
-        a <= 0L || off < 1 || off > n) break           # end of table
+    len2_ok <- if (relaxed) b >= a
+               else b == a || b == (a + 3L) %/% 4L * 4L
+    if (!len2_ok || a <= 0L || off < 1 || off > n) break   # end of table
     offs <- c(offs, off); lens <- c(lens, a)
   }
   if (!length(offs)) return(NULL)
@@ -596,7 +603,8 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   #    DGUID array; the uid is the bare code inside the combined block).
   inl <- ivt_f2_geo_inline(raw)
   if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo))
-    return(list(geo_name = inl$geo_name, geo_uid = inl$geouid,
+    return(list(geo_name = inl$geo_name, geo_name_fr = inl$geo_name_fr,
+                geo_uid = inl$geouid,
                 dqf_code = inl$dqf_code))   # the per-geography flag: on the
                                             # 2016 tables its last digit marks
                                             # wholly-suppressed geographies
@@ -1269,6 +1277,39 @@ IVT_F2_INLINE_PAT <- paste0(
   "^(.*) \\(([0-9A-Za-z.]+)\\)(?:,\\s*|\\s+)(?:[^0-9\\s]\\S*\\s+)?([0-9]+)",
   "(?:\\s*\\([^)]*\\))?\\s*$")
 
+# A second inline layout stores the code LAST, inside the trailing parentheses, with
+# NO data-quality flag: "<name>[, <type_abbr>] (<code>)" -- the 2006 custom-order
+# crosstabs (cro0172986_ct.7/8) use it (e.g. "East Kootenay, RD (5901)", "Elkford,
+# DM (5901003)"). The name (which keeps its ", <type>" suffix as StatCan displays it)
+# is everything before the final "(code)"; there is no flag. Tried only AFTER
+# `IVT_F2_INLINE_PAT` (which the 1991/2006/2011 "<name> (<code>) <flag>" blocks match),
+# so those vintages are unaffected.
+IVT_F2_INLINE_PAT2 <- "^(.*?)\\s*\\(([0-9A-Za-z.]+)\\)\\s*$"
+
+# Parse a vector of inline geography member strings into name / code / flag columns,
+# trying the flag-trailing form (`IVT_F2_INLINE_PAT`) first and the code-trailing form
+# (`IVT_F2_INLINE_PAT2`) for whatever it misses. Returns a list of three character
+# vectors (NA where neither pattern matched; `flag` is always NA for the second form).
+ivt_f2_parse_inline <- function(v) {
+  nm <- code <- fl <- rep(NA_character_, length(v))
+  m1 <- regmatches(v, regexec(IVT_F2_INLINE_PAT, v))
+  ok1 <- vapply(m1, function(g) length(g) >= 4L, logical(1))
+  if (any(ok1)) {
+    nm[ok1]   <- vapply(m1[ok1], `[`, "", 2L)
+    code[ok1] <- vapply(m1[ok1], `[`, "", 3L)
+    fl[ok1]   <- vapply(m1[ok1], `[`, "", 4L)
+  }
+  miss <- !ok1 & !is.na(v)
+  if (any(miss)) {
+    m2 <- regmatches(v[miss], regexec(IVT_F2_INLINE_PAT2, v[miss]))
+    ok2 <- vapply(m2, function(g) length(g) >= 3L, logical(1))
+    idx <- which(miss)[ok2]
+    nm[idx]   <- vapply(m2[ok2], `[`, "", 2L)
+    code[idx] <- vapply(m2[ok2], `[`, "", 3L)
+  }
+  list(name = nm, code = code, flag = fl)
+}
+
 # Byte range [start, end) of the geography dimension's codebook region, anchored on
 # its `81 02 02 00` doubled-name marker (the same anchor used for every data
 # dimension). Preferred bound: the geography block directory's own byte span
@@ -1414,25 +1455,35 @@ ivt_f2_geo_inline_dir <- function(raw) {
     if (!is.null(runs)) break
   }
   if (is.null(runs)) return(NULL)
-  # run roles by content: the combined runs parse as "name (code) flag"
+  # run roles by content: the combined runs parse as "name (code) flag" (flag-last)
+  # or "name, type (code)" (code-last) -- either counts (`ivt_f2_parse_inline`).
   prate <- vapply(runs, function(v) {
     nn <- v[!is.na(v)]
-    if (!length(nn)) 0 else mean(grepl(IVT_F2_INLINE_PAT, nn))
+    if (!length(nn)) 0 else mean(!is.na(ivt_f2_parse_inline(nn)$code))
   }, 0)
   cmb <- which(prate >= 0.8)
   if (!length(cmb)) return(NULL)
-  # English combined run by frscore over the members where the two copies differ
-  comb <- if (length(cmb) == 1L) runs[[cmb[1L]]] else {
+  # English combined run by frscore over the members where the two copies differ;
+  # the OTHER combined run (when a distinct one exists) is the French copy. On the
+  # 1991/2006/2011 vintages the two combined runs are identical bilingual "EN | FR"
+  # blocks, so geo_name_fr collapses to geo_name (French falls back to it in tidy).
+  en_i <- cmb[1L]; fr_i <- NA_integer_
+  if (length(cmb) >= 2L) {
     a <- runs[[cmb[1L]]]; b <- runs[[cmb[2L]]]
     dd <- which(!is.na(a) & !is.na(b) & a != b)
-    if (ivt_f2_frscore(a[dd]) <= ivt_f2_frscore(b[dd])) a else b
+    if (ivt_f2_frscore(a[dd]) <= ivt_f2_frscore(b[dd])) {
+      en_i <- cmb[1L]; fr_i <- cmb[2L]
+    } else {
+      en_i <- cmb[2L]; fr_i <- cmb[1L]
+    }
   }
-  m <- regmatches(comb, regexec(IVT_F2_INLINE_PAT, comb))
-  okm <- vapply(m, function(gg) length(gg) >= 4L, logical(1))
-  nm <- fl <- rep(NA_character_, n_geo); cd <- nm
-  nm[okm] <- vapply(m[okm], `[`, "", 2L)
-  cd[okm] <- vapply(m[okm], `[`, "", 3L)
-  fl[okm] <- vapply(m[okm], `[`, "", 4L)
+  pe <- ivt_f2_parse_inline(runs[[en_i]])
+  nm <- pe$name; cd <- pe$code; fl <- pe$flag
+  length(nm) <- length(cd) <- length(fl) <- n_geo
+  nm_fr <- if (!is.na(fr_i)) ivt_f2_parse_inline(runs[[fr_i]])$name
+           else rep(NA_character_, n_geo)
+  length(nm_fr) <- n_geo
+  okm <- !is.na(cd)
   # a positional code array (a non-combined run equal to the parsed codes) is
   # preferred as the uid -- it also cross-validates the run alignment
   codes <- cd
@@ -1442,7 +1493,7 @@ ivt_f2_geo_inline_dir <- function(raw) {
     if (sum(ok) && all(v[ok] == cd[ok])) { codes <- v; break }
   }
   g <- tibble::tibble(member_id = seq_len(n_geo), geo_name = trimws(nm),
-                      geouid = codes, dqf_code = fl)
+                      geo_name_fr = trimws(nm_fr), geouid = codes, dqf_code = fl)
   ivt_f2_check_geo_count(raw, nrow(g))
   g
 }
@@ -1495,7 +1546,7 @@ ivt_f2_geo_inline <- function(raw) {
     "not read positionally from the block directory; the member order of",
     "byte-order + dedup scans has been wrong before on chunked codebooks."))
   g <- tibble::tibble(member_id = seq_along(cd), geo_name = trimws(nm),
-                      geouid = cd, dqf_code = fl)
+                      geo_name_fr = NA_character_, geouid = cd, dqf_code = fl)
   ivt_f2_check_geo_count(raw, nrow(g))
   g
 }

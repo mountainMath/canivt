@@ -144,6 +144,19 @@ on all six reference tables:
   also `0x09` with **331** members — the u8 read collapsed it to 1, so only
   member 1's cells had decoded. Now CSV-validated cell-exact (14,895/14,895
   over 3 geographies: all 331 mother-tongue × 3 gender × 5 knowledge).
+- **2006 custom-order crosstabs `cro0172986_ct.7/8`** (BC CDs+CSDs): cells +
+  dims were already decoded; **geography now decodes too** — all 581 EN **and**
+  FR names + GEOUIDs, read positionally from dimension 1's slot directory. Two
+  small fixes: (1) `ivt_f2_read_dir_at(relaxed = TRUE)` admits the `len2 > len`
+  **allocated** block size these exports store (content 3024 → allocation 3078),
+  used only as `ivt_f2_dim_dir()`'s bounded fallback (capped to the slot's
+  declared entry count) so it never over-reads garbage elsewhere; (2)
+  `IVT_F2_INLINE_PAT2` + `ivt_f2_parse_inline()` parse the **code-in-trailing-
+  parens** combined form `"<name>, <type> (<code>)"` (no dqf flag), tried only
+  after the flag-trailing `IVT_F2_INLINE_PAT` — 1991/2006/2011 geo_name/geouid/
+  dqf are byte-identical. Internal-consistency validated (owner+renter+band =
+  total per geography, ±random rounding). The inline reader now returns
+  `geo_name_fr` alongside `geo_name` for all inline vintages.
 
 `read_ivt()` auto-detects via `ivt_family()`, but **both the cell decode and the
 metadata read are now shared** (`ivt_decode()` + `ivt_f2_metadata()` for every
@@ -610,7 +623,10 @@ pointed at `98100129.ivt` (fallback `/tmp/t129/98100129.ivt`), and the 1991 test
   container variants**, rejected structurally by the page pre-flight or
   descriptor gate: `98-400-X2016019` (descriptor misreads,
   `ivt_f2_decodable()`), `97F0015XCB2001041` and `97-570-X1981002` (descriptor
-  undecoded), the `cro`/`ord` extracts (page body / descriptor un-RE'd).
+  undecoded). (The `cro0172986_ct.7/8` and `ord-08035` custom extracts are now
+  SUPPORTED — the "page body / descriptor un-RE'd" reads were misread `@32`
+  descriptor pointers; the cro **geography** is now decoded too, all 581 BC
+  CD/CSD names EN+FR — see below.)
   **97-570-X1981004, 98-400-X2016203, the 1991 profiles 98F0172X/95F0170X and
   the 2001 F-series 97F0020XCB2001070 are SUPPORTED as of 2026-07-04**
   (descriptor misreads — `0x0a`/`0x09` u16 count width tags, the "Values"

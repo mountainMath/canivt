@@ -80,6 +80,14 @@ ivt_f2_dim_dir <- function(raw, k, slots = NULL) {
   d <- ivt_f2_read_dir_at(raw, sl$ptr, max_entries = want + 4L)
   if (ok(d)) return(d)
   d <- ivt_f2_read_dir_at(raw, rd_u32(raw, sl$ptr), max_entries = want + 4L)
+  if (ok(d)) return(d)
+  # some exports (the 2006 custom-order crosstabs cro0172986_ct.7/8) store an
+  # ALLOCATED len2 > len that the strict end-of-table sentinel treats as a stop,
+  # truncating the read. Retry admitting any `len2 >= len`, but bounded to the
+  # slot's declared entry count so the relaxed rule cannot run on into garbage.
+  d <- ivt_f2_read_dir_at(raw, sl$ptr, max_entries = want, relaxed = TRUE)
+  if (ok(d)) return(d)
+  d <- ivt_f2_read_dir_at(raw, rd_u32(raw, sl$ptr), max_entries = want, relaxed = TRUE)
   if (ok(d)) d else NULL
 }
 

@@ -124,7 +124,16 @@ fully decoded):
   (the `b3 >= 0x0a` suppression-tail pages append mask records after the run — see
   "The b3 head block and suppression tails" below). The decoder enforces the bound
   per page (`canivt_page_overrun`), so a misread marker aborts rather than
-  decoding garbage values. The second copy's purpose (redundancy?) is unproven.
+  decoding garbage values. In the **codebook block directories** the second field
+  is likewise the block's allocation and is usually equal to the content length,
+  but some exports store it **larger**: the 1991 profiles round it up to a 4-byte
+  boundary (`len2 = 4·ceil(len/4)`), and the 2006 custom-order crosstabs
+  (`cro0172986_ct.7/8`) store an outright larger capacity (content 3024 →
+  allocation 3078, 367 → 903). `ivt_f2_read_dir_at()` uses `len2 == len ||
+  len2 == 4·ceil(len/4)` as its default end-of-table sentinel (a stricter rule
+  that random trailing bytes rarely satisfy) and only admits any `len2 >= len` in
+  its bounded `relaxed` mode (`ivt_f2_dim_dir()`, capped to the slot's declared
+  entry count). The content length is always the first field.
 - **Per-page header bytes.** The page marker is `[b0] 01 [b2] [b3]` with the value-
   width in `b0`'s low nibble and `b3 ∈ {08,09,0a,0c}` (a ZERO high nibble in `b0`
   is the dense variant — bytes 3–4 are then a u16 value count, see "Dense pages"
@@ -438,6 +447,31 @@ GIDs 1,2,3,9,10,11,13,14 — see the sibling `censusmapper-import` repo).
   2021 `2021A000210`), and the 5-digit **data-quality flag**. First-appearance
   de-duplication on the unique GEOUID yields member order (the same idea as the
   2021 DGUID stitch). For enumeration areas the name equals the code.
+
+#### Inline combined-block format variants
+
+The inline geography "combined block" packs the member's name, code and (usually)
+a data-quality flag into one string, but the field ORDER differs by vintage. Two
+patterns cover the corpus, tried in order by `ivt_f2_parse_inline()`:
+
+- **Flag-trailing** (`IVT_F2_INLINE_PAT`), the common form — `"<name> (<code>)
+  [<type_abbr>] <flag>"` (1991/2006/2011) and its comma variant `"<name>
+  (<code>), <type_abbr> <flag>"` (a few unorganised CSDs, plus the 2016 tables'
+  trailing ` (<pct>%)` non-response rate). The code sits in the FIRST parentheses,
+  the numeric flag last.
+- **Code-trailing** (`IVT_F2_INLINE_PAT2`) — `"<name>[, <type_abbr>] (<code>)"`
+  with **no flag**, the code in the LAST parentheses (the 2006 custom-order
+  crosstabs `cro0172986_ct.7/8`: `"East Kootenay, RD (5901)"`, `"Elkford, DM
+  (5901003)"`; the name keeps its `, <type>` suffix as StatCan displays it).
+  Tried only after the flag-trailing form, so the older vintages are unaffected.
+
+The block is read **positionally** from the geography dimension's slot directory
+(`ivt_f2_geo_inline_dir()`), which lays down, per 256-member chunk, several runs:
+two combined runs (English then French — often near-identical, only province-level
+names translate) plus separate code / type / ordinal arrays. Both combined runs
+are parsed, giving `geo_name` (English, chosen by `ivt_f2_frscore()`) and
+`geo_name_fr`; the bare-code run supplies the `geouid`. Low-level geographies with
+no name (a code-only member) simply carry the code as the name — expected.
 
 #### The geography layout is declared in the header (not inferred)
 
