@@ -1262,8 +1262,11 @@ ivt_f2_geo_is_inline <- function(raw) {
 # abbreviation, not the numeric flag) -- this admits "T" and the accented Quebec
 # "ME"; and an optional trailing parenthesised group carries the non-response rate
 # that the 2016 single-census-year tables append (e.g. "Canada (01) 20000 ( 4.0%)").
+# A comma may follow the code group: a few unorganised CSDs in the ord custom
+# export invert the order to "<name> (<code>), <type_abbr> <flag>" (e.g. "Central
+# Kootenay D (5903039), CSD 01010 ( 14.4%)"), so the code/name still resolve.
 IVT_F2_INLINE_PAT <- paste0(
-  "^(.*) \\(([0-9A-Za-z.]+)\\)\\s+(?:[^0-9\\s]\\S*\\s+)?([0-9]+)",
+  "^(.*) \\(([0-9A-Za-z.]+)\\)(?:,\\s*|\\s+)(?:[^0-9\\s]\\S*\\s+)?([0-9]+)",
   "(?:\\s*\\([^)]*\\))?\\s*$")
 
 # Byte range [start, end) of the geography dimension's codebook region, anchored on
@@ -1566,14 +1569,122 @@ ivt_f2_geographies <- function(raw) {
 # (41859/110/3), 98-10-0241 (166 + 6 data dims) and 98-10-0077 (174 + 6 data dims
 # incl. the "Year (2)" reference period).
 
+# The dimension-descriptor block opens with an invariant 9-byte signature on
+# EVERY known layout (family-1, family-2, legacy and profile): `81 01 20 00 f0`
+# then `.. .. 80 03` (`81 01` block marker, u16 len 0x20, then `f0<XX>00 80 03`;
+# the fifth/sixth bytes vary `20`/`28`). This lets the descriptor be located
+# structurally rather than trusting a single header pointer -- some custom-order
+# exports (ord-08035, the cro crosstabs) point the `@32` field at the identity /
+# title block instead, while still listing the descriptor in the master directory.
+ivt_f2_is_descriptor <- function(raw, off) {
+  if (is.null(off) || is.na(off) || off < 1L || off + 18L > length(raw)) return(FALSE)
+  b <- as.integer(raw[(off + 1L):(off + 9L)])
+  b[1] == 0x81L && b[2] == 0x01L && b[3] == 0x20L && b[4] == 0x00L &&
+    b[5] == 0xf0L && b[8] == 0x80L && b[9] == 0x03L
+}
+
+#' Locate the dimension-descriptor block.
+#'
+#' `@32` points at it on the standard tables. Custom-order exports point `@32` at
+#' the title/identity block instead; the descriptor is then found from the master
+#' directory (whose entries carry `(off, len)` in the same 8-byte shape as the
+#' page directory) or, failing that, a signature scan -- both loud fallbacks.
+#' @keywords internal
+#' @noRd
+ivt_f2_descriptor_offset <- function(raw) {
+  n <- length(raw)
+  D <- rd_u32(raw, IVT_HDR_DESCRIPTOR_PTR)
+  if (ivt_f2_is_descriptor(raw, D)) return(as.integer(D))
+  # The master directory is itself a positional, header-anchored structure and
+  # every candidate is confirmed by the strict descriptor signature, so this
+  # relocation is not a content heuristic and stays quiet (custom-order exports
+  # legitimately point @32 at the identity block). Only the signature scan below,
+  # a content search, is a loud fallback.
+  md <- tryCatch(ivt_f2_master_dir(raw), error = function(e) NULL)
+  if (!is.null(md)) {
+    for (r in seq_len(nrow(md))) {
+      off <- as.integer(md[r, "off"])
+      if (ivt_f2_is_descriptor(raw, off)) return(off)
+    }
+  }
+  hit <- ivt_f2_scan_descriptor(raw)
+  if (!is.na(hit)) {
+    ivt_fallback(
+      "Descriptor pointer @32 does not resolve; located by signature scan.",
+      "canivt_descriptor_reloc")
+    return(hit)
+  }
+  if (!is.na(D) && D >= 1L && D + 18L <= n) as.integer(D) else NULL
+}
+
+# First offset whose 9-byte prefix is the descriptor signature, else NA.
+ivt_f2_scan_descriptor <- function(raw) {
+  n <- length(raw)
+  hits <- which(raw[seq_len(n - 8L)] == as.raw(0x81) &
+                raw[2:(n - 7L)]      == as.raw(0x01) &
+                raw[3:(n - 6L)]      == as.raw(0x20) &
+                raw[4:(n - 5L)]      == as.raw(0x00) &
+                raw[5:(n - 4L)]      == as.raw(0xf0))
+  for (h in hits) if (ivt_f2_is_descriptor(raw, h - 1L)) return(h - 1L)
+  NA_integer_
+}
+
+# Extract a dimension name from the printable run that follows the `0x01`
+# separator. The name is stored TWICE back-to-back; `first_record` allows the
+# opening (geography) record to store its name once, followed by inline member
+# text instead of a second copy (the ord-08035 custom export). Returns the name
+# or NA when the run is not a dimension name.
+ivt_f2_descriptor_name <- function(run, first_record = FALSE) {
+  rl <- length(run)
+  if (rl < 2L) return(NA_character_)
+  # Standard layout: two identical copies. Largest p with run[1:p]==run[(p+1):2p];
+  # the first copy may be truncated at a ~15-byte cap, so prefer the (complete)
+  # tail when the first copy is capped and the tail strictly extends it.
+  half <- NA_integer_
+  for (p in seq.int(rl %/% 2L, 1L)) {
+    if (identical(run[1:p], run[(p + 1L):(2L * p)])) { half <- p; break }
+  }
+  if (!is.na(half) && half >= 2L) {
+    nm_run <- run[1:half]
+    if (half >= 14L && rl > 2L * half) nm_run <- run[(half + 1L):rl]
+    return(trimws(intToUtf8(nm_run)))
+  }
+  # No exact double. Split at the first (lowercase|space) -> uppercase transition;
+  # every accepted shape needs a genuine repeated-name signal so the lenient path
+  # cannot swallow descriptor formats that interleave the name with description
+  # prose (97F0015X: "Geographyle nomGeographyconnexes, c'est-a-dire ...").
+  is_up <- run >= 65L & run <= 90L
+  is_lo <- run >= 97L & run <= 122L
+  b <- NA_integer_
+  for (i in 2:rl) if (is_up[i] && (is_lo[i - 1L] || run[i - 1L] == 32L)) { b <- i; break }
+  if (is.na(b)) return(NA_character_)
+  name1 <- trimws(intToUtf8(run[1:(b - 1L)]))
+  name2 <- trimws(intToUtf8(run[b:rl]))
+  if (!nzchar(name1)) return(NA_character_)
+  # (a) space-separated exact double ("Tenure Tenure").
+  if (identical(tolower(name1), tolower(name2))) return(name1)
+  namelike <- nchar(name2) <= 40L && !grepl("[^[:alnum:] ()/,.'-]", name2)
+  # (b) short "variable" name then its longer display name -- the display name
+  #     ENDS with the short name (a front qualifier is prepended: "Selected " +
+  #     "Characteristics"). Requiring a suffix (not just any substring) rejects
+  #     the "<first word> ... <first word> + prose" bleed of 97F0015X, where the
+  #     boundary falls on an internal word space rather than the copy boundary.
+  if (namelike && name1 != name2 && endsWith(name2, name1)) return(name2)
+  # (c) a single clean Title-case name followed by inline member text -- only the
+  #     opening geography record ("Geography" then "ORD 08588 (…)").
+  if (!namelike && first_record &&
+      grepl("^[A-Z][A-Za-z]+( [A-Z][A-Za-z]+)*$", name1)) return(name1)
+  NA_character_
+}
+
 #' Parse the header dimension descriptor.
 #' @return list(n_dim, dims = list(name, count, type), title) or NULL.
 #' @keywords internal
 #' @noRd
 ivt_f2_descriptor <- function(raw) {
   n <- length(raw)
-  D <- rd_u32(raw, IVT_HDR_DESCRIPTOR_PTR)
-  if (is.na(D) || D < 1 || D + 18 > n) return(NULL)
+  D <- ivt_f2_descriptor_offset(raw)
+  if (is.null(D) || is.na(D) || D < 1 || D + 18 > n) return(NULL)
   D <- as.integer(D)
   ndim <- rd_u16(raw, D + 16L)
   win <- min(D + 4000L, n)
@@ -1585,12 +1696,12 @@ ivt_f2_descriptor <- function(raw) {
   Lend <- if (facet > 0) facet - 1L else length(v)
 
   # Walk the bounded region; a dimension record is a 0x01 whose following printable
-  # run is a doubled string (the first copy may be truncated -- the longest
-  # matching prefix wins). Read count/type from the bytes just before the 0x01.
-  # The name may start with an uppercase letter OR a digit ("1995 Household
-  # Income (3)" in the 1996 table 95F0250XDB96001 -- the uppercase-only anchor
-  # silently dropped that dimension, and the 2-dimension layout then decoded
-  # misindexed cells that even passed the page pre-flight).
+  # run is the dimension name stored twice (`ivt_f2_descriptor_name()` handles the
+  # standard doubling, truncated first copies, space-separated / short+display
+  # pairs, and the single-name geography record of the ord custom export). Read
+  # count/type from the bytes just before the 0x01. The name may start with an
+  # uppercase letter OR a digit ("1995 Household Income (3)" in the 1996 table
+  # 95F0250XDB96001 -- the uppercase-only anchor silently dropped that dimension).
   dims <- list()
   k <- 4L
   while (k <= Lend - 1L && length(dims) < ndim) {
@@ -1599,20 +1710,9 @@ ivt_f2_descriptor <- function(raw) {
          (v[k + 1L] >= 48L && v[k + 1L] <= 57L))) {
       e <- k + 1L
       while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
-      run <- v[(k + 1L):(e - 1L)]; rl <- length(run); half <- NA_integer_
-      for (p in seq.int(rl %/% 2L, 1L)) {
-        if (identical(run[1:p], run[(p + 1L):(2L * p)])) { half <- p; break }
-      }
-      if (!is.na(half) && half >= 2L) {
-        # The FIRST copy is truncated at a ~15-byte cap; the SECOND copy is
-        # complete ("Presence of incPresence of income (9)" in the 2006 DA
-        # crosstab). Prefer the tail (second copy) when the first copy looks
-        # capped (>= 14 chars) and the tail strictly extends it -- the cap
-        # guard keeps short, complete names immune to a stray printable byte
-        # from the NEXT record's count field being glued onto the run (e.g. a
-        # count of 110 reads as "n").
-        nm_run <- run[1:half]
-        if (half >= 14L && rl > 2L * half) nm_run <- run[(half + 1L):rl]
+      run <- v[(k + 1L):(e - 1L)]
+      nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L)
+      if (!is.na(nm)) {
         double01 <- v[k - 1L] == 0x01L
         if (double01) {                            # period/facet double-01 framing
           type <- v[k - 3L]; count <- v[k - 2L]
@@ -1638,7 +1738,7 @@ ivt_f2_descriptor <- function(raw) {
                      v[k - 3L] + v[k - 2L] * 256L
                    else v[k - 2L]
         }
-        dims[[length(dims) + 1L]] <- list(name = trimws(intToUtf8(nm_run)),
+        dims[[length(dims) + 1L]] <- list(name = nm,
                                           count = count, type = type,
                                           double01 = double01)
         k <- e; next

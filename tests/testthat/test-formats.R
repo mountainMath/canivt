@@ -54,12 +54,30 @@ ivt_corpus <- list(
   # fix corrected 98-10-0174's silently mis-decoded Mother tongue(331).
   list(id = "97F0020XCB2001070", file = "97F0020XCB2001070.IVT", family = 1L,
        dims = c(14L, 2L, 8L, 282L, 2L)),
+  # Custom-order Beyond 20/20 exports (2021 "ord", 2006 "cro"): the ONLY
+  # structural difference from the standard tables is that the header `@32`
+  # descriptor pointer targets the identity/title block, not the descriptor --
+  # which `ivt_f2_descriptor_offset()` now relocates via the master directory
+  # (confirmed by the invariant `81 01 20 00 f0 .. .. 80 03` signature). The
+  # geography-straddle layout, page markers and cell decode are all standard.
+  # ord-08035 is Geography(791) x Selected characteristics(79) x Tenure(4) for
+  # BC CDs/CSDs; internal-consistency validated (Canada/BC total pop 4,915,940
+  # in private households; tenure Total == Owner + Renter + Band across counts,
+  # differing only by random rounding +/-10). Data-dim member labels come from
+  # its plaintext "Variables:" enumeration (no binary member codebook), and
+  # geography names from the inline combined block (789/791; two alternate-name
+  # entries stay uid-only). The 2006 cro crosstabs decode cells + dimensions the
+  # same way (owner+renter=total holds); their pre-DGUID geography combined
+  # block is not yet located (geo_name empty), so n_geo is not asserted.
+  list(id = "ord-08035_ct1_2021",  file = "ord-08035-q7v4p7_ct.1-2021-population_updated.ivt",
+       family = 2L, dims = c(791L, 79L, 4L), n_geo = 791L),
+  list(id = "cro0172986_ct7_2006", file = "cro0172986_ct.7-2006-population.ivt",
+       family = 2L, dims = c(581L, 4L, 79L)),
+  list(id = "cro0172986_ct8_2006", file = "cro0172986_ct.8-2006_private-households.ivt",
+       family = 2L, dims = c(581L, 5L, 87L)),
   # --- share the signature but are NOT a supported format ------------------
   list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA),
-  list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = NA),
-  list(id = "cro0172986_ct7_2006", file = "cro0172986_ct.7-2006-population.ivt",       family = NA),
-  list(id = "cro0172986_ct8_2006", file = "cro0172986_ct.8-2006_private-households.ivt", family = NA),
-  list(id = "ord-08035_ct1_2021",  file = "ord-08035-q7v4p7_ct.1-2021-population_updated.ivt", family = NA)
+  list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = NA)
 )
 
 for (case in ivt_corpus) {

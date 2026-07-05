@@ -35,6 +35,82 @@ ivt_f2_vl_pairs <- function(raw) {
   data.frame(name = name, count = count, stringsAsFactors = FALSE)
 }
 
+# The plaintext "Variables:" enumeration block that the custom-order exports
+# (ord-08035) carry INSTEAD of a binary `81 02 02 00` member codebook. Member
+# labels are a numbered text list per dimension:
+#
+#   Variables:
+#
+#   Tenure (4)
+#   1. Total - Tenure
+#   2. Owner
+#   ...
+#   Note: 1) Tenure refers to ...       <- interspersed footnote paragraphs
+#
+#   Selected characteristics (76)
+#   1. Total - Gender of the population
+#   ...
+#
+# Returns a list of list(name, count, labels) -- one per dimension whose member
+# numbers run 1..k contiguously (spurious "(N)"-ending prose lines are rejected
+# by that gate) -- or NULL when there is no such block. This is a text heuristic
+# and only ever consulted as the last member-label fallback (a dimension whose
+# binary codebook resolves never reaches it), so it does not touch the standard
+# tables (which carry a "Variable List:" name line, not a "Variables:" list).
+ivt_f2_varlist_members <- function(raw) {
+  n <- length(raw)
+  txt <- raw_to_latin1(raw[seq_len(min(n, 65536L))])
+  m <- regexpr("\r\nVariables:\r\n", txt, fixed = TRUE)
+  if (m < 0L) return(NULL)
+  lines <- strsplit(substring(txt, m + attr(m, "match.length")), "\r\n", fixed = TRUE)[[1]]
+  hdr_re <- "^(.+) \\(([0-9]+)[A-Za-z]?\\)$"
+  mem_re <- "^([0-9]+)\\.[ \t]+(.*)$"
+  out <- list(); cur <- NULL
+  flush <- function() {
+    if (!is.null(cur) && length(cur$labels) &&
+        identical(cur$ids, seq_along(cur$ids)))            # members run 1..k
+      out[[length(out) + 1L]] <<- cur[c("name", "count", "labels")]
+  }
+  for (ln in lines) {
+    mm <- regmatches(ln, regexec(mem_re, ln))[[1]]
+    if (length(mm) == 3L && !is.null(cur)) {               # "N. label"
+      cur$ids <- c(cur$ids, as.integer(mm[2]))
+      cur$labels <- c(cur$labels, trimws(mm[3]))
+      next
+    }
+    hm <- regmatches(ln, regexec(hdr_re, ln))[[1]]
+    if (length(hm) == 3L) {                                # "<Name> (<count>)"
+      flush()
+      cur <- list(name = trimws(hm[2]), count = as.integer(hm[3]),
+                  labels = character(0), ids = integer(0))
+    }
+  }
+  flush()
+  if (length(out)) out else NULL
+}
+
+# Best VL member-label match for a descriptor dimension: an entry with the same
+# member count, else the one sharing the most significant (>3-char) name tokens
+# (display names differ from the descriptor's -- "Selected characteristics" vs
+# "Characteristics"). Labels are padded/truncated to the descriptor count (the VL
+# can under-list, e.g. ord-08035 enumerates 76 of 79 characteristics). NULL when
+# nothing matches.
+ivt_f2_varlist_match <- function(vlm, dim) {
+  if (is.null(vlm)) return(NULL)
+  norm_tok <- function(s) {
+    t <- strsplit(tolower(gsub("[^A-Za-z ]", " ", s)), " +")[[1]]
+    t[nchar(t) > 3L]
+  }
+  dtok <- norm_tok(dim$name)
+  score <- vapply(vlm, function(e)
+    2L * length(intersect(dtok, norm_tok(e$name))) + (e$count == dim$count),
+    integer(1))
+  if (max(score) <= 0L) return(NULL)
+  labs <- vlm[[which.max(score)]]$labels
+  length(labs) <- dim$count
+  labs
+}
+
 # Full display name for a descriptor dimension. Geography is always "Geography";
 # every other dimension takes the Variable-List entry whose count uniquely matches
 # (the VL is the only source of the untruncated name), falling back to the
@@ -100,6 +176,9 @@ ivt_f2_dimensions <- function(raw) {
     name_lut <- stats::setNames(lapply(by_name, `[[`, "labels"),
                                 vapply(by_name, `[[`, "", "name"))
   }
+  # last resort: the plaintext "Variables:" enumeration (custom-order exports have
+  # no binary member codebook). Computed only when the binary paths missed a dim.
+  vlm <- if (length(miss)) ivt_f2_varlist_members(raw) else NULL
   vl <- ivt_f2_vl_pairs(raw)
   lapply(seq_along(d$dims), function(i) {
     dim <- d$dims[[i]]
@@ -109,6 +188,7 @@ ivt_f2_dimensions <- function(raw) {
       m <- dl$en                            # slot-directory English labels (primary)
       if (is.null(m)) m <- name_lut[[dim$name]]
       if (is.null(m)) m <- labels[[as.character(dim$count)]]
+      if (is.null(m)) m <- ivt_f2_varlist_match(vlm, dim)  # plaintext Variables:
       m
     }
     # French member labels + the French dimension name come from the slot

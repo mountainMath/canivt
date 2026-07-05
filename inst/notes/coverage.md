@@ -685,22 +685,52 @@ Files in the test corpus that are currently unsupported:
   its `@32` points at a title block, with small pointer tables after it).
   Note its sibling 1981004 turned out to be an ordinary supported container,
   so this vintage is *not* inherently alien — the header indirection differs.
-- [ ] **Custom CT / "cro"/"ord" extracts** (`cro0172986_ct.*-2006-*`,
-  `ord-08035-…_ct.1-2021-population`): Beyond 20/20 desktop exports (not StatCan
-  table downloads); single-page-ish directories, descriptor undecoded.
+- [x] **2021 custom-order export `ord-08035…_ct.1-2021-population` — DECODED,
+  SUPPORTED** (2026-07-04). The only structural difference from the standard
+  tables is that the header `@32` descriptor pointer targets the identity/title
+  block, not the descriptor — a red herring that made the "page body looks like
+  a different encoding" reading (the misread descriptor mis-nested the layout).
+  `ivt_f2_descriptor_offset()` now relocates the descriptor via the master
+  directory (every candidate confirmed by the invariant `81 01 20 00 f0 .. ..
+  80 03` block signature; a signature scan is the loud last resort). With the
+  real descriptor the layout is entirely standard: `Geography(791) × Selected
+  characteristics(79) × Tenure(4)`, geography straddles at 4 geos/page over 198
+  windows, ordinary `88 01 20 08` float64 / `a2 01 03 09` markers. 101,525
+  cells in ~2 s, internal-consistency validated (BC total population in private
+  households **4,915,940**; tenure Total == Owner+Renter+Band across all count
+  characteristics, differing only by StatCan random rounding ±10). Two
+  descriptor-parse generalisations went with it: the geography record may store
+  its name **once** (followed by inline member text) and the two name copies may
+  be **space-separated or a short/long pair** — handled by
+  `ivt_f2_descriptor_name()` (a lowercase→uppercase split), with the single-name
+  form accepted only for the opening record. Geography names decode 789/791 from
+  the inline combined block (`IVT_F2_INLINE_PAT` relaxed to admit the inverted
+  `"<name> (<code>), <type>"` order a few unorganised CSDs use; 2 alternate-name
+  entries stay uid-only). Data-dimension member labels come from the plaintext
+  **"Variables:" enumeration** (`ivt_f2_varlist_members()`) — the last label
+  fallback, since this export carries no binary `81 02 02 00` member codebook —
+  Tenure 4/4, characteristics 76/79 (the text under-lists the 3 tail members
+  the cube stores).
+- [~] **2006 custom-order crosstabs `cro0172986_ct.7/8-2006` — cells + dimensions
+  DECODED** (2026-07-04, via the same `@32` relocation). `Geography(581) ×
+  Tenure/Housing × Characteristics`; owner+renter=total holds. Their pre-DGUID
+  geography combined block (stored `"<name>, <type> (<code>)"` with no dqf flag,
+  near the title block ~795 KB) is not yet located by `ivt_f2_geo_marker_region()`
+  (which resolves ~150 KB too high), so `geo_name` is empty — the remaining gap.
 
-Decoding any of these is future work — each likely needs its descriptor/codebook
-layout reverse-engineered. Reconnaissance (sub-format taxonomy, descriptor
-locations, per-file blockers) is captured in
-[`unsupported-formats.md`](unsupported-formats.md). Summary: near-family-2
-crosstabs (`ord-08035` — its page body turned out NOT to be the 98-10-0023
-container and needs re-RE'ing; `97F0020X` — container located, presence nesting
-differs) and older layouts whose container is not yet located (`97F0015X`, 1981
-`97-570-X1981002`). (`97-563-XCB2006072`, `97-570-X1981004`,
-`98-400-X2016203` and the 1991 profiles `98F0172X`/`95F0170X` — formerly the
-top open items — are now all SUPPORTED: the b3 head-block rule, the descriptor
-count reconciliation + geography-dimension index, the `0x0a` u16 width tag,
-and the dense `0x0_` page variant respectively.)
+Decoding the remaining files is future work — each likely needs its
+descriptor/codebook layout reverse-engineered. Reconnaissance (sub-format
+taxonomy, descriptor locations, per-file blockers) is captured in
+[`unsupported-formats.md`](unsupported-formats.md). Summary: the still-open items
+are older layouts whose container/descriptor is not yet located (`97F0015X`,
+1981 `97-570-X1981002`, the 2016019 variant) and the cro geography codebook
+(cells decode, names pending). (`ord-08035` — its "different page encoding" was
+just a misread descriptor from a relocated `@32` pointer; `97F0020X`,
+`97-563-XCB2006072`, `97-570-X1981004`, `98-400-X2016203` and the 1991 profiles
+`98F0172X`/`95F0170X` — formerly the top open items — are now all SUPPORTED via
+the `@32` relocation, the b3 head-block rule, the descriptor count reconciliation
++ geography-dimension index, the `0x0a`/`0x09` u16 width tags, and the dense
+`0x0_` page variant respectively.)
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
