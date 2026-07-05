@@ -85,6 +85,95 @@ ivt_f2_geo_dguids <- function(raw) {
 ivt_f2_is_dguid_block <- function(t)
   length(t) >= 2L && all(grepl(IVT_F2_DGUID_RE, t))
 
+# Member-ordered geography DGUIDs read POSITIONALLY from the geography block
+# directory -- the primary uid read for the chunked tables; the byte scan above is
+# its fallback. The directory lists the codebook blocks in logical member order
+# (which the byte-ascending scan cannot see: 98-10-0013's reverse-stored root chunk
+# sits below the marker region, so the scan silently dropped members 1-256). The
+# DGUID slot's blocks are found by a cheap O(1) probe per entry -- the plain
+# value-block header `[01 01][u16 payload][u16 n_slots]` with a first (non-empty)
+# record of DGUID shape; no other attribute stores DGUID-shaped strings (codes have
+# a digit, not a level letter, in position 5) -- then only those blocks are strict-
+# parsed. Consumed per group of `G` chunks as one language run of `G` blocks then
+# the identical second-language run, exactly like every other attribute; the two
+# copies must agree record-for-record (DGUIDs are language-invariant), every chunk
+# must parse to its expected size, and every record must match the DGUID shape.
+# Returns the n_geo-long uid vector (NA for members that carry no attributes), or
+# NULL when the directory/probe does not resolve (the caller falls back to the
+# scan, loudly).
+ivt_f2_geo_dguids_dir <- function(raw) {
+  d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
+  n_geo <- ivt_f2_geo_count(raw)
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  n <- length(raw)
+  # O(1) probe: a value-block header (plain `[01 01]` or bit-headed dense
+  # `[81 01]` -- the trailing partial chunks may be stored dense, e.g.
+  # 98-10-0013's 71-member last chunk) whose first non-empty record is
+  # DGUID-shaped (an absent leading member in a plain array is an explicit
+  # empty record `00 00`; walk past a few).
+  probe <- function(off, len) {
+    if (len < 8L || off + len > n) return(FALSE)
+    b0 <- as.integer(raw[off + 1L])
+    if (as.integer(raw[off + 2L]) != 0x01L || !(b0 %in% c(0x01L, 0x81L)))
+      return(FALSE)
+    end <- off + len
+    if (b0 == 0x01L) {                              # plain: [u16 payload][u16 n_slots]
+      pay <- rd_u16(raw, off + 2L)
+      if (is.na(pay) || pay != len - 4L) return(FALSE)
+      i <- off + 6L
+      for (k in seq_len(16L)) {                     # skip leading empty records
+        if (i + 1L > end) return(FALSE)
+        L <- as.integer(raw[i + 1L])
+        if (L > 0L) break
+        i <- i + 2L
+      }
+    } else {                                        # dense: [u16 nbits][bitstream][80|01]
+      nbits <- rd_u16(raw, off + 2L)
+      if (is.na(nbits) || nbits < 1L || nbits > 8L * len) return(FALSE)
+      i <- off + 4L + 2L * as.integer(ceiling(nbits / 16))
+      if (i + 1L > end || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L)))
+        return(FALSE)
+      i <- i + 1L
+      if (i + 1L > end) return(FALSE)
+      L <- as.integer(raw[i + 1L])
+    }
+    if (L < 9L || L > 20L || i + 1L + L > end) return(FALSE)
+    grepl(IVT_F2_DGUID_RE, raw_to_latin1(raw[(i + 2L):(i + 1L + L)]))
+  }
+  cand <- which(vapply(seq_len(nrow(d)),
+                       function(r) probe(d[r, "off"], d[r, "len"]), TRUE))
+  sizes <- ivt_f2_geo_group_sizes(n_geo)
+  if (length(cand) != 2L * sum(sizes)) return(NULL)
+  starts <- cumsum(c(1L, utils::head(sizes, -1L) * 256L))
+  chunk_vals <- function(entry, want) {              # strict parse -> want-long chunk
+    e <- ivt_f2_dir_entry_members(raw, d[entry, "off"], d[entry, "len"])
+    if (is.null(e)) return(NULL)
+    v <- e$values
+    if (!e$dense && length(v) > want && all(is.na(v[(want + 1L):length(v)])))
+      v <- v[seq_len(want)]                          # trim the pow-2 slot padding
+    # a dense chunk skips absent members entirely; it is positional only when no
+    # member is absent, i.e. it parses to exactly the chunk size
+    if (length(v) != want) return(NULL)
+    if (!all(grepl(IVT_F2_DGUID_RE, v[!is.na(v)]))) return(NULL)
+    v
+  }
+  out <- rep(NA_character_, n_geo)
+  pos <- 1L
+  for (gi in seq_along(sizes)) {
+    G <- sizes[gi]; s <- starts[gi]
+    M <- min(G * 256L, n_geo - s + 1L)
+    chunk_sz <- pmin(256L, M - 256L * (seq_len(G) - 1L))
+    for (c in seq_len(G)) {
+      a <- chunk_vals(cand[pos + c - 1L], chunk_sz[c])
+      b <- chunk_vals(cand[pos + G + c - 1L], chunk_sz[c])
+      if (is.null(a) || is.null(b) || !identical(a, b)) return(NULL)
+      out[s + 256L * (c - 1L) + seq_along(a) - 1L] <- a
+    }
+    pos <- pos + 2L * G
+  }
+  out
+}
+
 # Each dimension's member labels are anchored in the codebook by a doubled-name
 # header marker -- the same `81 02 02 00` framing for every table -- that carries
 # the dimension's display name (exactly as the header descriptor stores it) and
@@ -639,11 +728,24 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   simple <- ivt_f2_geo_simple(raw, n_geo)
   if (!is.null(simple)) {
     geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
-               else ivt_f2_geo_dguids(raw)
+               else ivt_f2_geo_uids(raw)
     return(list(geo_name = simple$name, geo_uid = geo_uid))
   }
-  # 3. chunked DGUID tables (0023/0129): uid only via the fast DGUID scan
-  list(geo_name = NULL, geo_uid = ivt_f2_geo_dguids(raw))
+  # 3. chunked DGUID tables (0023/0129/0013/...): uid only, positional first
+  list(geo_name = NULL, geo_uid = ivt_f2_geo_uids(raw))
+}
+
+# The uid-only read: the positional block-directory parse first (it sees the
+# logical member order the byte scan cannot -- 98-10-0013's reverse-stored root
+# chunk sits below the marker region and the scan silently dropped members 1-256),
+# the byte scan as the loud fallback.
+ivt_f2_geo_uids <- function(raw) {
+  uid <- ivt_f2_geo_dguids_dir(raw)
+  if (!is.null(uid)) return(uid)
+  ivt_fallback(paste(
+    "The geography block directory did not resolve the DGUID member blocks;",
+    "scanning the codebook bytes for DGUID-shaped strings instead."))
+  ivt_f2_geo_dguids(raw)
 }
 
 # --- Full geography attribute table ------------------------------------------

@@ -430,6 +430,23 @@ units) and the directory entries (8-byte entry units).
   - **Fallback still runs on 98-10-0013 ADA** (its directory drops a trailing partial →
     irregular block count → stride path with the `ivt_f2_geo_root_dir()` root override);
     all its attributes validate exact vs the StatCan metadata CSV.
+- [x] **The uid-only DEFAULT read is positional too (`ivt_f2_geo_dguids_dir()`) —
+  DONE** (2026-07-05). The default metadata path for the chunked tables used the
+  byte scan (`ivt_f2_geo_dguids()`), which reads blocks in BYTE order: on
+  98-10-0013 the reverse-stored root chunk sits below the geography marker
+  region, so the scan **silently dropped members 1–256** (5,191/5,447 with only
+  a plain count-mismatch warning). The positional read walks the geography
+  block directory with an O(1) per-entry probe — a plain `[01 01]` or dense
+  `[81 01]` value-block header whose first non-empty record is DGUID-shaped
+  (no other attribute stores DGUID-shaped strings) — then strict-parses only
+  the 2·Σsizes DGUID blocks, consumed per group as two language runs of `G`
+  chunks that must agree record-for-record (DGUIDs are language-invariant),
+  each chunk exactly its expected size (a dense partial chunk — 0013 stores
+  its 71-member last chunk bit-headed — is accepted only when no member is
+  absent). Validated: 0013 all **5,447/5,447** (== the validated full
+  attribute table's DGUID column); byte-identical to the scan on
+  0023/0129/0174/0478 and **5–13× faster** (0.8 s vs 6.5–10.4 s on the 63k-geo
+  tables). The scan survives as the loud fallback (`ivt_f2_geo_uids()`).
 - [x] **Strict value-entry parse (the two block framings) — DECODED and wired**
   (`ivt_f2_dir_entry_members()`; see ivt-format.md "Value-entry block framings").
   Plain arrays are `[01 01][u16 payload][u16 n_slots]` + exactly `n_slots`
