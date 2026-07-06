@@ -1931,9 +1931,10 @@ ivt_f2_scan_descriptor <- function(raw) {
 # Extract a dimension name from the printable run that follows the `0x01`
 # separator. The name is stored TWICE back-to-back; `first_record` allows the
 # opening (geography) record to store its name once, followed by inline member
-# text instead of a second copy (the ord-08035 custom export). Returns the name
-# or NA when the run is not a dimension name.
-ivt_f2_descriptor_name <- function(run, first_record = FALSE) {
+# text instead of a second copy (the ord-08035 custom export). `count` is the
+# framing member count, used only by the last (prose-bleed) fallback. Returns
+# the name or NA when the run is not a dimension name.
+ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer_) {
   rl <- length(run)
   if (rl < 2L) return(NA_character_)
   # Standard layout: two identical copies. Largest p with run[1:p]==run[(p+1):2p];
@@ -1944,9 +1945,20 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE) {
     if (identical(run[1:p], run[(p + 1L):(2L * p)])) { half <- p; break }
   }
   if (!is.na(half) && half >= 2L) {
-    nm_run <- run[1:half]
-    if (half >= 14L && rl > 2L * half) nm_run <- run[(half + 1L):rl]
-    return(trimws(intToUtf8(nm_run)))
+    if (half >= 14L && rl > 2L * half) {
+      # first copy capped at ~15 bytes; prefer the complete tail. On the 2001
+      # F-series (97F0015X) French description prose bleeds onto the tail after
+      # the name, so trim it at the end of the "(count)" the name ends with when
+      # a framing count is available (tables whose tail has no "(count)", e.g.
+      # the 2006 "Presence of income..." completion, are left whole).
+      tail <- trimws(intToUtf8(run[(half + 1L):rl]))
+      if (!is.na(count) && count >= 1L) {
+        p <- regexpr(sprintf("(%d)", count), tail, fixed = TRUE)
+        if (p > 0L) tail <- substr(tail, 1L, p + attr(p, "match.length") - 1L)
+      }
+      return(tail)
+    }
+    return(trimws(intToUtf8(run[1:half])))
   }
   # No exact double. Split at the first (lowercase|space) -> uppercase transition;
   # every accepted shape needs a genuine repeated-name signal so the lenient path
@@ -1973,6 +1985,38 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE) {
   #     opening geography record ("Geography" then "ORD 08588 (…)").
   if (!namelike && first_record &&
       grepl("^[A-Z][A-Za-z]+( [A-Z][A-Za-z]+)*$", name1)) return(name1)
+  # (d) prose-bleed data dim with the copies NON-adjacent (2001 F-series
+  #     97F0015X): French prose bleeds BETWEEN the two copies ("Sex (3)atif
+  #     totSex (3) et les ..."), so the adjacent-double and split paths miss.
+  #     The name ends in "(count)" and the framing count is known: take the
+  #     shortest prefix that completes "(count)", de-truncating a capped first
+  #     copy (A+B with A a prefix of B -> B), and accept only a clean
+  #     title-case name so a stray "(count)" in prose cannot match.
+  s <- intToUtf8(run)
+  if (!is.na(count) && count >= 1L) {
+    p <- regexpr(sprintf("(%d)", count), s, fixed = TRUE)
+    if (p > 0L) {
+      cand <- substr(s, 1L, p + attr(p, "match.length") - 1L)
+      best <- cand
+      for (a in seq_len(min(16L, nchar(cand) - 1L))) {
+        A <- substr(cand, 1L, a); B <- substr(cand, a + 1L, nchar(cand))
+        if (startsWith(B, A)) best <- B
+      }
+      if (grepl("^[A-Z][A-Za-z0-9 ()&,.'/-]*\\(\\d+\\)$", best)) return(trimws(best))
+    }
+  }
+  # (e) prose-bleed geography record (no "(count)" to anchor on): French prose
+  #     bleeds BETWEEN the two "Geography" copies ("Geographyle nomGeography
+  #     connexes ..."). Recover it as the longest prefix that reoccurs later in
+  #     the run, when that prefix is a clean title-case token. First record only.
+  if (first_record) {
+    rep <- ""
+    for (kk in seq_len(nchar(s) %/% 2L)) {
+      pfx <- substr(s, 1L, kk)
+      if (regexpr(pfx, substr(s, kk + 1L, nchar(s)), fixed = TRUE) > 0L) rep <- pfx
+    }
+    if (nchar(rep) >= 3L && grepl("^[A-Z][A-Za-z]+$", rep)) return(rep)
+  }
   NA_character_
 }
 
@@ -2005,33 +2049,38 @@ ivt_f2_descriptor <- function(raw) {
         e <- k + 1L
         while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
         run <- v[(k + 1L):(e - 1L)]
-        nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L)
+        # count/type come from the framing bytes before the 0x01 (computed here so
+        # the count can hint the name recovery -- some 2001 descriptors bleed
+        # French prose into the name copies, see below).
+        double01 <- v[k - 1L] == 0x01L
+        if (double01) {                            # period/facet double-01 framing
+          type <- v[k - 3L]; count <- v[k - 2L]
+        } else {
+          type <- v[k - 1L]
+          # the descriptor stores a (large) member count as a 16-bit little-endian
+          # value `[count_lo][count_hi][type][01]`; the type byte tags the storage
+          # width. u16 types: 0x10 (modern DGUID geography, e.g. 63404 in
+          # 98-10-0023; 57523 in the 2006 DA table), 0x0d (the 2011 census-tract
+          # geography, 5447; also the 1981/1991 profile geographies; the 2001
+          # F-series 97F0015X's geography), 0x0a / 0x0c (the profile lineage's
+          # characteristics / geography dimensions, e.g. 98F0172X's Profile(529)
+          # and Geography(4063)) and 0x09 (the >256-member "Selected
+          # characteristics"/detailed-classification data dimensions: 97F0020X's
+          # Selected(282) and 98-10-0174's Mother tongue(331), both chunked
+          # >256-member codebooks -- the u8 read took the low byte and got 1,
+          # which mis-nested the layout). The small family-1 geography (type
+          # 0x08, <=255) and the ordinary data dimensions carry a u8 count.
+          # Reading 0x0d as u8 misread 2011's 5447 geographies as 21; 0x0a/0x0c
+          # as u8 misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09
+          # as u8 silently mis-decoded 98-10-0174's cells. (u16 is safe for a
+          # small member of any of these types: count_hi is then 00.)
+          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L))
+                     v[k - 3L] + v[k - 2L] * 256L
+                   else v[k - 2L]
+        }
+        nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L,
+                                     count = count)
         if (!is.na(nm)) {
-          double01 <- v[k - 1L] == 0x01L
-          if (double01) {                          # period/facet double-01 framing
-            type <- v[k - 3L]; count <- v[k - 2L]
-          } else {
-            type <- v[k - 1L]
-            # the descriptor stores a (large) member count as a 16-bit little-endian
-            # value `[count_lo][count_hi][type][01]`; the type byte tags the storage
-            # width. u16 types: 0x10 (modern DGUID geography, e.g. 63404 in
-            # 98-10-0023; 57523 in the 2006 DA table), 0x0d (the 2011 census-tract
-            # geography, 5447; also the 1981/1991 profile geographies), 0x0a / 0x0c
-            # (the profile lineage's characteristics / geography dimensions, e.g.
-            # 98F0172X's Profile(529) and Geography(4063)) and 0x09 (the >256-member
-            # "Selected characteristics"/detailed-classification data dimensions:
-            # 97F0020X's Selected(282) and 98-10-0174's Mother tongue(331), both
-            # chunked >256-member codebooks -- the u8 read took the low byte and got
-            # 1, which mis-nested the layout). The small family-1 geography (type
-            # 0x08, <=255) and the ordinary data dimensions carry a u8 count. Reading
-            # 0x0d as u8 misread 2011's 5447 geographies as 21; 0x0a/0x0c as u8
-            # misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09 as u8
-            # silently mis-decoded 98-10-0174's cells. (u16 is safe for a small
-            # member of any of these types: count_hi is then 00.)
-            count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L))
-                       v[k - 3L] + v[k - 2L] * 256L
-                     else v[k - 2L]
-          }
           dims[[length(dims) + 1L]] <- list(name = nm,
                                             count = count, type = type,
                                             double01 = double01)

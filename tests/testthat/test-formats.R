@@ -85,8 +85,17 @@ ivt_corpus <- list(
        dims = c(1L, 80L, 120L), n_geo = 120L),
   list(id = "98400X2016019",     file = "98400X2016019.ivt",     family = 2L,
        dims = c(14L, 16L, 2L), n_geo = 14L),
-  # --- share the signature but are NOT a supported format ------------------
-  list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA)
+  # 2001 F-series 97F0015X: its descriptor bleeds French description prose INTO
+  # and BETWEEN the two name copies of each dimension record ("Total Income
+  # GrTotal Income Groups (12). ; Dans tous les ..."; "Sex (3)atif totSex (3)
+  # et les ..."). The names are recovered by anchoring on the framing count --
+  # each data-dim name ends in "(count)" -- and the geography name by the
+  # longest reoccurring prefix ("Geographyle nomGeography..." -> "Geography").
+  # Viewer-validated cell-exact: 864/864 over Canada across all four data dims
+  # (5 fixed sex/age slices) + 1,080/1,080 over 29 further geographies; all
+  # 4,432 geographies named. Strict-clean.
+  list(id = "97F0015X",          file = "97F0015X.ivt",          family = 1L,
+       dims = c(4432L, 3L, 7L, 12L, 9L), n_geo = 4432L)
 )
 
 for (case in ivt_corpus) {
@@ -120,3 +129,15 @@ for (case in ivt_corpus) {
     })
   })
 }
+
+# Every real corpus file is now supported, so exercise the rejection path with a
+# synthetic input: the `04 00 20 00` signature but a garbage descriptor region
+# (no recoverable dimension records). `ivt_f2_decodable()` must reject it and the
+# public entry points must fail with an informative message, never the raw
+# "argument of length 0" crash.
+test_that("a signature-only file with no decodable descriptor is rejected cleanly", {
+  raw <- as.raw(rep(0L, 4096L))
+  raw[1:4] <- as.raw(c(0x04, 0x00, 0x20, 0x00))
+  expect_false(ivt_is_supported(raw))
+  expect_true(is.na(ivt_family(raw)))
+})

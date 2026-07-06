@@ -634,19 +634,20 @@ for completeness with no data in this table — but that is a per-geography prop
 (the CSV publishes them as all-zero) and appears on both `0x8` and `0xa` pages,
 sometimes right beside a data-rich geography on the same page.
 
-## [ ] Other Beyond 20/20 products that share the signature but are undecoded
+## [x] Other Beyond 20/20 products that share the signature — ALL DECODED
 
-Several other `.ivt` products share the `04 00 20 00` signature and even expose a
-page-directory-like structure, but their **header descriptor is a different,
-undecoded layout**: `ivt_f2_descriptor()` reads a garbage dimension count
-(hundreds/thousands) and recovers zero data dimensions. They are now **detected as
-unsupported** (`ivt_family()` returns `NA`, `ivt_is_supported()` is `FALSE`) and
-`read_ivt()`/`ivt_metadata()` abort with a clear message — previously they passed
-the loose family-2 gate and crashed the decoder with `argument of length 0`. The
-fix is the `ivt_f2_decodable()` check (plausible `n_dim`, ≥1 sized data dimension).
-Regression-guarded in `tests/testthat/test-formats.R`.
+**Every `.ivt` file in the test corpus now decodes** (2026-07-06). The products
+below share the `04 00 20 00` signature but historically read a garbage
+dimension count and recovered zero data dimensions; each turned out to be a
+**descriptor-layer difference** (a relocated pointer, an inverted record region,
+a misread count width, or prose-bled name copies), not an alien container. The
+`ivt_f2_decodable()` gate (plausible `n_dim`, ≥1 sized data dimension) still
+rejects genuinely non-decodable inputs — previously they passed the loose
+family-2 gate and crashed the decoder with `argument of length 0` — and that
+rejection path is regression-guarded by a synthetic signature-only input in
+`tests/testthat/test-formats.R`.
 
-Files in the test corpus that are currently unsupported:
+Files formerly unsupported, now all DECODED and SUPPORTED:
 
 - [x] **Profile tables** (`98F0172X`, `95F0170X`) — **DECODED and SUPPORTED**
   (2026-07-04). They are the ordinary unified layout (`Values(1) × Profile(529)
@@ -683,10 +684,28 @@ Files in the test corpus that are currently unsupported:
   decode is viewer-validated cell-exact (34,968/34,968; PID 60957). The same
   `0x09` u16 fix corrected 98-10-0174's Mother tongue(331). Served by
   StatCan's legacy `www12` dynamic system, but its b2020 HTML viewer renders.
-- [ ] **Other "F"-series** (`97F0015XCB2001041`): 2001-era crosstab. `n_dim`
-  garbage (1282), the doubled-name anchor snags on French text bleeding into
-  the truncated names, descriptor layout differs — the least understood 2001
-  file. Served by StatCan's legacy `www12` dynamic system.
+- [x] **Other "F"-series** (`97F0015XCB2001041`) — **DECODED, SUPPORTED**
+  (2026-07-06). This was the "least understood 2001 file": French **description
+  prose bleeds INTO and BETWEEN the two name copies** of every dimension record
+  (`Total Income GrTotal Income Groups (12). ; Dans tous les …`;
+  `Sex (3)atif totSex (3) et les …`; `Geographyle nomGeography connexes …`), so
+  the exact-double, truncated-tail and split paths in `ivt_f2_descriptor_name()`
+  all missed. Two count-anchored fallbacks recover the names structurally: each
+  **data-dim name ends in `(count)`** and the framing count is known, so take the
+  shortest prefix completing `(count)` (de-truncating a capped first copy A+B →
+  B); the **geography** name (no parenthetical) is the longest prefix that
+  reoccurs later in the run (`Geography`). The framing counts were always clean
+  (`Geography(4432, type 0x0d) × Sex(3) × Age Groups(7) × Total Income
+  Groups(12) × Mode of Transportation(9)`), so with the names recovered the
+  ordinary family-1 layout decodes 864,205 cells. **Viewer-validated
+  cell-exact**: 864/864 over Canada across all four data dimensions (5 fixed
+  sex/age slices) + 1,080/1,080 over 29 further geographies (member order
+  confirmed by reconstructing the viewer's `<name>, <type_abbr>` display key);
+  median-income (member 12) values are all sensible ($18,991–$33,553 for
+  Canada). All 4,432 geographies named + coded, all data-dim EN/FR labels
+  resolve, strict-clean. One byte-faithful negative stored value (-3298, a tiny
+  area's median-income sentinel). Served by StatCan's legacy `www12` dynamic
+  system, but its b2020 HTML viewer renders.
 - [x] **2016 collective-dwellings crosstab** (`98-400-X2016019`) — **DECODED,
   SUPPORTED** (2026-07-06). Same **inverted descriptor layout** as
   97-570-X1981002 (records before the signature block, anchored on the
@@ -796,20 +815,20 @@ Files in the test corpus that are currently unsupported:
   the ONLY output change on all 28 supported tables is ct8 dim 3 gaining
   `members_fr`/`name_fr` (its EN labels are identical to the old fallback's).
 
-Decoding the remaining file is future work. Reconnaissance (sub-format
-taxonomy, descriptor locations, per-file blockers) is captured in
-[`unsupported-formats.md`](unsupported-formats.md). Summary: the ONLY still-open
-corpus file is **`97F0015X`** (2001 F-series: `n_dim` garbage 1282, the
-doubled-name anchor snags on French text bleeding into the truncated names, a
-descriptor layout not yet located). Everything else in the corpus is SUPPORTED:
-`97-570-X1981002` and `98-400-X2016019` via the **inverted descriptor layout**
-(records before the signature block); the `cro0172986_ct.7/8` custom crosstabs
-incl. bilingual geography names; `ord-08035` via the relocated `@32` pointer;
-and `97F0020X`, `97-563-XCB2006072`, `97-570-X1981004`, `98-400-X2016203` and
-the 1991 profiles `98F0172X`/`95F0170X` via the `@32` relocation, the b3
-head-block rule, the descriptor count reconciliation + geography-dimension
-index, the `0x0a`/`0x09` u16 width tags, and the dense `0x0_` page variant
-respectively.
+**The entire test corpus is now decoded — there are no remaining unsupported
+files.** Reconnaissance (sub-format taxonomy, descriptor locations, per-file
+blockers) is captured in [`unsupported-formats.md`](unsupported-formats.md).
+The last three onboarded (2026-07-06): `97-570-X1981002` and `98-400-X2016019`
+via the **inverted descriptor layout** (records before the signature block), and
+`97F0015X` via the **count-anchored prose-bleed name recovery** (French
+description text bleeds into and between the two name copies; the name is
+recovered from the framing `(count)` suffix, geography from the longest
+reoccurring prefix). Earlier: the `cro0172986_ct.7/8` custom crosstabs incl.
+bilingual geography names; `ord-08035` via the relocated `@32` pointer; and
+`97F0020X`, `97-563-XCB2006072`, `97-570-X1981004`, `98-400-X2016203` and the
+1991 profiles `98F0172X`/`95F0170X` via the `@32` relocation, the b3 head-block
+rule, the descriptor count reconciliation + geography-dimension index, the
+`0x0a`/`0x09` u16 width tags, and the dense `0x0_` page variant respectively.
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
@@ -931,8 +950,9 @@ width tag: Selected characteristics is 282 members, not 1 — the same fix also
 repaired a silent mis-decode of 98-10-0174's Mother tongue(331);
 viewer- and CSV-validated cell-exact respectively).
 The **inverted descriptor layout** (records before the `81 01 20 00 f0`
-signature block, anchored on the preceding `81 02 03 00` sub-header) then
-onboarded the last two 2026-07-06: the 1981 CMA/CA profile **97-570-X1981002**
-and the tiny 2016 collective-dwellings crosstab **98-400-X2016019**, both
-viewer-validated cell-exact. The single remaining open corpus file is the
-2001 F-series **97F0015X**; see the section above.
+signature block, anchored on the preceding `81 02 03 00` sub-header) onboarded
+the 1981 CMA/CA profile **97-570-X1981002** and the tiny 2016
+collective-dwellings crosstab **98-400-X2016019** (both viewer-validated
+cell-exact, 2026-07-06), and the **count-anchored prose-bleed name recovery**
+onboarded the last file, the 2001 F-series **97F0015X** — so **every `.ivt`
+file in the test corpus now decodes**. See the section above.

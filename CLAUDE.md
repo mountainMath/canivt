@@ -365,7 +365,18 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   `ivt_f2_descriptor()` retries the region between the last `81 02 03 00`
   before D and D; both anchors are block signatures and the retry only wins on
   ≥ 2 doubled-name records, so it stays structural (quiet). Both files then
-  decode as ordinary layouts, viewer-validated cell-exact.
+  decode as ordinary layouts, viewer-validated cell-exact. **PROSE-BLEED names**
+  (2001 F-series 97F0015X): French description text bleeds INTO and BETWEEN the
+  two name copies (`Total Income GrTotal Income Groups (12). ; Dans tous les…`;
+  `Sex (3)atif totSex (3) et les…`; `Geographyle nomGeography connexes…`), so
+  the exact-double / truncated-tail / split paths all miss. Two count-anchored
+  fallbacks in `ivt_f2_descriptor_name()` (which now takes the framing `count`):
+  each **data-dim name ends in `(count)`** → shortest prefix completing
+  `(count)`, de-truncating a capped first copy (A+B with A a prefix of B → B),
+  accepted only when clean title-case; the **geography** name (no parenthetical)
+  → longest prefix that reoccurs later in the run. With names recovered the
+  ordinary family-1 layout decodes (864,205 cells, viewer-validated cell-exact).
+  **Every `.ivt` in the corpus now decodes** — no unsupported files remain.
 - **There is ONE decode pattern — "family 1 / family 2" are two cases of it**
   (`decode.R`, `ivt_layout()` + `ivt_decode()`). Nest **every** dimension
   power-of-two-positionally (`ivt_f2_bit_layout()`), data dimensions innermost
