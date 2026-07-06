@@ -19,6 +19,14 @@
 #' download -- handy for tables that are not on either index, or for local
 #' experiments.
 #'
+#' For an ad-hoc table on neither index, pass a **named** length-one vector or
+#' list whose name is the local cache key and whose value is a URL or a local
+#' file path to a (zipped or raw) `.ivt`:
+#' `get_statcan_ivt(c(my_table = "~/Downloads/foo.zip"))`. The name keys the
+#' cached Parquet; the value is fetched (URL) or copied in place (local path,
+#' never moved), sniffed so a `.zip` is unzipped and a raw `.ivt` used as-is,
+#' then decoded.
+#'
 #' @param catalogue A StatCan catalogue number (e.g. `"98-10-0241-01"`,
 #'   `"95F0436XCB2001003"`), a Borealis id (a filename like `"CD1T29M3"`, its
 #'   DOI-qualified key like `"SP3/6DGOTF/CD1T29M3"`, or a numeric `file_id`), or a
@@ -27,7 +35,9 @@
 #'   datasets is ambiguous and aborts with the disambiguating keys. **A one-row
 #'   tibble from [statcan_ivt_catalogue()] or [borealis_ivt_catalogue()]** may be
 #'   passed instead of an id, routing straight to that row's source with no
-#'   catalogue lookup.
+#'   catalogue lookup. A **named** length-one vector/list (`c(key = "url-or-path")`)
+#'   is a manual import: its name is the cache key and its value a URL or local
+#'   file path to a zipped or raw `.ivt`.
 #' @param geo_attributes Passed to [read_ivt()]: decode the full family-2
 #'   geography attribute table (slower) so geographies can be labelled by name.
 #' @param labels Passed to [ivt_write_parquet()]: write labelled columns
@@ -37,6 +47,11 @@
 #'   structural slug (`"slug"`).
 #' @param language Passed to [ivt_write_parquet()]: output labels and
 #'   label-derived column names in English (`"en"`, default) or French (`"fr"`).
+#' @param keep_ivt Persist the downloaded/imported raw `.ivt` in the ivt cache
+#'   ([ivt_cache_dir("ivt")][ivt_cache_dir]). The default `FALSE` decodes the
+#'   `.ivt` from a temporary copy and then discards it, keeping only the parsed
+#'   Parquet (re-fetched if the Parquet is later rebuilt). A raw `.ivt` already
+#'   persisted in the ivt cache is reused regardless of this flag.
 #' @param refresh Re-download and re-parse even if cached outputs exist.
 #' @param quiet Suppress progress messages.
 #' @return An [arrow::open_dataset()] connection to the Parquet file. The Parquet
@@ -49,16 +64,18 @@
 #' @export
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
                             dim_names = c("slug", "label"), language = "en",
-                            refresh = FALSE, quiet = FALSE) {
+                            keep_ivt = FALSE, refresh = FALSE, quiet = FALSE) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to open the parsed Parquet.")
   }
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
-  # `catalogue` may be an id string OR a one-row catalogue tibble (from
-  # statcan_ivt_catalogue() / borealis_ivt_catalogue()); derive a stable string
-  # id / cache key from either.
-  id  <- ivt_input_id(catalogue)
+  # `catalogue` may be an id string, a one-row catalogue tibble (from
+  # statcan_ivt_catalogue() / borealis_ivt_catalogue()), or a NAMED length-one
+  # vector/list mapping a cache key -> a manual URL/path source. Derive a stable
+  # string id / cache key.
+  manual <- ivt_manual_input(catalogue)
+  id  <- if (is.null(manual)) ivt_input_id(catalogue) else manual$key
   key <- ivt_catalogue_key(id)
   # the language marker lets the English and French Parquets of one table coexist
   parquet <- file.path(ivt_cache_dir("data"),
@@ -68,18 +85,29 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
     return(ivt_parquet_connection(parquet, NULL))
   }
 
-  # 1. Custom local file in the ivt cache takes precedence over the catalogue.
-  ivt_path <- ivt_find_cached_ivt(id)
+  # Where the raw .ivt lands: the persistent ivt cache when `keep_ivt`, else a
+  # per-session temp folder (decoded then discarded).
+  dest_dir <- if (isTRUE(keep_ivt)) file.path(ivt_cache_dir("ivt"), key)
+              else file.path(tempdir(), "canivt_tmp_ivt", key)
   row <- NULL
 
-  # 2. Otherwise resolve via the catalogues (StatCan first, Borealis fallback)
-  #    and download. A row input routes straight to its own source.
-  if (is.na(ivt_path)) {
-    src <- ivt_resolve_source(catalogue, quiet = quiet)
-    row <- src$row
-    ivt_path <- src$download(key, refresh, quiet)
-  } else if (!quiet) {
-    cli::cli_inform("Using local IVT {.path {ivt_path}}")
+  if (!is.null(manual)) {
+    # Manual source: fetch/copy the given URL or local path into dest_dir.
+    ivt_path <- ivt_manual_download(manual$source, key, dest_dir = dest_dir,
+                                    overwrite = refresh, quiet = quiet)
+  } else {
+    # 1. A raw .ivt already in the ivt cache takes precedence (reused even when
+    #    keep_ivt is FALSE -- it is already on disk).
+    ivt_path <- ivt_find_cached_ivt(id)
+    # 2. Otherwise resolve via the catalogues (StatCan first, Borealis fallback)
+    #    and download. A row input routes straight to its own source.
+    if (is.na(ivt_path)) {
+      src <- ivt_resolve_source(catalogue, quiet = quiet)
+      row <- src$row
+      ivt_path <- src$download(key, refresh, quiet, dest_dir)
+    } else if (!quiet) {
+      cli::cli_inform("Using local IVT {.path {ivt_path}}")
+    }
   }
 
   # 3. Decode and cache the tidy table as Parquet.
@@ -362,6 +390,60 @@ ivt_find_cached_ivt <- function(id) {
   if (length(cands)) cands[1] else NA_character_
 }
 
+# Detect a manual-source input to get_statcan_ivt(): a NAMED length-one vector
+# or list mapping a local cache key to a URL or local file path. Returns
+# list(key=, source=) for such an input, or NULL for an ordinary id / catalogue
+# row. A named input with != 1 entry, or a blank name/value, aborts.
+ivt_manual_input <- function(x) {
+  if (is.data.frame(x)) return(NULL)
+  nm <- names(x)
+  if (is.null(nm) || !any(nzchar(nm))) return(NULL)
+  if (length(x) != 1L)
+    cli::cli_abort(c(
+      "A named manual IVT source must have exactly one entry (got {length(x)}).",
+      i = "Call {.fn get_statcan_ivt} once per table."))
+  key <- nm[[1L]]
+  src <- x[[1L]]
+  if (!is.character(src) || length(src) != 1L)
+    src <- tryCatch(as.character(src), error = function(e) NA_character_)
+  if (!nzchar(key))
+    cli::cli_abort("The manual IVT source name (used as the cache key) must be non-empty.")
+  if (length(src) != 1L || is.na(src) || !nzchar(src))
+    cli::cli_abort("The manual IVT source (a URL or local file path) must be a non-empty string.")
+  list(key = key, source = src)
+}
+
+# Import a manual source (a URL, or a local path to a zipped or raw .ivt) into
+# `dest_dir` and return the local .ivt path. Mirrors statcan_ivt_download()'s
+# sniff-and-store (ivt_store_download): a URL is downloaded to a tempfile first;
+# a local file is passed through directly (copied/unzipped in place, never
+# moved). Reuses an existing .ivt in `dest_dir` unless `overwrite`.
+ivt_manual_download <- function(source, key, dest_dir = NULL, overwrite = FALSE,
+                                quiet = FALSE) {
+  if (is.null(dest_dir)) dest_dir <- file.path(ivt_cache_dir("ivt"), key)
+  dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
+
+  existing <- list.files(dest_dir, pattern = "\\.ivt$", full.names = TRUE,
+                         ignore.case = TRUE)
+  if (length(existing) && !overwrite) return(existing[1])
+
+  out_name <- paste0(key, ".ivt")
+  if (grepl("://", source)) {
+    if (!quiet) cli::cli_inform("Downloading {.url {source}}")
+    tmp <- tempfile(fileext = ".bin")
+    on.exit(unlink(tmp), add = TRUE)
+    utils::download.file(source, tmp, mode = "wb", quiet = quiet)
+    return(ivt_store_download(tmp, dest_dir, out_name))
+  }
+  path <- path.expand(source)
+  if (!file.exists(path))
+    cli::cli_abort(c(
+      "Manual IVT source {.path {source}} does not exist.",
+      i = "Provide a URL (containing {.val ://}) or an existing local file path."))
+  if (!quiet) cli::cli_inform("Importing local IVT {.path {path}}")
+  ivt_store_download(path, dest_dir, out_name)
+}
+
 # Resolve a catalogue number to its StatCan catalogue row. Returns NULL when no
 # product matches and `error = FALSE`; aborts otherwise.
 ivt_lookup_catalogue <- function(catalogue, quiet = FALSE, error = TRUE) {
@@ -396,16 +478,16 @@ ivt_resolve_source <- function(catalogue, quiet = FALSE) {
   row <- ivt_lookup_catalogue(catalogue, quiet = quiet, error = FALSE)
   if (!is.null(row)) {
     return(list(source = "statcan", row = row,
-      download = function(key, overwrite, quiet)
-        statcan_ivt_download(row$download_url, key = key,
+      download = function(key, overwrite, quiet, dest_dir = NULL)
+        statcan_ivt_download(row$download_url, key = key, dest_dir = dest_dir,
                              overwrite = overwrite, quiet = quiet)))
   }
   brow <- ivt_lookup_borealis(catalogue, quiet = quiet)
   if (!is.null(brow)) {
     return(list(source = "borealis", row = brow,
-      download = function(key, overwrite, quiet)
-        borealis_ivt_download(brow, key = key, overwrite = overwrite,
-                              quiet = quiet)))
+      download = function(key, overwrite, quiet, dest_dir = NULL)
+        borealis_ivt_download(brow, key = key, dest_dir = dest_dir,
+                              overwrite = overwrite, quiet = quiet)))
   }
   cli::cli_abort(c(
     "No IVT product matches {.val {catalogue}}.",
@@ -428,13 +510,14 @@ ivt_row_source <- function(row) {
     cli::cli_abort("A catalogue row must have exactly one row (got {nrow(row)}).")
   if (ivt_row_is_borealis(row)) {
     return(list(source = "borealis", row = row,
-      download = function(key, overwrite, quiet)
-        borealis_ivt_download(row, key = key, overwrite = overwrite, quiet = quiet)))
+      download = function(key, overwrite, quiet, dest_dir = NULL)
+        borealis_ivt_download(row, key = key, dest_dir = dest_dir,
+                              overwrite = overwrite, quiet = quiet)))
   }
   if (all(c("catalogue", "download_url") %in% names(row))) {
     return(list(source = "statcan", row = row,
-      download = function(key, overwrite, quiet)
-        statcan_ivt_download(row$download_url, key = key,
+      download = function(key, overwrite, quiet, dest_dir = NULL)
+        statcan_ivt_download(row$download_url, key = key, dest_dir = dest_dir,
                              overwrite = overwrite, quiet = quiet)))
   }
   cli::cli_abort(c(
@@ -502,12 +585,15 @@ ivt_lookup_borealis <- function(catalogue, quiet = FALSE) {
 #' @param key Cache key used to name the per-table folder under the ivt cache.
 #'   Optional when `download_url` is a catalogue row (defaults to the row's
 #'   catalogue number).
+#' @param dest_dir Directory the `.ivt` is written to. Defaults to a per-table
+#'   folder under the ivt cache ([ivt_cache_dir("ivt")][ivt_cache_dir]);
+#'   [get_statcan_ivt()] passes a temporary folder when `keep_ivt = FALSE`.
 #' @param overwrite Re-download even if a `.ivt` already exists.
 #' @param quiet Suppress the download message.
 #' @return Path to the local `.ivt` file.
 #' @export
-statcan_ivt_download <- function(download_url, key = NULL, overwrite = FALSE,
-                                 quiet = FALSE) {
+statcan_ivt_download <- function(download_url, key = NULL, dest_dir = NULL,
+                                 overwrite = FALSE, quiet = FALSE) {
   if (is.data.frame(download_url)) {
     row <- download_url
     if (nrow(row) != 1L)
@@ -518,7 +604,7 @@ statcan_ivt_download <- function(download_url, key = NULL, overwrite = FALSE,
   if (is.null(key) || !nzchar(key))
     cli::cli_abort("{.arg key} is required when {.arg download_url} is a URL string.")
 
-  dest_dir <- file.path(ivt_cache_dir("ivt"), key)
+  if (is.null(dest_dir)) dest_dir <- file.path(ivt_cache_dir("ivt"), key)
   dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
 
   existing <- list.files(dest_dir, pattern = "\\.ivt$", full.names = TRUE,

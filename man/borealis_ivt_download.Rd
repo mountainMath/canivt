@@ -4,7 +4,13 @@
 \alias{borealis_ivt_download}
 \title{Download a Borealis IVT file into the ivt cache}
 \usage{
-borealis_ivt_download(x, key = NULL, overwrite = FALSE, quiet = FALSE)
+borealis_ivt_download(
+  x,
+  key = NULL,
+  dest_dir = NULL,
+  overwrite = FALSE,
+  quiet = FALSE
+)
 }
 \arguments{
 \item{x}{A one-row tibble from \code{\link[=borealis_ivt_catalogue]{borealis_ivt_catalogue()}}, or a Borealis
@@ -12,6 +18,10 @@ borealis_ivt_download(x, key = NULL, overwrite = FALSE, quiet = FALSE)
 
 \item{key}{Cache key naming the per-table folder under the ivt cache. Defaults
 to the catalogue row's \code{key} (or the \code{file_id} when \code{x} is a bare id).}
+
+\item{dest_dir}{Directory the \code{.ivt} is written to. Defaults to a per-table
+folder under the ivt cache (\link[=ivt_cache_dir]{ivt_cache_dir("ivt")});
+\code{\link[=get_statcan_ivt]{get_statcan_ivt()}} passes a temporary folder when \code{keep_ivt = FALSE}.}
 
 \item{overwrite}{Re-download even if a \code{.ivt} already exists.}
 

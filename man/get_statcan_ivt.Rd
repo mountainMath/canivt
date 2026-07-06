@@ -10,6 +10,7 @@ get_statcan_ivt(
   labels = TRUE,
   dim_names = c("slug", "label"),
   language = "en",
+  keep_ivt = FALSE,
   refresh = FALSE,
   quiet = FALSE
 )
@@ -23,7 +24,9 @@ and punctuation-insensitive. A bare Borealis filename that occurs in several
 datasets is ambiguous and aborts with the disambiguating keys. \strong{A one-row
 tibble from \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}} or \code{\link[=borealis_ivt_catalogue]{borealis_ivt_catalogue()}}} may be
 passed instead of an id, routing straight to that row's source with no
-catalogue lookup.}
+catalogue lookup. A \strong{named} length-one vector/list (\code{c(key = "url-or-path")})
+is a manual import: its name is the cache key and its value a URL or local
+file path to a zipped or raw \code{.ivt}.}
 
 \item{geo_attributes}{Passed to \code{\link[=read_ivt]{read_ivt()}}: decode the full family-2
 geography attribute table (slower) so geographies can be labelled by name.}
@@ -37,6 +40,12 @@ structural slug (\code{"slug"}).}
 
 \item{language}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: output labels and
 label-derived column names in English (\code{"en"}, default) or French (\code{"fr"}).}
+
+\item{keep_ivt}{Persist the downloaded/imported raw \code{.ivt} in the ivt cache
+(\link[=ivt_cache_dir]{ivt_cache_dir("ivt")}). The default \code{FALSE} decodes the
+\code{.ivt} from a temporary copy and then discards it, keeping only the parsed
+Parquet (re-fetched if the Parquet is later rebuilt). A raw \code{.ivt} already
+persisted in the ivt cache is reused regardless of this flag.}
 
 \item{refresh}{Re-download and re-parse even if cached outputs exist.}
 
@@ -65,6 +74,14 @@ placed in the ivt cache yourself (as \verb{<id>.ivt} directly in
 subfolder). Such files are used directly, with no catalogue lookup or
 download -- handy for tables that are not on either index, or for local
 experiments.
+
+For an ad-hoc table on neither index, pass a \strong{named} length-one vector or
+list whose name is the local cache key and whose value is a URL or a local
+file path to a (zipped or raw) \code{.ivt}:
+\code{get_statcan_ivt(c(my_table = "~/Downloads/foo.zip"))}. The name keys the
+cached Parquet; the value is fetched (URL) or copied in place (local path,
+never moved), sniffed so a \code{.zip} is unzipped and a raw \code{.ivt} used as-is,
+then decoded.
 }
 \seealso{
 \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}, \code{\link[=read_ivt]{read_ivt()}}

@@ -7,6 +7,7 @@
 statcan_ivt_download(
   download_url,
   key = NULL,
+  dest_dir = NULL,
   overwrite = FALSE,
   quiet = FALSE
 )
@@ -20,6 +21,10 @@ cache key are used).}
 \item{key}{Cache key used to name the per-table folder under the ivt cache.
 Optional when \code{download_url} is a catalogue row (defaults to the row's
 catalogue number).}
+
+\item{dest_dir}{Directory the \code{.ivt} is written to. Defaults to a per-table
+folder under the ivt cache (\link[=ivt_cache_dir]{ivt_cache_dir("ivt")});
+\code{\link[=get_statcan_ivt]{get_statcan_ivt()}} passes a temporary folder when \code{keep_ivt = FALSE}.}
 
 \item{overwrite}{Re-download even if a \code{.ivt} already exists.}
 

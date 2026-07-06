@@ -128,13 +128,16 @@ borealis_tidy_catalogue <- function(raw) {
 #'   `file_id` (character/numeric).
 #' @param key Cache key naming the per-table folder under the ivt cache. Defaults
 #'   to the catalogue row's `key` (or the `file_id` when `x` is a bare id).
+#' @param dest_dir Directory the `.ivt` is written to. Defaults to a per-table
+#'   folder under the ivt cache ([ivt_cache_dir("ivt")][ivt_cache_dir]);
+#'   [get_statcan_ivt()] passes a temporary folder when `keep_ivt = FALSE`.
 #' @param overwrite Re-download even if a `.ivt` already exists.
 #' @param quiet Suppress the download message.
 #' @return Path to the local `.ivt` file.
 #' @seealso [borealis_ivt_catalogue()], [get_statcan_ivt()]
 #' @export
-borealis_ivt_download <- function(x, key = NULL, overwrite = FALSE,
-                                  quiet = FALSE) {
+borealis_ivt_download <- function(x, key = NULL, dest_dir = NULL,
+                                  overwrite = FALSE, quiet = FALSE) {
   borealis_require(needs_key = TRUE)
   if (is.data.frame(x)) {
     stopifnot(nrow(x) == 1L)
@@ -149,7 +152,7 @@ borealis_ivt_download <- function(x, key = NULL, overwrite = FALSE,
     if (is.null(key)) key <- file_id
   }
 
-  dest_dir <- file.path(ivt_cache_dir("ivt"), ivt_catalogue_key(key))
+  if (is.null(dest_dir)) dest_dir <- file.path(ivt_cache_dir("ivt"), ivt_catalogue_key(key))
   dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
 
   existing <- list.files(dest_dir, pattern = "\\.ivt$", full.names = TRUE,
