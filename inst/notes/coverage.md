@@ -911,9 +911,17 @@ directory slot table**:
   small records preceding each footnote pair in the directory look like member
   references (plausible, unverified). (The inline `01 01 … 00 01` markers we
   investigated earlier are block framing, not note references.)
-- [ ] **Member hierarchy as a structured tree** for family 2. Encoded via leading-
-  space indentation in the labels (preserved verbatim) but not parsed into
-  parent/child. Family 1 exposes `ivt_label_depth()`; family 2 does not yet.
+- [x] **Member hierarchy as a structured tree** — DONE (2026-07-06). The
+  leading-space indentation of the member labels (preserved verbatim) is parsed
+  into both `depth` (already exposed) and now `parent_id` — the `member_id` of
+  each member's parent, i.e. the nearest preceding member at a strictly smaller
+  depth (robust to depth skips like 0→2; `NA` for top-level members).
+  `ivt_label_parent()` (write.R) turns the flat depth sequence into the tree;
+  `parent_id` rides on `ivt_members()`, the `_members.parquet` sidecar and the
+  `dimension_members.csv` metadata export, for both families (the geography
+  columns and every data dimension). Validated on 97F0015X's income groups
+  (the `$X–$Y` brackets roll up to "With income" → "Total - Income groups";
+  "Median income $" is a separate top-level statistic).
 
 ## Summary
 

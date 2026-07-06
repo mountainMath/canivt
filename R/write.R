@@ -100,7 +100,8 @@ ivt_write_metadata <- function(x, dir = NULL) {
                dimension_fr = if (is.null(d$name_fr)) NA_character_ else d$name_fr,
                member_id = seq_along(d$members),
                ordinal = as.integer(ord), label = trimws(d$members),
-               label_fr = label_fr, depth = ivt_label_depth(d$members))
+               label_fr = label_fr, depth = ivt_label_depth(d$members),
+               parent_id = ivt_label_parent(d$members))
   }))
   wr(members, "dimension_members.csv")
 
@@ -151,4 +152,26 @@ ivt_data_cache_file <- function(x, suffix) {
 ivt_label_depth <- function(labels) {
   lead <- nchar(labels) - nchar(sub("^ +", "", labels))
   as.integer(lead %/% 2L)
+}
+
+# Parent member (1-based member id) of each label in the hierarchy the
+# indentation implies: the nearest PRECEDING member at a strictly smaller depth
+# (robust to depth skips, e.g. 0 -> 2). NA for top-level (depth 0) members. This
+# turns the flat depth sequence into a structured parent/child tree -- the
+# family-2 analogue of the depth column, usable to roll members up to their
+# aggregate ("Under $10,000" -> "With income" -> "Total - Income groups").
+ivt_label_parent <- function(labels) {
+  d <- ivt_label_depth(labels)
+  parent <- rep(NA_integer_, length(d))
+  last_at <- integer(0)                         # last_at[k] = latest member at depth k-1
+  for (i in seq_along(d)) {
+    di <- d[i]
+    if (di > 0L && length(last_at) >= 1L)       # nearest preceding SHALLOWER member:
+      for (k in seq.int(min(di, length(last_at)), 1L))   # scan up from depth di-1
+        if (!is.na(last_at[k])) { parent[i] <- last_at[k]; break }
+    if (length(last_at) > di + 1L)              # returning to a shallower level:
+      last_at[(di + 2L):length(last_at)] <- NA_integer_   # clear the stale deeper ids
+    last_at[di + 1L] <- i
+  }
+  parent
 }

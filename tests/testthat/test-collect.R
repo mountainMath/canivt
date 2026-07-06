@@ -44,12 +44,30 @@ test_that("ivt_members builds the full level table in ordinal order", {
   expect_equal(age$level[2], "0 to 14 years")       # level is trimmed like ivt_tidy
   expect_equal(age$level_fr, c("Total - Âge", "0 à 14 ans", "15 ans et plus"))
   expect_equal(age$depth, c(0L, 1L, 1L))
+  # the two indented members roll up to the depth-0 "Total" (member 1)
+  expect_equal(age$parent_id, c(NA_integer_, 1L, 1L))
   geo <- m[m$column == "geo_uid", ]
   expect_equal(geo$level, c("2021A000011124", "2021A000235"))
   expect_equal(unique(geo$dimension), "Geography")
   # dim_names = "label" names the data column by the full dimension label
   expect_setequal(unique(ivt_members(fake_ivt(), dim_names = "label")$column),
                   c(age_col, "geo_name", "geo_uid"))
+})
+
+test_that("ivt_label_parent turns indentation into a parent/child tree", {
+  labs <- c("Total - Income groups",   #  depth 0  (1)
+            "  Without income",        #  depth 1  (2) -> parent 1
+            "  With income",           #  depth 1  (3) -> parent 1
+            "    Under $10,000",       #  depth 2  (4) -> parent 3
+            "    $10,000 and over",    #  depth 2  (5) -> parent 3
+            "  Median income $")       #  depth 1  (6) -> parent 1 (back up a level)
+  expect_equal(ivt_label_depth(labs), c(0L, 1L, 1L, 2L, 2L, 1L))
+  expect_equal(ivt_label_parent(labs), c(NA, 1L, 1L, 3L, 3L, 1L))
+  # a depth skip (0 -> 2) still resolves to the nearest shallower member
+  skip_lab <- c("Root", "    Deep child")
+  expect_equal(ivt_label_parent(skip_lab), c(NA_integer_, 1L))
+  # a flat list (no indentation) has no parents
+  expect_equal(ivt_label_parent(c("a", "b", "c")), rep(NA_integer_, 3))
 })
 
 test_that("collect_ivt on an ivt object yields factors with ALL member levels", {
