@@ -830,6 +830,15 @@ bilingual geography names; `ord-08035` via the relocated `@32` pointer; and
 rule, the descriptor count reconciliation + geography-dimension index, the
 `0x0a`/`0x09` u16 width tags, and the dense `0x0_` page variant respectively.
 
+**Borealis-sourced corpus table (2026-07-06):** `97f0017xcb01004` (2001 census
+topic-based tabulation, Geography(164) × Census Years(3) × Age(13) × Sex(3) ×
+Highest level of schooling(12) × School Attendance(4), 662,564 cells, strict-
+clean) is the first ledger table downloaded through the **Borealis Dataverse**
+ingestion path (`borealis_ivt_catalogue()` / `borealis_ivt_download()`). It needs
+no new decode work — it is the already-supported 2001 F-series family (cf.
+`97F0020X`) — but is a Borealis-**only** product (not on the StatCan index), so it
+exercises the fallback source end to end.
+
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
 The "variable section-pointer table" (~header bytes 690–1080) is decoded
