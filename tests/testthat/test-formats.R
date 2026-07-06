@@ -75,9 +75,18 @@ ivt_corpus <- list(
        family = 2L, dims = c(581L, 4L, 79L)),
   list(id = "cro0172986_ct8_2006", file = "cro0172986_ct.8-2006_private-households.ivt",
        family = 2L, dims = c(581L, 5L, 87L)),
+  # INVERTED descriptor layout (records BEFORE the `81 01 20 00 f0` signature
+  # block, anchored after the `81 02 03 00` sub-header; the signature block is
+  # followed by the identity/title text instead): the 1981 CMA/CA profile
+  # Part A and the tiny 2016 collective-dwellings crosstab. Both viewer-
+  # validated cell-exact (1981002: 1,920/1,920 over 24 geographies incl.
+  # members 60/100/119/120; 2016019: all 448/448 cells).
+  list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = 1L,
+       dims = c(1L, 80L, 120L), n_geo = 120L),
+  list(id = "98400X2016019",     file = "98400X2016019.ivt",     family = 2L,
+       dims = c(14L, 16L, 2L), n_geo = 14L),
   # --- share the signature but are NOT a supported format ------------------
-  list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA),
-  list(id = "97-570-X1981002",   file = "97-570-X1981002.IVT",   family = NA)
+  list(id = "97F0015X",          file = "97F0015X.ivt",          family = NA)
 )
 
 for (case in ivt_corpus) {

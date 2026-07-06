@@ -1986,6 +1986,63 @@ ivt_f2_descriptor <- function(raw) {
   if (is.null(D) || is.na(D) || D < 1 || D + 18 > n) return(NULL)
   D <- as.integer(D)
   ndim <- rd_u16(raw, D + 16L)
+
+  # Walk a bounded byte region for dimension records; a record is a 0x01 whose
+  # following printable run is the dimension name stored twice
+  # (`ivt_f2_descriptor_name()` handles the standard doubling, truncated first
+  # copies, space-separated / short+display pairs, and the single-name geography
+  # record of the ord custom export). Read count/type from the bytes just before
+  # the 0x01. The name may start with an uppercase letter OR a digit ("1995
+  # Household Income (3)" in the 1996 table 95F0250XDB96001 -- the
+  # uppercase-only anchor silently dropped that dimension).
+  walk_records <- function(v, Lend, cap) {
+    dims <- list()
+    k <- 4L
+    while (k <= Lend - 1L && length(dims) < cap) {
+      if (v[k] == 0x01L &&
+          ((v[k + 1L] >= 65L && v[k + 1L] <= 90L) ||
+           (v[k + 1L] >= 48L && v[k + 1L] <= 57L))) {
+        e <- k + 1L
+        while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
+        run <- v[(k + 1L):(e - 1L)]
+        nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L)
+        if (!is.na(nm)) {
+          double01 <- v[k - 1L] == 0x01L
+          if (double01) {                          # period/facet double-01 framing
+            type <- v[k - 3L]; count <- v[k - 2L]
+          } else {
+            type <- v[k - 1L]
+            # the descriptor stores a (large) member count as a 16-bit little-endian
+            # value `[count_lo][count_hi][type][01]`; the type byte tags the storage
+            # width. u16 types: 0x10 (modern DGUID geography, e.g. 63404 in
+            # 98-10-0023; 57523 in the 2006 DA table), 0x0d (the 2011 census-tract
+            # geography, 5447; also the 1981/1991 profile geographies), 0x0a / 0x0c
+            # (the profile lineage's characteristics / geography dimensions, e.g.
+            # 98F0172X's Profile(529) and Geography(4063)) and 0x09 (the >256-member
+            # "Selected characteristics"/detailed-classification data dimensions:
+            # 97F0020X's Selected(282) and 98-10-0174's Mother tongue(331), both
+            # chunked >256-member codebooks -- the u8 read took the low byte and got
+            # 1, which mis-nested the layout). The small family-1 geography (type
+            # 0x08, <=255) and the ordinary data dimensions carry a u8 count. Reading
+            # 0x0d as u8 misread 2011's 5447 geographies as 21; 0x0a/0x0c as u8
+            # misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09 as u8
+            # silently mis-decoded 98-10-0174's cells. (u16 is safe for a small
+            # member of any of these types: count_hi is then 00.)
+            count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L))
+                       v[k - 3L] + v[k - 2L] * 256L
+                     else v[k - 2L]
+          }
+          dims[[length(dims) + 1L]] <- list(name = nm,
+                                            count = count, type = type,
+                                            double01 = double01)
+          k <- e; next
+        }
+      }
+      k <- k + 1L
+    }
+    dims
+  }
+
   win <- min(D + 4000L, n)
   v <- as.integer(raw[(D + 1L):win])               # v[k] is byte D+k-1
   # the dimension records sit between the fixed header and the "FACET04" title;
@@ -1993,57 +2050,28 @@ ivt_f2_descriptor <- function(raw) {
   txt <- intToUtf8(ifelse(v >= 32L & v <= 126L, v, 46L))
   facet <- regexpr("FACET04", txt)
   Lend <- if (facet > 0) facet - 1L else length(v)
+  dims <- walk_records(v, Lend, ndim)
 
-  # Walk the bounded region; a dimension record is a 0x01 whose following printable
-  # run is the dimension name stored twice (`ivt_f2_descriptor_name()` handles the
-  # standard doubling, truncated first copies, space-separated / short+display
-  # pairs, and the single-name geography record of the ord custom export). Read
-  # count/type from the bytes just before the 0x01. The name may start with an
-  # uppercase letter OR a digit ("1995 Household Income (3)" in the 1996 table
-  # 95F0250XDB96001 -- the uppercase-only anchor silently dropped that dimension).
-  dims <- list()
-  k <- 4L
-  while (k <= Lend - 1L && length(dims) < ndim) {
-    if (v[k] == 0x01L &&
-        ((v[k + 1L] >= 65L && v[k + 1L] <= 90L) ||
-         (v[k + 1L] >= 48L && v[k + 1L] <= 57L))) {
-      e <- k + 1L
-      while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
-      run <- v[(k + 1L):(e - 1L)]
-      nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L)
-      if (!is.na(nm)) {
-        double01 <- v[k - 1L] == 0x01L
-        if (double01) {                            # period/facet double-01 framing
-          type <- v[k - 3L]; count <- v[k - 2L]
-        } else {
-          type <- v[k - 1L]
-          # the descriptor stores a (large) member count as a 16-bit little-endian
-          # value `[count_lo][count_hi][type][01]`; the type byte tags the storage
-          # width. u16 types: 0x10 (modern DGUID geography, e.g. 63404 in
-          # 98-10-0023; 57523 in the 2006 DA table), 0x0d (the 2011 census-tract
-          # geography, 5447; also the 1981/1991 profile geographies), 0x0a / 0x0c
-          # (the profile lineage's characteristics / geography dimensions, e.g.
-          # 98F0172X's Profile(529) and Geography(4063)) and 0x09 (the >256-member
-          # "Selected characteristics"/detailed-classification data dimensions:
-          # 97F0020X's Selected(282) and 98-10-0174's Mother tongue(331), both
-          # chunked >256-member codebooks -- the u8 read took the low byte and got
-          # 1, which mis-nested the layout). The small family-1 geography (type
-          # 0x08, <=255) and the ordinary data dimensions carry a u8 count. Reading
-          # 0x0d as u8 misread 2011's 5447 geographies as 21; 0x0a/0x0c as u8
-          # misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09 as u8
-          # silently mis-decoded 98-10-0174's cells. (u16 is safe for a small
-          # member of any of these types: count_hi is then 00.)
-          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L))
-                     v[k - 3L] + v[k - 2L] * 256L
-                   else v[k - 2L]
-        }
-        dims[[length(dims) + 1L]] <- list(name = nm,
-                                          count = count, type = type,
-                                          double01 = double01)
-        k <- e; next
-      }
+  # INVERTED layout (97-570-X1981002, 98-400-X2016019): the dimension records
+  # PRECEDE the `81 01 20 00 f0 ...` signature block (which is followed by the
+  # identity/title text instead), anchored after the same `81 02 03 00`
+  # sub-header that follows the signature at D+14/15 on the standard profile
+  # tables. When the forward walk recovers no usable records, retry the region
+  # between the last `81 02 03 00` before D and D itself. Both anchors are
+  # block signatures and the retry only wins when it recovers >= 2 doubled-name
+  # records, so this stays structural (quiet, like the master-directory
+  # relocation of the descriptor offset itself).
+  if (length(dims) < 2L && D > 8L) {
+    lo <- max(0L, D - 4096L)
+    reg <- (lo + 1L):(D - 3L)
+    sub <- reg[raw[reg] == as.raw(0x81) & raw[reg + 1L] == as.raw(0x02) &
+               raw[reg + 2L] == as.raw(0x03) & raw[reg + 3L] == as.raw(0x00)]
+    if (length(sub)) {
+      sub <- sub[length(sub)] - 1L                 # 0-based offset of the last hit
+      v2 <- as.integer(raw[(sub + 1L):D])          # bytes sub .. D-1
+      dims2 <- walk_records(v2, length(v2), 32L)
+      if (length(dims2) >= 2L) dims <- dims2
     }
-    k <- k + 1L
   }
 
   title <- regmatches(txt, regexpr("FACET04[^.]*", txt))

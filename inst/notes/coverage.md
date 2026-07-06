@@ -687,6 +687,16 @@ Files in the test corpus that are currently unsupported:
   garbage (1282), the doubled-name anchor snags on French text bleeding into
   the truncated names, descriptor layout differs — the least understood 2001
   file. Served by StatCan's legacy `www12` dynamic system.
+- [x] **2016 collective-dwellings crosstab** (`98-400-X2016019`) — **DECODED,
+  SUPPORTED** (2026-07-06). Same **inverted descriptor layout** as
+  97-570-X1981002 (records before the signature block, anchored on the
+  preceding `81 02 03 00` sub-header — see the header section-pointer notes).
+  With the real descriptor the layout is ordinary: `Geography(14) × Type of
+  collective dwelling(16) × Collective dwellings occupied…(2)`, geography
+  straddles (14 fits one window). Viewer-validated cell-exact: **448/448**
+  cells across all 14 geographies (join by the EN half of the bilingual
+  geography name), strict-clean; all 16+2 EN/FR data-dim labels and the 14
+  inline geography names + bare codes decode.
 - [x] **2006 census DA crosstab** (`97-563-XCB2006072`): **DECODED — SUPPORTED**
   (2026-07-03). The page directory was at the plain `u16@558 = 45641` all along
   (14,381 entries = ⌈57,523/4⌉ exactly, the geography-straddle layout the
@@ -720,11 +730,20 @@ Files in the test corpus that are currently unsupported:
 - [x] **1981 profile `97-570-X1981004` — SUPPORTED** (2026-07-04; see the
   Rejected-variants section above for the full story: descriptor count
   reconciliation + `ivt_f2_geo_dim_index()`, no new nesting needed).
-- [ ] **1981 census `97-570-X1981002`** (CMA/CA profile, Part A): descriptor
-  still undecoded (`n_dim` garbage, out-of-line title-first block layout —
-  its `@32` points at a title block, with small pointer tables after it).
-  Note its sibling 1981004 turned out to be an ordinary supported container,
-  so this vintage is *not* inherently alien — the header indirection differs.
+- [x] **1981 census `97-570-X1981002`** (CMA/CA profile, Part A) — **DECODED,
+  SUPPORTED** (2026-07-06). Its descriptor uses the **INVERTED layout**: the
+  dimension records sit *before* the `81 01 20 00 f0 .. .. 80 03` signature
+  block (which is followed by the identity/title text instead of preceding the
+  records), anchored after the same `81 02 03 00` sub-header that trails the
+  signature at D+14/15 on the standard profile tables. `ivt_f2_descriptor()`
+  now retries the region between the last `81 02 03 00` before D and D itself
+  when the forward walk recovers < 2 records; both anchors are block
+  signatures and the retry only wins on ≥ 2 doubled-name records, so it stays
+  structural (quiet). Layout is then the ordinary profile lineage
+  (`Values(1) × Profile(80) × Geography(120)`, geography LAST and straddling).
+  Viewer-validated cell-exact: **1,600/1,600** over the 20 leading geographies
+  plus **320/320** deep-tail (members 60/100/119/120, member order confirmed
+  by name), strict-clean. Inline geography names + GEOUIDs (120/120).
 - [x] **2021 custom-order export `ord-08035…_ct.1-2021-population` — DECODED,
   SUPPORTED** (2026-07-04). The only structural difference from the standard
   tables is that the header `@32` descriptor pointer targets the identity/title
@@ -777,20 +796,20 @@ Files in the test corpus that are currently unsupported:
   the ONLY output change on all 28 supported tables is ct8 dim 3 gaining
   `members_fr`/`name_fr` (its EN labels are identical to the old fallback's).
 
-Decoding the remaining files is future work — each likely needs its
-descriptor/codebook layout reverse-engineered. Reconnaissance (sub-format
+Decoding the remaining file is future work. Reconnaissance (sub-format
 taxonomy, descriptor locations, per-file blockers) is captured in
-[`unsupported-formats.md`](unsupported-formats.md). Summary: the still-open items
-are older layouts whose container/descriptor is not yet located (`97F0015X`,
-1981 `97-570-X1981002`, the 2016019 variant). (The `cro0172986_ct.7/8` custom
-crosstabs are now fully SUPPORTED incl. bilingual geography names — see above.
-`ord-08035` — its "different page encoding" was
-just a misread descriptor from a relocated `@32` pointer; `97F0020X`,
-`97-563-XCB2006072`, `97-570-X1981004`, `98-400-X2016203` and the 1991 profiles
-`98F0172X`/`95F0170X` — formerly the top open items — are now all SUPPORTED via
-the `@32` relocation, the b3 head-block rule, the descriptor count reconciliation
-+ geography-dimension index, the `0x0a`/`0x09` u16 width tags, and the dense
-`0x0_` page variant respectively.)
+[`unsupported-formats.md`](unsupported-formats.md). Summary: the ONLY still-open
+corpus file is **`97F0015X`** (2001 F-series: `n_dim` garbage 1282, the
+doubled-name anchor snags on French text bleeding into the truncated names, a
+descriptor layout not yet located). Everything else in the corpus is SUPPORTED:
+`97-570-X1981002` and `98-400-X2016019` via the **inverted descriptor layout**
+(records before the signature block); the `cro0172986_ct.7/8` custom crosstabs
+incl. bilingual geography names; `ord-08035` via the relocated `@32` pointer;
+and `97F0020X`, `97-563-XCB2006072`, `97-570-X1981004`, `98-400-X2016203` and
+the 1991 profiles `98F0172X`/`95F0170X` via the `@32` relocation, the b3
+head-block rule, the descriptor count reconciliation + geography-dimension
+index, the `0x0a`/`0x09` u16 width tags, and the dense `0x0_` page variant
+respectively.
 
 ## [x] Header section-pointer table — DECODED and WIRED (`dimdir.R`)
 
@@ -911,6 +930,9 @@ and the **2001 F-series crosstab 97F0020XCB2001070** (the `0x09` u16 count
 width tag: Selected characteristics is 282 members, not 1 — the same fix also
 repaired a silent mis-decode of 98-10-0174's Mother tongue(331);
 viewer- and CSV-validated cell-exact respectively).
-Remaining open items: the other 2001 "F"-series product 97F0015X, the 1981
-profile 1981002, the 2016019 variant, and the custom `cro`/`ord` extracts;
-see the section above.
+The **inverted descriptor layout** (records before the `81 01 20 00 f0`
+signature block, anchored on the preceding `81 02 03 00` sub-header) then
+onboarded the last two 2026-07-06: the 1981 CMA/CA profile **97-570-X1981002**
+and the tiny 2016 collective-dwellings crosstab **98-400-X2016019**, both
+viewer-validated cell-exact. The single remaining open corpus file is the
+2001 F-series **97F0015X**; see the section above.

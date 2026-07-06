@@ -357,7 +357,15 @@ inline codebook. Unrecognised `04 00 20 00` products (e.g. the older 2016-census
   "Statistics" in 98-10-0241 but gender/sex in the family-2 census tables). The
   header **`n_dim` count field is unreliable** (95F0200XDB96003 reads 1026 with 4
   clean dimensions; 97-570-X1981004 reads 770): gate on `length(d$dims)`, never
-  on `d$n_dim`.
+  on `d$n_dim`. **INVERTED layout** (97-570-X1981002, 98-400-X2016019): the
+  dimension records sit *before* the `81 01 20 00 f0 .. .. 80 03` signature
+  block (which is followed by the identity/title text instead), anchored after
+  the same `81 02 03 00` sub-header that trails the signature at D+14/15 on the
+  standard profile tables. When the forward walk from D recovers < 2 records,
+  `ivt_f2_descriptor()` retries the region between the last `81 02 03 00`
+  before D and D; both anchors are block signatures and the retry only wins on
+  ≥ 2 doubled-name records, so it stays structural (quiet). Both files then
+  decode as ordinary layouts, viewer-validated cell-exact.
 - **There is ONE decode pattern — "family 1 / family 2" are two cases of it**
   (`decode.R`, `ivt_layout()` + `ivt_decode()`). Nest **every** dimension
   power-of-two-positionally (`ivt_f2_bit_layout()`), data dimensions innermost
