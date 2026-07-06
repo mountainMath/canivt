@@ -462,6 +462,21 @@ units) and the directory entries (8-byte entry units).
     outside Quebec and New Brunswick", carries **no attributes at all**, and the
     scanner's split at its empty record silently **shifted every uid after member
     25 by one** and dropped the count to 90 in the light metadata path).
+
+- [ ] **KNOWN GAP — synthetic aggregate geography members carry no `geo_name`/
+  `geo_uid`/`geo_level`.** 98-10-0662's member 26 ("Canada outside Quebec and New
+  Brunswick") is an *aggregate* geography with **only a display `geo_label`**; the
+  schema attribute block stores nothing for it, so `geo_name`, `geo_name_fr`,
+  `geo_uid`, `geo_level` and `geo_type` all decode as `NA`. This is faithful to
+  the file (the attributes are genuinely absent), but it is a **semantic gap**: the
+  member has a real name and belongs at a known aggregation level, neither of which
+  is recovered. It caused a hard crash in `ivt_label_depth()`/`ivt_label_parent()`
+  (fixed 2026-07-06 — an `NA` label now maps to depth 0, no parent), but the NA
+  attributes themselves remain. **To address:** for a geography member that has a
+  `geo_label` but an empty schema slot, derive `geo_name` from `geo_label` (and
+  ideally synthesise a `geo_uid`/`geo_level` for the aggregate) so such rows are
+  not silently name-/uid-less downstream. Applies to any table with synthetic
+  aggregate geographies, not just 0662.
   - **DQF_NOTE is now positional-exact**: 63,404/63,404 on 98-10-0023 (was ~99.8%
     via the majority vote), 91/91 on 0662. The `ivt_f2_derive_text()` vote now only
     fills slots whose block the strict parse could not decode. The only residual is
