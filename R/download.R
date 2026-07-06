@@ -40,6 +40,28 @@ ivt_download <- function(pid, dest_dir = NULL, lang = c("en", "fr"),
   ivt[1]
 }
 
+# Store a freshly-downloaded payload in `dest_dir` and return the `.ivt` path.
+# Sniffs the file signature: a `.zip` (PK\003\004) is unzipped and its first
+# `.ivt` returned; a raw payload is copied to `out_name` (a missing IVT
+# `04 00 20 00` signature only warns). Shared by statcan_ivt_download() and
+# borealis_ivt_download().
+ivt_store_download <- function(tmp, dest_dir, out_name) {
+  sig <- readBin(tmp, "raw", n = 4L)
+  is_zip <- length(sig) >= 2L && sig[1] == as.raw(0x50) && sig[2] == as.raw(0x4B)
+  if (is_zip) {
+    files <- utils::unzip(tmp, exdir = dest_dir)
+    ivt <- grep("\\.ivt$", files, value = TRUE, ignore.case = TRUE)
+    if (!length(ivt)) cli::cli_abort("No .ivt file found in the downloaded archive.")
+    return(ivt[1])
+  }
+  if (!identical(as.integer(sig), c(4L, 0L, 32L, 0L))) {
+    cli::cli_warn("Downloaded payload lacks the IVT {.val 04 00 20 00} signature.")
+  }
+  out <- file.path(dest_dir, out_name)
+  file.copy(tmp, out, overwrite = TRUE)
+  out
+}
+
 # Normalise a product id to the 8-digit table id used by the b2020 endpoint.
 ivt_pid8 <- function(pid) {
   digits <- gsub("[^0-9]", "", as.character(pid))

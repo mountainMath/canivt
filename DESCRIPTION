@@ -18,6 +18,7 @@ Imports:
     utils
 Suggests:
     arrow,
+    dataverse,
     dplyr,
     ggplot2,
     httr2,

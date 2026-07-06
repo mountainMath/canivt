@@ -85,15 +85,19 @@ statcan_ivt_catalogue <- function(temporal = NULL, refresh = FALSE, quiet = FALS
   catl
 }
 
-# Warn (once per session) when the cached catalogue is a month or more old.
-ivt_warn_stale_catalogue <- function(cache_file) {
-  if (isTRUE(.ivt_session$catalogue_stale_warned)) return(invisible())
+# Warn (once per session, per source) when a cached catalogue is a month or more
+# old. `label` names the source and `refresh_call` the code that rebuilds it;
+# `flag` is the per-source session slot so each catalogue warns independently.
+ivt_warn_stale_catalogue <- function(cache_file, label = "StatCan",
+                                     refresh_call = "statcan_ivt_catalogue(refresh = TRUE)",
+                                     flag = "catalogue_stale_warned") {
+  if (isTRUE(.ivt_session[[flag]])) return(invisible())
   age <- as.numeric(difftime(Sys.time(), file.mtime(cache_file), units = "days"))
   if (is.na(age) || age < IVT_CATALOGUE_MAX_AGE_DAYS) return(invisible())
-  .ivt_session$catalogue_stale_warned <- TRUE
+  .ivt_session[[flag]] <- TRUE
   cli::cli_warn(c(
-    "The cached StatCan IVT catalogue is {round(age)} days old.",
-    i = "Call {.code statcan_ivt_catalogue(refresh = TRUE)} to rebuild it from the live index."
+    "The cached {label} IVT catalogue is {round(age)} days old.",
+    i = "Call {.code {refresh_call}} to rebuild it from the live index."
   ))
   invisible()
 }

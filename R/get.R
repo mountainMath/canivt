@@ -5,24 +5,29 @@
 
 #' Get a StatCan IVT table as a Parquet connection
 #'
-#' One-stop accessor: given a Beyond 20/20 catalogue number, this looks the
-#' product up in the [statcan_ivt_catalogue()], downloads its `.ivt` (cached in
-#' the ivt cache), decodes it with [read_ivt()], writes the tidy table to Parquet
-#' (cached in the data cache) and returns an Arrow connection to that Parquet so
-#' the data can be queried lazily (e.g. with `dplyr`) without loading it all into
-#' memory.
+#' One-stop accessor: given a table id, this resolves the product (the
+#' [statcan_ivt_catalogue()] first, then the [borealis_ivt_catalogue()] of custom
+#' tabulations), downloads its `.ivt` (cached in the ivt cache), decodes it with
+#' [read_ivt()], writes the tidy table to Parquet (cached in the data cache) and
+#' returns an Arrow connection to that Parquet so the data can be queried lazily
+#' (e.g. with `dplyr`) without loading it all into memory.
 #'
 #' `catalogue` may also be a **custom identifier** for an `.ivt` file you have
 #' placed in the ivt cache yourself (as `<id>.ivt` directly in
 #' [ivt_cache_dir("ivt")][ivt_cache_dir], or as the only `.ivt` in a `<id>/`
 #' subfolder). Such files are used directly, with no catalogue lookup or
-#' download -- handy for tables that are not on the public index, or for local
+#' download -- handy for tables that are not on either index, or for local
 #' experiments.
 #'
 #' @param catalogue A StatCan catalogue number (e.g. `"98-10-0241-01"`,
-#'   `"95F0436XCB2001003"`) or a custom identifier matching a local `.ivt` in the
-#'   ivt cache. Matching against the catalogue is case- and punctuation-
-#'   insensitive.
+#'   `"95F0436XCB2001003"`), a Borealis id (a filename like `"CD1T29M3"`, its
+#'   DOI-qualified key like `"SP3/6DGOTF/CD1T29M3"`, or a numeric `file_id`), or a
+#'   custom identifier matching a local `.ivt` in the ivt cache. Matching is case-
+#'   and punctuation-insensitive. A bare Borealis filename that occurs in several
+#'   datasets is ambiguous and aborts with the disambiguating keys. **A one-row
+#'   tibble from [statcan_ivt_catalogue()] or [borealis_ivt_catalogue()]** may be
+#'   passed instead of an id, routing straight to that row's source with no
+#'   catalogue lookup.
 #' @param geo_attributes Passed to [read_ivt()]: decode the full family-2
 #'   geography attribute table (slower) so geographies can be labelled by name.
 #' @param labels Passed to [ivt_write_parquet()]: write labelled columns
@@ -50,8 +55,11 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   }
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
-  catalogue <- as.character(catalogue)
-  key <- ivt_catalogue_key(catalogue)
+  # `catalogue` may be an id string OR a one-row catalogue tibble (from
+  # statcan_ivt_catalogue() / borealis_ivt_catalogue()); derive a stable string
+  # id / cache key from either.
+  id  <- ivt_input_id(catalogue)
+  key <- ivt_catalogue_key(id)
   # the language marker lets the English and French Parquets of one table coexist
   parquet <- file.path(ivt_cache_dir("data"),
                        paste0(key, "_", language, ".parquet"))
@@ -61,14 +69,15 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   }
 
   # 1. Custom local file in the ivt cache takes precedence over the catalogue.
-  ivt_path <- ivt_find_cached_ivt(catalogue)
+  ivt_path <- ivt_find_cached_ivt(id)
   row <- NULL
 
-  # 2. Otherwise resolve via the catalogue and download.
+  # 2. Otherwise resolve via the catalogues (StatCan first, Borealis fallback)
+  #    and download. A row input routes straight to its own source.
   if (is.na(ivt_path)) {
-    row <- ivt_lookup_catalogue(catalogue, quiet = quiet)
-    ivt_path <- statcan_ivt_download(row$download_url, key = key,
-                                     overwrite = refresh, quiet = quiet)
+    src <- ivt_resolve_source(catalogue, quiet = quiet)
+    row <- src$row
+    ivt_path <- src$download(key, refresh, quiet)
   } else if (!quiet) {
     cli::cli_inform("Using local IVT {.path {ivt_path}}")
   }
@@ -122,7 +131,8 @@ list_ivt_cache <- function(catalogue = NULL) {
   pq <- list.files(data_dir, pattern = "\\.parquet$", full.names = TRUE,
                    ignore.case = TRUE)
   pq <- pq[!grepl("_members\\.parquet$", pq, ignore.case = TRUE)]
-  pq <- pq[basename(pq) != "statcan_ivt_catalogue.parquet"]
+  pq <- pq[!(basename(pq) %in% c("statcan_ivt_catalogue.parquet",
+                                 "borealis_ivt_catalogue.parquet"))]
   pq_stem <- tools::file_path_sans_ext(basename(pq))
   pq_lang <- rep(NA_character_, length(pq)); pq_key <- pq_stem
   m <- regmatches(pq_stem, regexec("^(.*)_(en|fr)$", pq_stem, ignore.case = TRUE))
@@ -149,10 +159,10 @@ list_ivt_cache <- function(catalogue = NULL) {
 
   if (n) {
     if (is.null(catalogue)) catalogue <- ivt_cached_catalogue(data_dir)
+    key_norm <- ivt_catalogue_norm(df$key)
     if (!is.null(catalogue) && nrow(catalogue) &&
         "catalogue" %in% names(catalogue)) {
       cat_norm <- ivt_catalogue_norm(catalogue$catalogue)
-      key_norm <- ivt_catalogue_norm(df$key)
       idx <- match(key_norm, cat_norm)                       # exact first
       for (i in which(is.na(idx))) {                         # then prefix
         h <- which(startsWith(cat_norm, key_norm[i]))
@@ -162,6 +172,23 @@ list_ivt_cache <- function(catalogue = NULL) {
       df$title       <- catalogue$title[idx]
       df$census_year <- catalogue$census_year[idx]
       df$topic       <- catalogue$topic[idx]
+    }
+    # Borealis-sourced files: fill still-unmatched rows from the cached Borealis
+    # catalogue (matched on the sanitised key, then file_id, then filename stem).
+    bor <- ivt_cached_borealis_catalogue(data_dir)
+    if (!is.null(bor) && nrow(bor)) {
+      bkey  <- ivt_catalogue_norm(bor$key)
+      bid   <- ivt_catalogue_norm(bor$file_id)
+      bstem <- ivt_catalogue_norm(bor$file_stem)
+      for (i in which(is.na(df$catalogue) & is.na(df$title))) {
+        h <- which(bkey == key_norm[i])
+        if (!length(h)) h <- which(bid == key_norm[i])
+        if (!length(h)) h <- which(bstem == key_norm[i])
+        if (length(h)) {
+          df$catalogue[i] <- bor$key[h[1L]]
+          df$title[i]     <- bor$dataset_name[h[1L]]
+        }
+      }
     }
   }
 
@@ -174,6 +201,14 @@ list_ivt_cache <- function(catalogue = NULL) {
 # NULL when there is no cache / arrow is unavailable.
 ivt_cached_catalogue <- function(data_dir = ivt_cache_dir("data", create = FALSE)) {
   cf <- file.path(data_dir, "statcan_ivt_catalogue.parquet")
+  if (!file.exists(cf) || !requireNamespace("arrow", quietly = TRUE)) return(NULL)
+  tryCatch(tibble::as_tibble(arrow::read_parquet(cf)), error = function(e) NULL)
+}
+
+# The cached Borealis catalogue read directly from the data cache (no search),
+# or NULL when there is no cache / arrow is unavailable.
+ivt_cached_borealis_catalogue <- function(data_dir = ivt_cache_dir("data", create = FALSE)) {
+  cf <- file.path(data_dir, "borealis_ivt_catalogue.parquet")
   if (!file.exists(cf) || !requireNamespace("arrow", quietly = TRUE)) return(NULL)
   tryCatch(tibble::as_tibble(arrow::read_parquet(cf)), error = function(e) NULL)
 }
@@ -314,7 +349,10 @@ ivt_find_cached_ivt <- function(id) {
   cache <- ivt_cache_dir("ivt", create = FALSE)
   flat <- list.files(cache, pattern = "\\.ivt$", full.names = TRUE,
                      ignore.case = TRUE)
-  sub <- list.files(file.path(cache, id), pattern = "\\.ivt$",
+  # per-table subfolder: the id verbatim, and its filesystem-safe key form (the
+  # download folder for e.g. Borealis DOI keys, which contain slashes).
+  subdirs <- unique(c(id, ivt_catalogue_key(id)))
+  sub <- list.files(file.path(cache, subdirs), pattern = "\\.ivt$",
                     full.names = TRUE, ignore.case = TRUE)
   cands <- c(file.path(cache, paste0(id, c(".ivt", ".IVT"))),
              flat[ivt_catalogue_norm(tools::file_path_sans_ext(basename(flat))) ==
@@ -324,14 +362,16 @@ ivt_find_cached_ivt <- function(id) {
   if (length(cands)) cands[1] else NA_character_
 }
 
-# Resolve a catalogue number to its catalogue row (errors if not found).
-ivt_lookup_catalogue <- function(catalogue, quiet = FALSE) {
+# Resolve a catalogue number to its StatCan catalogue row. Returns NULL when no
+# product matches and `error = FALSE`; aborts otherwise.
+ivt_lookup_catalogue <- function(catalogue, quiet = FALSE, error = TRUE) {
   catl <- statcan_ivt_catalogue(quiet = quiet)
   want <- ivt_catalogue_norm(catalogue)
   norm <- ivt_catalogue_norm(catl$catalogue)
   hit <- which(norm == want)
   if (!length(hit)) hit <- which(startsWith(norm, want))
   if (!length(hit)) {
+    if (!error) return(NULL)
     cli::cli_abort(c(
       "No IVT product matches catalogue {.val {catalogue}}.",
       i = "It is also not a local .ivt in the ivt cache ({.path {ivt_cache_dir('ivt', create = FALSE)}}).",
@@ -347,6 +387,107 @@ ivt_lookup_catalogue <- function(catalogue, quiet = FALSE) {
   catl[hit[1L], , drop = FALSE]
 }
 
+# Resolve a table id (or a pre-fetched catalogue row) to a source (StatCan
+# catalogue, else Borealis) and a download closure. Aborts if neither catalogue
+# has it. StatCan takes precedence for the ~800 products mirrored in both
+# (official source, no API key).
+ivt_resolve_source <- function(catalogue, quiet = FALSE) {
+  if (is.data.frame(catalogue)) return(ivt_row_source(catalogue))
+  row <- ivt_lookup_catalogue(catalogue, quiet = quiet, error = FALSE)
+  if (!is.null(row)) {
+    return(list(source = "statcan", row = row,
+      download = function(key, overwrite, quiet)
+        statcan_ivt_download(row$download_url, key = key,
+                             overwrite = overwrite, quiet = quiet)))
+  }
+  brow <- ivt_lookup_borealis(catalogue, quiet = quiet)
+  if (!is.null(brow)) {
+    return(list(source = "borealis", row = brow,
+      download = function(key, overwrite, quiet)
+        borealis_ivt_download(brow, key = key, overwrite = overwrite,
+                              quiet = quiet)))
+  }
+  cli::cli_abort(c(
+    "No IVT product matches {.val {catalogue}}.",
+    i = "It is not in the StatCan catalogue, the Borealis catalogue, or the local ivt cache ({.path {ivt_cache_dir('ivt', create = FALSE)}}).",
+    i = "See {.fn statcan_ivt_catalogue} and {.fn borealis_ivt_catalogue} for the available products."
+  ))
+}
+
+# TRUE when a one-row catalogue tibble is a Borealis row (vs a StatCan row),
+# distinguished by the Borealis-only `file_id`/`dataset_doi` columns.
+ivt_row_is_borealis <- function(row) {
+  all(c("file_id", "dataset_doi") %in% names(row))
+}
+
+# Build a source descriptor (source/row/download) directly from a pre-fetched
+# catalogue row, with no catalogue lookup. Accepts a one-row tibble from either
+# statcan_ivt_catalogue() or borealis_ivt_catalogue().
+ivt_row_source <- function(row) {
+  if (nrow(row) != 1L)
+    cli::cli_abort("A catalogue row must have exactly one row (got {nrow(row)}).")
+  if (ivt_row_is_borealis(row)) {
+    return(list(source = "borealis", row = row,
+      download = function(key, overwrite, quiet)
+        borealis_ivt_download(row, key = key, overwrite = overwrite, quiet = quiet)))
+  }
+  if (all(c("catalogue", "download_url") %in% names(row))) {
+    return(list(source = "statcan", row = row,
+      download = function(key, overwrite, quiet)
+        statcan_ivt_download(row$download_url, key = key,
+                             overwrite = overwrite, quiet = quiet)))
+  }
+  cli::cli_abort(c(
+    "Unrecognised catalogue row.",
+    i = "Pass a one-row tibble from {.fn statcan_ivt_catalogue} or {.fn borealis_ivt_catalogue}."
+  ))
+}
+
+# The stable string id / cache key for a get_statcan_ivt() input, which may be an
+# id string or a one-row catalogue tibble (its StatCan `catalogue` number or its
+# Borealis `key`).
+ivt_input_id <- function(x) {
+  if (!is.data.frame(x)) return(as.character(x))
+  if (nrow(x) != 1L)
+    cli::cli_abort("A catalogue row must have exactly one row (got {nrow(x)}).")
+  id <- if (ivt_row_is_borealis(x)) x$key else x$catalogue
+  if (is.null(id) || !length(id) || is.na(id))
+    cli::cli_abort(c(
+      "Could not derive an id from the catalogue row.",
+      i = "Pass a one-row tibble from {.fn statcan_ivt_catalogue} or {.fn borealis_ivt_catalogue}."
+    ))
+  as.character(id)
+}
+
+# Resolve a table id to its Borealis catalogue row, or NULL if Borealis has no
+# such file (or its catalogue is unavailable -- no key/package). Matches on the
+# canonical DOI-qualified `key`, then the unique `file_id`, then the bare
+# filename stem; an ambiguous stem (the same name across datasets/editions)
+# aborts with the disambiguating keys.
+ivt_lookup_borealis <- function(catalogue, quiet = FALSE) {
+  catl <- tryCatch(borealis_ivt_catalogue(quiet = quiet),
+                   error = function(e) NULL)
+  if (is.null(catl) || !nrow(catl)) return(NULL)
+  want <- ivt_catalogue_norm(catalogue)
+
+  hit <- which(ivt_catalogue_norm(catl$key) == want)
+  if (!length(hit)) hit <- which(ivt_catalogue_norm(catl$file_id) == want)
+  if (!length(hit)) hit <- which(ivt_catalogue_norm(catl$file_stem) == want)
+  if (!length(hit)) return(NULL)
+
+  # Collapse byte-identical duplicates (the same file mirrored across datasets,
+  # e.g. EN/FR deposits): any copy will do. Only genuinely different content
+  # (distinct md5 -- e.g. the same filename reused across editions) is ambiguous.
+  if (length(hit) > 1L && length(unique(catl$md5[hit])) > 1L) {
+    cli::cli_abort(c(
+      "Borealis has {length(hit)} files matching {.val {catalogue}} (different datasets/editions).",
+      i = "Re-request one by its full key, e.g. {.val {catl$key[hit[1]]}}:",
+      i = "{.val {paste0(catl$key[hit], '  (', catl$dataset_name[hit], ')')}}"
+    ))
+  }
+  catl[hit[1L], , drop = FALSE]
+}
+
 #' Download a StatCan IVT by its direct-download URL
 #'
 #' Downloads a `.ivt` (or its containing `.zip`) from a resolved
@@ -355,14 +496,28 @@ ivt_lookup_catalogue <- function(catalogue, quiet = FALSE) {
 #' as-is.
 #'
 #' @param download_url A direct-download URL (a b2020 `.zip` or a
-#'   `Download.cfm?PID=` endpoint).
+#'   `Download.cfm?PID=` endpoint), **or** a one-row [statcan_ivt_catalogue()]
+#'   tibble (its `download_url` and, by default, its `catalogue` number as the
+#'   cache key are used).
 #' @param key Cache key used to name the per-table folder under the ivt cache.
+#'   Optional when `download_url` is a catalogue row (defaults to the row's
+#'   catalogue number).
 #' @param overwrite Re-download even if a `.ivt` already exists.
 #' @param quiet Suppress the download message.
 #' @return Path to the local `.ivt` file.
 #' @export
-statcan_ivt_download <- function(download_url, key, overwrite = FALSE,
+statcan_ivt_download <- function(download_url, key = NULL, overwrite = FALSE,
                                  quiet = FALSE) {
+  if (is.data.frame(download_url)) {
+    row <- download_url
+    if (nrow(row) != 1L)
+      cli::cli_abort("A catalogue row must have exactly one row (got {nrow(row)}).")
+    if (is.null(key)) key <- ivt_catalogue_key(as.character(row$catalogue))
+    download_url <- as.character(row$download_url)
+  }
+  if (is.null(key) || !nzchar(key))
+    cli::cli_abort("{.arg key} is required when {.arg download_url} is a URL string.")
+
   dest_dir <- file.path(ivt_cache_dir("ivt"), key)
   dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -374,19 +529,5 @@ statcan_ivt_download <- function(download_url, key, overwrite = FALSE,
   tmp <- tempfile(fileext = ".bin")
   on.exit(unlink(tmp), add = TRUE)
   utils::download.file(download_url, tmp, mode = "wb", quiet = quiet)
-
-  sig <- readBin(tmp, "raw", n = 4L)
-  is_zip <- length(sig) >= 2L && sig[1] == as.raw(0x50) && sig[2] == as.raw(0x4B)
-  if (is_zip) {
-    files <- utils::unzip(tmp, exdir = dest_dir)
-    ivt <- grep("\\.ivt$", files, value = TRUE, ignore.case = TRUE)
-    if (!length(ivt)) cli::cli_abort("No .ivt file found in the downloaded archive.")
-    return(ivt[1])
-  }
-  if (!identical(as.integer(sig), c(4L, 0L, 32L, 0L))) {
-    cli::cli_warn("Downloaded payload lacks the IVT {.val 04 00 20 00} signature.")
-  }
-  out <- file.path(dest_dir, paste0(key, ".ivt"))
-  file.copy(tmp, out, overwrite = TRUE)
-  out
+  ivt_store_download(tmp, dest_dir, paste0(key, ".ivt"))
 }

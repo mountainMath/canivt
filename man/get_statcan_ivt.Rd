@@ -16,9 +16,14 @@ get_statcan_ivt(
 }
 \arguments{
 \item{catalogue}{A StatCan catalogue number (e.g. \code{"98-10-0241-01"},
-\code{"95F0436XCB2001003"}) or a custom identifier matching a local \code{.ivt} in the
-ivt cache. Matching against the catalogue is case- and punctuation-
-insensitive.}
+\code{"95F0436XCB2001003"}), a Borealis id (a filename like \code{"CD1T29M3"}, its
+DOI-qualified key like \code{"SP3/6DGOTF/CD1T29M3"}, or a numeric \code{file_id}), or a
+custom identifier matching a local \code{.ivt} in the ivt cache. Matching is case-
+and punctuation-insensitive. A bare Borealis filename that occurs in several
+datasets is ambiguous and aborts with the disambiguating keys. \strong{A one-row
+tibble from \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}} or \code{\link[=borealis_ivt_catalogue]{borealis_ivt_catalogue()}}} may be
+passed instead of an id, routing straight to that row's source with no
+catalogue lookup.}
 
 \item{geo_attributes}{Passed to \code{\link[=read_ivt]{read_ivt()}}: decode the full family-2
 geography attribute table (slower) so geographies can be labelled by name.}
@@ -46,19 +51,19 @@ read from the \verb{_members.parquet} sidecar when present) as
 columns into full-level factors.
 }
 \description{
-One-stop accessor: given a Beyond 20/20 catalogue number, this looks the
-product up in the \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}, downloads its \code{.ivt} (cached in
-the ivt cache), decodes it with \code{\link[=read_ivt]{read_ivt()}}, writes the tidy table to Parquet
-(cached in the data cache) and returns an Arrow connection to that Parquet so
-the data can be queried lazily (e.g. with \code{dplyr}) without loading it all into
-memory.
+One-stop accessor: given a table id, this resolves the product (the
+\code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}} first, then the \code{\link[=borealis_ivt_catalogue]{borealis_ivt_catalogue()}} of custom
+tabulations), downloads its \code{.ivt} (cached in the ivt cache), decodes it with
+\code{\link[=read_ivt]{read_ivt()}}, writes the tidy table to Parquet (cached in the data cache) and
+returns an Arrow connection to that Parquet so the data can be queried lazily
+(e.g. with \code{dplyr}) without loading it all into memory.
 }
 \details{
 \code{catalogue} may also be a \strong{custom identifier} for an \code{.ivt} file you have
 placed in the ivt cache yourself (as \verb{<id>.ivt} directly in
 \link[=ivt_cache_dir]{ivt_cache_dir("ivt")}, or as the only \code{.ivt} in a \verb{<id>/}
 subfolder). Such files are used directly, with no catalogue lookup or
-download -- handy for tables that are not on the public index, or for local
+download -- handy for tables that are not on either index, or for local
 experiments.
 }
 \seealso{

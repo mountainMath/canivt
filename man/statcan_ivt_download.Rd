@@ -4,13 +4,22 @@
 \alias{statcan_ivt_download}
 \title{Download a StatCan IVT by its direct-download URL}
 \usage{
-statcan_ivt_download(download_url, key, overwrite = FALSE, quiet = FALSE)
+statcan_ivt_download(
+  download_url,
+  key = NULL,
+  overwrite = FALSE,
+  quiet = FALSE
+)
 }
 \arguments{
 \item{download_url}{A direct-download URL (a b2020 \code{.zip} or a
-\verb{Download.cfm?PID=} endpoint).}
+\verb{Download.cfm?PID=} endpoint), \strong{or} a one-row \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}
+tibble (its \code{download_url} and, by default, its \code{catalogue} number as the
+cache key are used).}
 
-\item{key}{Cache key used to name the per-table folder under the ivt cache.}
+\item{key}{Cache key used to name the per-table folder under the ivt cache.
+Optional when \code{download_url} is a catalogue row (defaults to the row's
+catalogue number).}
 
 \item{overwrite}{Re-download even if a \code{.ivt} already exists.}
 
