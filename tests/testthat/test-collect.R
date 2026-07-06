@@ -70,6 +70,15 @@ test_that("ivt_label_parent turns indentation into a parent/child tree", {
   expect_equal(ivt_label_parent(c("a", "b", "c")), rep(NA_integer_, 3))
 })
 
+test_that("ivt_label_depth/parent treat NA and empty labels as top-level", {
+  # an aggregate member with no name (e.g. geography member 26 on 98-10-0662)
+  # arrives as NA; it must map to depth 0 with no parent, not crash the tree
+  # walk with a "missing value where TRUE/FALSE needed" error.
+  labs <- c("Total", "  A", NA, "", "  B")
+  expect_equal(ivt_label_depth(labs), c(0L, 1L, 0L, 0L, 1L))
+  expect_equal(ivt_label_parent(labs), c(NA, 1L, NA, NA, 4L))
+})
+
 test_that("collect_ivt on an ivt object yields factors with ALL member levels", {
   x <- fake_ivt()
   df <- collect_ivt(x)

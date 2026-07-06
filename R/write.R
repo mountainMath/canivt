@@ -149,8 +149,12 @@ ivt_data_cache_file <- function(x, suffix) {
 }
 
 # Hierarchy depth implied by the leading-space indentation of a member label.
+# An NA/empty label (e.g. an aggregate geography member that carries no name)
+# has no indentation and so is treated as top-level (depth 0), which keeps the
+# depth vector free of NAs for ivt_label_parent().
 ivt_label_depth <- function(labels) {
   lead <- nchar(labels) - nchar(sub("^ +", "", labels))
+  lead[is.na(lead)] <- 0L
   as.integer(lead %/% 2L)
 }
 
