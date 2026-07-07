@@ -463,20 +463,37 @@ units) and the directory entries (8-byte entry units).
     scanner's split at its empty record silently **shifted every uid after member
     25 by one** and dropped the count to 90 in the light metadata path).
 
-- [ ] **KNOWN GAP — synthetic aggregate geography members carry no `geo_name`/
-  `geo_uid`/`geo_level`.** 98-10-0662's member 26 ("Canada outside Quebec and New
-  Brunswick") is an *aggregate* geography with **only a display `geo_label`**; the
-  schema attribute block stores nothing for it, so `geo_name`, `geo_name_fr`,
-  `geo_uid`, `geo_level` and `geo_type` all decode as `NA`. This is faithful to
-  the file (the attributes are genuinely absent), but it is a **semantic gap**: the
-  member has a real name and belongs at a known aggregation level, neither of which
-  is recovered. It caused a hard crash in `ivt_label_depth()`/`ivt_label_parent()`
-  (fixed 2026-07-06 — an `NA` label now maps to depth 0, no parent), but the NA
-  attributes themselves remain. **To address:** for a geography member that has a
-  `geo_label` but an empty schema slot, derive `geo_name` from `geo_label` (and
-  ideally synthesise a `geo_uid`/`geo_level` for the aggregate) so such rows are
-  not silently name-/uid-less downstream. Applies to any table with synthetic
-  aggregate geographies, not just 0662.
+- [x] **Synthetic aggregate geography members: `geo_name` now derived from
+  `geo_label`** (2026-07-06). 98-10-0662's member 26 ("Canada outside Quebec and New
+  Brunswick") is an *aggregate* geography constructed at tabulation time with **only
+  a display `geo_label`** — the schema attribute arrays (GEO_NAME, DGUID, level,
+  type, …) store nothing for it, so those columns decoded `NA`. `ivt_f2_geo_fill_label()`
+  (codebook-f2.R, run once on the `ivt_f2_geo_light()` result so metadata **and**
+  tidy both benefit) now backfills `geo_name`/`geo_name_fr` from `geo_label`/
+  `geo_label_fr` for any member that carries a label but no GEO_NAME — the member's
+  real name is exactly the label. It is a **loud** derivation
+  (`canivt_fallback`; strict-mode error) because the value is derived, not read
+  from its own slot. `geo_uid`/`geo_level` stay `NA` — an aggregate genuinely has
+  no DGUID/level in the file. Generic (any table with synthetic aggregates, not a
+  hard-coded member). The earlier `ivt_label_depth()`/`ivt_label_parent()` crash on
+  an `NA` label was fixed separately (NA → depth 0, no parent).
+- [x] **Inline geography names the positional regex missed are recovered by
+  SUBTRACTION** (2026-07-06). `ivt_f2_parse_inline()` keys on the geographic code
+  sitting at a **fixed** position (just before the quality flag), so it returned no
+  name for two shapes: (a) the code **embedded mid-name** on some dual-official-name
+  CSDs (ord-08035: `Kootenay Boundary D (5905052) / Rural Grand Forks, CSD 00000
+  (5.9%)` → 2 members), and (b) **code-only** geographies whose whole combined string
+  is the bare code (95F0200's 1996 enumeration areas — the display name *is* the
+  code, exactly as the 43,008 named members already read; the last partial chunk of
+  each attribute-run stores 226 such bare codes). `ivt_f2_inline_name_subtract()`
+  recovers both by removing the tokens we already hold from the file's own dedicated
+  arrays — the parenthesised code, the trailing flag, the `(pct%)` — leaving the
+  display text (or the code itself when nothing else remains). Metadata-driven (the
+  code comes from the code array), fills **only** NA names so every validated table
+  is byte-identical, and **loud** (`canivt_fallback`). Corpus-wide result: **0 NA
+  `geo_name` on every one of the 32 tables** (was 226 on 95F0200, 2 on ord-08035, 1
+  on 0662). `strict_clean` flips to `FALSE` for 95F0200 and 0662 (they now emit the
+  loud derivation).
   - **DQF_NOTE is now positional-exact**: 63,404/63,404 on 98-10-0023 (was ~99.8%
     via the majority vote), 91/91 on 0662. The `ivt_f2_derive_text()` vote now only
     fills slots whose block the strict parse could not decode. The only residual is

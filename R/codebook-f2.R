@@ -735,6 +735,34 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   list(geo_name = NULL, geo_uid = ivt_f2_geo_uids(raw))
 }
 
+# Backfill `geo_name` from the display `geo_label` for members that carry a label
+# but no schema GEO_NAME. Synthetic AGGREGATE geographies -- 98-10-0662's member 26,
+# "Canada outside Quebec and New Brunswick" -- are constructed at tabulation time and
+# store only the human-readable display label; the schema attribute arrays (GEO_NAME,
+# DGUID, level, type, ...) hold nothing for them, so those columns decode NA. The
+# member has a real, meaningful name (the label), so we use it for `geo_name` rather
+# than leave the row nameless downstream. This is metadata-driven -- the label is
+# what the file stores for the member -- and applies to any table with such
+# aggregates, not a hard-coded member. The uid / level / type genuinely have no value
+# in the file and stay NA (an aggregate has no DGUID). Loud: the value is derived, not
+# read from its own attribute slot. `g$geo_name_fr` is filled from `geo_label_fr` the
+# same way when both are present.
+ivt_f2_geo_fill_label <- function(g) {
+  if (is.null(g$geo_name) || is.null(g$geo_label)) return(g)
+  miss <- is.na(g$geo_name) & !is.na(g$geo_label)
+  if (!any(miss)) return(g)
+  g$geo_name[miss] <- g$geo_label[miss]
+  if (!is.null(g$geo_name_fr) && !is.null(g$geo_label_fr)) {
+    mf <- is.na(g$geo_name_fr) & !is.na(g$geo_label_fr)
+    g$geo_name_fr[mf] <- g$geo_label_fr[mf]
+  }
+  ivt_fallback(paste(
+    "{sum(miss)} geography member(s) carry a display label but no schema GEO_NAME",
+    "(synthetic aggregate geographies); `geo_name` was derived from `geo_label`.",
+    "Their `geo_uid`/`geo_level` remain NA -- an aggregate has none in the file."))
+  g
+}
+
 # The uid-only read: the positional block-directory parse first (it sees the
 # logical member order the byte scan cannot -- 98-10-0013's reverse-stored root
 # chunk sits below the marker region and the scan silently dropped members 1-256),
@@ -1465,6 +1493,38 @@ ivt_f2_parse_inline <- function(v) {
   list(name = nm, code = code, flag = fl, type = ty, tnr = tnr)
 }
 
+# Recover a geography display name from its combined inline string by SUBTRACTING
+# the structural tokens we already hold from the file's own dedicated arrays -- the
+# geographic code (parenthesised) and the trailing data-quality flag / non-response
+# rate. The positional regexes (`ivt_f2_parse_inline`) key on the code sitting at a
+# FIXED position (just before the flag); this helper does not, so it recovers the
+# two shapes those regexes miss:
+#   * the code embedded MID-name on some dual-official-name CSDs
+#     ("Kootenay Boundary D (5905052) / Rural Grand Forks, CSD 00000 (5.9%)");
+#   * a code-only geography whose whole string is the bare code (1996 enumeration
+#     areas: the display name IS the code, exactly as the named members already read).
+# `code` is the member's uid (from the dedicated code array), so the subtraction is
+# metadata-driven, not a content guess. Returns the remaining display text, or the
+# code itself when nothing but the code (and the stripped tokens) remained. Used
+# ONLY to fill members the positional parse left NA, so validated output is
+# unchanged. Vectorised over `s` / `code`.
+ivt_f2_inline_name_subtract <- function(s, code) {
+  out <- s
+  has <- !is.na(out) & !is.na(code) & nzchar(code)
+  # drop the parenthesised code wherever it sits (code is digits/letters -> a
+  # literal, so escape any regex metacharacters defensively before substituting)
+  out[has] <- mapply(function(x, c)
+    gsub(paste0("\\s*\\(\\Q", c, "\\E\\)\\s*"), " ", x, perl = TRUE),
+    out[has], code[has], USE.NAMES = FALSE)
+  # drop a trailing "(pct%)" then a trailing data-quality flag (a run of digits)
+  out <- sub("\\s*\\([^)]*%\\)\\s*$", "", out, perl = TRUE)
+  out <- sub("\\s+[0-9]+\\s*$", "", out, perl = TRUE)
+  out <- trimws(gsub("\\s+", " ", out))
+  empty <- !is.na(out) & (!nzchar(out) | out == code)     # code-only geography
+  out[empty] <- code[empty]
+  out
+}
+
 # Split the inline vintages' bilingual display names into their English and
 # French halves. The combined block stores ONE display string per member, and
 # geographies whose two official names differ carry both, joined by the
@@ -1704,6 +1764,24 @@ ivt_f2_geo_inline_dir <- function(raw) {
     v <- trimws(runs[[rr]])
     ok <- okm & !is.na(v)
     if (sum(ok) && all(v[ok] == cd[ok])) { codes <- v; break }
+  }
+  # recover the display name for members the positional parse missed -- the code is
+  # embedded mid-name (some dual-name CSDs) or the member is a code-only enumeration
+  # area -- by subtracting the tokens we hold from the dedicated arrays. Fills only
+  # NA names, so validated tables are untouched; the fr copy from its own run.
+  raw_en <- runs[[en_i]]; length(raw_en) <- n_geo
+  miss <- is.na(nm) & !is.na(raw_en)
+  if (any(miss)) {
+    nm[miss] <- ivt_f2_inline_name_subtract(raw_en[miss], codes[miss])
+    if (!is.na(fr_i)) {
+      raw_fr <- runs[[fr_i]]; length(raw_fr) <- n_geo
+      mf <- is.na(nm_fr) & !is.na(raw_fr)
+      nm_fr[mf] <- ivt_f2_inline_name_subtract(raw_fr[mf], codes[mf])
+    }
+    ivt_fallback(paste(
+      "{sum(miss)} geography display name(s) were recovered by subtracting the",
+      "code / quality-flag tokens from the combined inline string (the positional",
+      "parse found no name -- a mid-name code or a code-only geography)."))
   }
   g <- ivt_f2_inline_table(nm, nm_fr, codes, fl, ty, tnr)
   ivt_f2_check_geo_count(raw, nrow(g))

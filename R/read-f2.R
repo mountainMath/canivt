@@ -360,6 +360,7 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   dims <- ivt_f2_dimensions(raw)
   n_geo <- ivt_f2_geo_count(raw)
   g <- ivt_f2_geo_light(raw, n_geo)
+  g <- ivt_f2_geo_fill_label(g)
   ivt_f2_check_geo_count(raw, length(g$geo_uid))
   # pack every decoded per-member geography column (bilingual labels/names, uid,
   # aggregation level, geography type / municipal status, quality flag + note,
