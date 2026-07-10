@@ -292,6 +292,14 @@ attribute table are all **done** — the corpus is fully supported. That work lo
   latched onto the single-side name array). `327`'s CMA geography also needed **`0x0b`
   added to the u16 width-tag set** (u8 misread count 5 vs u16 1399). Both now 100%
   geography coverage (391: 4,199 flows; 327: 1,399), internal-consistency validated.
+- **Flow member order — VIEWER-VALIDATED** (2026-07-10). Decoded `(residence → work)
+  → value` triples are content-exact against the Beyond 20/20 viewer on every vintage
+  (`98-400-X2016325`/`391`/`327`, `99-012-X2011032`: 100% joined-value + set-equal
+  across sampled residences, after fixing each non-geography data dim to its Total
+  member as the viewer does). Our member order is residence-major, SGC-code ascending
+  (deterministic/geographic); the viewer re-sorts within a residence for display, so a
+  positional match isn't expected (same as the 2016203 geography re-sort). Scrape-based,
+  internal (`R/ground-truth.R`), not in the automated suite.
 - Fixed a latent `metadata$geographies` crash en route: an undecoded `geo_name` NULL
   slot made the list ragged (`as_tibble()` failed) — now undecoded columns are omitted
   so it is always rectangular (`read-f2.R`).
@@ -310,9 +318,13 @@ attribute table are all **done** — the corpus is fully supported. That work lo
   `ivt_f2_attach_legacy_refs()` (read-f2.R) parse those (numeric parens 1..n_notes)
   into `scope = "member"` + `member_refs` (one-to-many; quiet, self-validating like
   `parent_id`). Footnote scope is now complete across the corpus.
-- **Optional niceties:** expose the per-dimension `depth` directly on `ivt_tidy()`
-  output; consider an `Rcpp` fast path only if pure-R decode becomes a bottleneck
-  (it is fine at ~5 s for the reference table).
+- **Per-dimension `depth` on `ivt_tidy()` — DONE** (2026-07-09). `ivt_tidy(depth =
+  TRUE)` (opt-in, default `FALSE` so Parquet output is unchanged) adds a
+  `<col>_depth` integer column after each data-dimension column, read from the
+  label indentation (the same measure `ivt_members()` carries). Works on the
+  labelled and compact-id (`labels = FALSE`) paths and in both languages.
+- **Optional niceties:** consider an `Rcpp` fast path only if pure-R decode becomes
+  a bottleneck (it is fine at ~5 s for the reference table).
 
 ## Provenance
 

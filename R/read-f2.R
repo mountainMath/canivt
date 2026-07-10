@@ -575,7 +575,7 @@ ivt_norm_lang <- function(language = "en") {
 # names -- falling back to English wherever the file carries no French copy (the
 # language-neutral `geo_uid` is unaffected).
 ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
-                        language = "en") {
+                        language = "en", depth = FALSE) {
   dim_names <- match.arg(dim_names)
   cells <- x$cells
   meta <- x$metadata
@@ -618,6 +618,11 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
                length(d$members_fr) == length(d$members)) d$members_fr
       else d$members
     out[[outnames[j]]] <- if (!is.null(labs)) fix(labs)[cells[[col]]] else cells[[col]]
+    # optional per-member hierarchy depth, read from the label indentation of the
+    # (untrimmed) member list -- a `<col>_depth` integer column right after the
+    # dimension. Opt-in so default output, parquet and members sidecar are unchanged.
+    if (depth && !is.null(labs))
+      out[[paste0(outnames[j], "_depth")]] <- ivt_label_depth(labs)[cells[[col]]]
   }
   out$value <- cells$value
   out

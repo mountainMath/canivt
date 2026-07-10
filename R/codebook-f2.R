@@ -1668,8 +1668,9 @@ ivt_f2_geo_marker_region <- function(raw) {
 # the combined records back on the two codes they carry (order-independent, self-
 # validating: a flow label's own codes must name a known member). Gated tightly on
 # a COMPLETE flow uid array (chunks summing exactly to the header geography count)
-# so no other table engages this path. Loud fallback: full bilingual label refinement
-# and viewer-validation of member order are follow-ups (see inst/notes/coverage.md).
+# so no other table engages this path. Loud fallback. Member order (residence-major,
+# SGC-code ascending) is viewer-validated content-exact across all vintages -- see
+# inst/notes/coverage.md; the viewer re-sorts within a residence for display.
 ivt_f2_geo_flow_dir <- function(raw) {
   if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern schema'd layout
   d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
@@ -1769,7 +1770,8 @@ ivt_f2_geo_flow_dir <- function(raw) {
     "as two geographies -- place of residence (geo_res_*) and place of work",
     "(geo_work_*) -- with the pair kept as geo_uid. Labels are joined to each member",
     "by the codes they carry (a few tail members recovered from the per-side name",
-    "arrays); Beyond 20/20 viewer-validation of the flow member order is pending."),
+    "arrays). Member order is residence-major, SGC-code ascending (viewer-validated",
+    "content-exact across 2011/2016 flow tables; the viewer re-sorts for display)."),
     class = c("canivt_geo_flow", "canivt_fallback"))
   # SAFETY CHECK: every flow member must resolve to a residence + work name AND code.
   # A residual gap means a codebook block was mis-parsed and silently dropped/truncated

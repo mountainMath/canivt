@@ -79,6 +79,24 @@ test_that("ivt_label_depth/parent treat NA and empty labels as top-level", {
   expect_equal(ivt_label_parent(labs), c(NA, 1L, NA, NA, 4L))
 })
 
+test_that("ivt_tidy(depth = TRUE) adds a <col>_depth column per data dimension", {
+  x <- fake_ivt()
+  # default output is unchanged: no depth columns
+  expect_false(any(grepl("_depth$", names(ivt_tidy(x)))))
+  # opt-in: a depth column sits right after its dimension, mapping member -> depth
+  d <- ivt_tidy(x, depth = TRUE)
+  expect_equal(match("age_depth", names(d)), match("age", names(d)) + 1L)
+  # cells age ids 1,2,1 -> depths 0,1,0 (Total, "  0 to 14 years", Total)
+  expect_equal(d$age_depth, c(0L, 1L, 0L))
+  # the id path (labels = FALSE) recomputes depth from the member list too
+  idp <- ivt_tidy(x, labels = FALSE, depth = TRUE)
+  expect_equal(match("age_depth", names(idp)), match("age", names(idp)) + 1L)
+  expect_equal(idp$age_depth, c(0L, 1L, 0L))
+  # dim_names = "label" carries the depth column onto the full-label name
+  dl <- ivt_tidy(x, depth = TRUE, dim_names = "label")
+  expect_true(paste0(age_col, "_depth") %in% names(dl))
+})
+
 test_that("collect_ivt on an ivt object yields factors with ALL member levels", {
   x <- fake_ivt()
   df <- collect_ivt(x)

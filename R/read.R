@@ -160,21 +160,54 @@ ivt_metadata <- function(path) {
 #'   lower-cased). French falls back to English wherever the file carries no
 #'   French copy (e.g. the language-neutral `geo_uid`, or a dimension with no
 #'   French name).
+#' @param depth If `TRUE` (default `FALSE`) add a `<col>_depth` integer column
+#'   after each data-dimension column giving that member's hierarchy depth (read
+#'   from the label indentation, the same measure carried by [ivt_members()]).
+#'   Opt-in, so the default output — and hence the Parquet written by
+#'   [ivt_write_parquet()] — is unchanged.
 #' @return A tibble.
 #' @export
 ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
-                     dim_names = c("slug", "label"), language = "en") {
+                     dim_names = c("slug", "label"), language = "en",
+                     depth = FALSE) {
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
   if (!labels) {
     cells <- x$cells
     datacols <- setdiff(names(cells), c("geo", "value"))
-    names(cells)[match(datacols, names(cells))] <-
-      ivt_data_colnames(datacols, x$metadata, dim_names, language)
+    out_names <- ivt_data_colnames(datacols, x$metadata, dim_names, language)
+    names(cells)[match(datacols, names(cells))] <- out_names
+    if (depth) cells <- ivt_tidy_add_depth(cells, out_names, x$metadata, language)
     return(cells)
   }
-  ivt_f2_tidy(x, trim_labels, dim_names, language)
+  ivt_f2_tidy(x, trim_labels, dim_names, language, depth)
+}
+
+# On the compact id path (`labels = FALSE`) there is no member label in the
+# output to read indentation from, so recompute depth from each dimension's
+# member list and insert a `<col>_depth` column immediately after its column,
+# matching the labelled path. `data_cols`/`out_names` are aligned to the
+# non-geography dimensions in declaration order.
+ivt_tidy_add_depth <- function(cells, out_names, meta, language) {
+  data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
+  id_cols <- setdiff(names(cells), c("geo", "value"))
+  for (j in seq_along(id_cols)) {
+    d <- if (j <= length(data_dims)) data_dims[[j]] else NULL
+    if (is.null(d)) next
+    labs <- if (language == "fr" && !is.null(d$members_fr) &&
+                length(d$members_fr) == length(d$members)) d$members_fr
+            else d$members
+    if (is.null(labs)) next
+    dcol <- paste0(out_names[j], "_depth")
+    cells[[dcol]] <- ivt_label_depth(labs)[cells[[id_cols[j]]]]
+    # move the depth column to sit right after its dimension column
+    ord <- names(cells)
+    ord <- ord[ord != dcol]
+    at <- match(out_names[j], ord)
+    cells <- cells[, append(ord, dcol, after = at)]
+  }
+  cells
 }
 
 #' @export

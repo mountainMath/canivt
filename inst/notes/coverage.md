@@ -886,8 +886,17 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   per-side name arrays (`POR/LDR` · `POW/LDT`) via a `code → name` dictionary, keyed by
   the residence/work code already held; `geo_label` for those is reconstructed from the
   recovered halves. It is a loud `canivt_geo_flow` fallback (→ `strict_clean = FALSE`),
-  gated on a complete uid array so no other table engages it. **Pending:** Beyond 20/20
-  viewer-validation of the flow member order.
+  gated on a complete uid array so no other table engages it. **Flow member order —
+  VIEWER-VALIDATED** (2026-07-10): the decoded `(residence → work) → value` triples are
+  **content-exact** against the Beyond 20/20 viewer on all vintages (`98-400-X2016325`
+  CSD, `98-400-X2016391` CD, `98-400-X2016327` CMA, `99-012-X2011032` 2011 NHS —
+  100% joined-value match and set-equal work destinations across sampled residences,
+  after fixing every non-geography data dim to its Total member as the viewer does).
+  Our member order is **residence-major, SGC-code ascending** — deterministic and
+  geographic; the viewer *re-sorts* within each residence for display (so a positional
+  order match to the viewer is not expected, the same behaviour as the 2016203 geography
+  re-sort). Validation is scrape-based and internal (see `R/ground-truth.R`), not part of
+  the automated suite.
 - [x] **Commuting-flow generalization across 2016 + 2021 vintages** (2026-07-09). The
   2011 `0x0f` packed origin-destination flow reader was validated against the sibling
   flow products of the 2016 and 2021 censuses. StatCan uses **three different
@@ -939,8 +948,8 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
     Internal-consistency validated: `391` has exactly **293 self-flows** (residence CD
     = work CD = Canada's CD count), self-flow mean 37,572 ≫ cross-flow mean 725, and
     every `Total − (Male + Female)` gap is a multiple of 5 (StatCan base-5 random
-    rounding). **Pending:** Beyond 20/20 viewer-validation of flow member order (shared
-    with the other flow tables).
+    rounding). Flow member order **viewer-validated content-exact** for `391`/`327`
+    alongside the other flow tables (2026-07-10, see the flow-metadata note above).
 
 **Robustness: byte-exact records + a silent-truncation tripwire (2026-07-09).** The
 handful of flow names lost in the first cut were a symptom, not a one-off: the reader

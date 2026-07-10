@@ -9,7 +9,8 @@ ivt_tidy(
   labels = TRUE,
   trim_labels = TRUE,
   dim_names = c("slug", "label"),
-  language = "en"
+  language = "en",
+  depth = FALSE
 )
 }
 \arguments{
@@ -33,6 +34,12 @@ language-neutral; \code{"label"} uses the full dimension name (e.g.
 lower-cased). French falls back to English wherever the file carries no
 French copy (e.g. the language-neutral \code{geo_uid}, or a dimension with no
 French name).}
+
+\item{depth}{If \code{TRUE} (default \code{FALSE}) add a \verb{<col>_depth} integer column
+after each data-dimension column giving that member's hierarchy depth (read
+from the label indentation, the same measure carried by \code{\link[=ivt_members]{ivt_members()}}).
+Opt-in, so the default output — and hence the Parquet written by
+\code{\link[=ivt_write_parquet]{ivt_write_parquet()}} — is unchanged.}
 }
 \value{
 A tibble.
