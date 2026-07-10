@@ -69,7 +69,16 @@ ivt_f2_dim_slots <- function(raw, m = NULL) {
 # something else on some layout is rejected rather than misread. Tries the two
 # indirection depths (slot -> directory, and slot -> struct -> directory).
 # Returns the (off, len) entry matrix, or NULL.
-ivt_f2_dim_dir <- function(raw, k, slots = NULL) {
+#
+# Memoized per (raw, k): each dimension's directory is consumed by the label,
+# ordinal, footnote AND geography readers, so it is decoded once. The result is
+# a pure function of the bytes and k (`slots` is deterministic given the
+# dimension count, so it does not key the cache).
+ivt_f2_dim_dir <- function(raw, k, slots = NULL)
+  ivt_memo(raw, paste0("dim_dir_", k),
+           function() ivt_f2_dim_dir_impl(raw, k, slots))
+
+ivt_f2_dim_dir_impl <- function(raw, k, slots = NULL) {
   if (is.null(slots)) slots <- ivt_f2_dim_slots(raw)
   if (is.null(slots) || k < 1L || k > length(slots)) return(NULL)
   sl <- slots[[k]]
@@ -305,7 +314,10 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
 # resolves. No decoder logic branches on this beyond which dimension gets the
 # geography role (slug/labels/codebook); the cell decode itself is
 # dimension-agnostic.
-ivt_f2_geo_dim_index <- function(raw, d = NULL) {
+ivt_f2_geo_dim_index <- function(raw, d = NULL)
+  ivt_memo(raw, "geo_dim_index", function() ivt_f2_geo_dim_index_impl(raw, d))
+
+ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   if (is.null(d)) d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(1L)
   cnt1 <- suppressWarnings(as.integer(d$dims[[1L]]$count))

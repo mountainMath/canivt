@@ -116,7 +116,10 @@ ivt_f2_dir_anchor_scan <- function(raw) {
 # Locate the page directory from the header pointer (falling back to a marker
 # scan), then grow the maximal contiguous run of valid 8-byte records around the
 # anchor. Returns NULL when no family-2 directory is present.
-ivt_f2_find_directory <- function(raw) {
+ivt_f2_find_directory <- function(raw)
+  ivt_memo(raw, "find_directory", function() ivt_f2_find_directory_impl(raw))
+
+ivt_f2_find_directory_impl <- function(raw) {
   n <- length(raw)
   anchor <- ivt_f2_dir_anchor_header(raw)
   if (is.null(anchor)) {

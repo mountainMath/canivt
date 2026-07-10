@@ -569,7 +569,11 @@ ivt_f2_geo_root_dir <- function(raw, n_geo) {
   out
 }
 
-ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L) {
+ivt_f2_geo_schema <- function(raw, tail_bytes = 600000L)
+  ivt_memo(raw, paste0("geo_schema_", tail_bytes),
+           function() ivt_f2_geo_schema_impl(raw, tail_bytes))
+
+ivt_f2_geo_schema_impl <- function(raw, tail_bytes = 600000L) {
   # Preferred: follow the file's own metadata directory (a header pointer -> a table
   # of block offsets/lengths) to the *exact* dictionary block, so its start comes
   # from the file rather than a scan. `ivt_f2_geo_dict_block()` confirms the block by
@@ -2057,6 +2061,13 @@ ivt_f2_geo_inline <- function(raw) {
   if (!is.null(g)) return(g)
   g <- ivt_f2_geo_inline_dir(raw)
   if (!is.null(g)) return(g)
+  # a geography attribute schema (GEO_NAME field list) means the modern DGUID
+  # attribute-array codebook -- never the inline combined-record layout -- so
+  # bail before the marker-region block scan. The directory readers above gate
+  # on the same discriminator; without it the Pascal run-scanner walked the
+  # whole multi-MB geography codebook of every large schema'd table (~17 s of
+  # the 20 s metadata read on 98-10-0023) only to find no inline blocks.
+  if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)
   region <- ivt_f2_geo_marker_region(raw)
   if (is.null(region)) return(NULL)
   blocks <- ivt_find_member_blocks(raw, max(0L, region[1] - 50L), min_records = 3L)
@@ -2342,7 +2353,10 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer
 #' @return list(n_dim, dims = list(name, count, type), title) or NULL.
 #' @keywords internal
 #' @noRd
-ivt_f2_descriptor <- function(raw) {
+ivt_f2_descriptor <- function(raw)
+  ivt_memo(raw, "descriptor", function() ivt_f2_descriptor_impl(raw))
+
+ivt_f2_descriptor_impl <- function(raw) {
   n <- length(raw)
   D <- ivt_f2_descriptor_offset(raw)
   if (is.null(D) || is.na(D) || D < 1 || D + 18 > n) return(NULL)
@@ -2480,7 +2494,10 @@ ivt_f2_geo_dim <- function(dims, gd = 1L)
 # for 3-dimension tables (it reads 16320 instead of 63404 for the 4-dimension
 # 98-10-0129). Falls back to the fixed-offset reader when the descriptor cannot be
 # parsed.
-ivt_f2_geo_count <- function(raw) {
+ivt_f2_geo_count <- function(raw)
+  ivt_memo(raw, "geo_count", function() ivt_f2_geo_count_impl(raw))
+
+ivt_f2_geo_count_impl <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   geo <- if (is.null(d)) NULL
          else ivt_f2_geo_dim(d$dims, ivt_f2_geo_dim_index(raw, d))

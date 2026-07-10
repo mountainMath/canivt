@@ -103,6 +103,9 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' @export
 read_ivt <- function(path, geo_attributes = FALSE) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
+  # the per-file parse memo (memo.R) is warm for the duration of this read and
+  # dropped on exit, so the file's bytes are not retained afterwards.
+  on.exit(ivt_memo_clear(), add = TRUE)
   family <- ivt_family(raw)
   if (is.na(family)) {
     cli::cli_abort(c(
@@ -145,6 +148,7 @@ read_ivt <- function(path, geo_attributes = FALSE) {
 #' @export
 ivt_metadata <- function(path) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
+  on.exit(ivt_memo_clear(), add = TRUE)
   family <- ivt_family(raw)
   if (is.na(family)) {
     cli::cli_abort("Unsupported or unrecognised IVT format in {.path {path}}.")

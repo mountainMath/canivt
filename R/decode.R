@@ -83,7 +83,10 @@ ivt_value_trailer <- function(b0, b2, b3 = 0x08L) {
 # in-page / straddle / paged roles, the in-page presence bit grid, the directory
 # entry strides, and the per-page presence record size. Geography is dimension 1
 # (descriptor order) and participates in the nesting like any other dimension.
-ivt_layout <- function(raw) {
+ivt_layout <- function(raw)
+  ivt_memo(raw, "layout", function() ivt_layout_impl(raw))
+
+ivt_layout_impl <- function(raw) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || length(d$dims) < 2L)
     cli::cli_abort("IVT descriptor has too few dimensions to decode.")

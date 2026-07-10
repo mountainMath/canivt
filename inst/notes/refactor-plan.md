@@ -51,29 +51,42 @@ Confirmed by grep: definition + tests only, no production callers.
 - [x] CLAUDE.md / coverage.md / ivt-format.md / decode-history.md "legacy
   counter" caveats updated.
 
-## 3. Per-read parse context (the enabling refactor)
+## 3. Per-read parse context (the enabling refactor) — DONE 2026-07-10
 
-There is no memoization anywhere: `ivt_f2_descriptor(raw)` is re-parsed from
+There was no memoization anywhere: `ivt_f2_descriptor(raw)` was re-parsed from
 13 call sites, `ivt_f2_geo_dim_index()` from 12, `ivt_f2_geo_count()` from 9 —
-and each descriptor parse re-runs `ivt_f2_dim_count_reconcile()` (which
-strict-parses slot directories), while `ivt_f2_geo_dim_index()` probes
-directories with `ivt_f2_dir_entry_members()` when dim 1 has count 1. One
-`read_ivt()` re-derives the descriptor dozens of times, and each dimension's
-block directory is decoded at least three times (labels / ordinals /
-footnotes).
+each descriptor parse re-running `ivt_f2_dim_count_reconcile()` (which
+strict-parses slot directories) — and each dimension's block directory was
+decoded at least three times (labels / ordinals / footnotes).
 
-- [ ] Build a `ctx` object once per file (descriptor, slot table,
-  per-dimension directories, geo dim index, layout, geo count) and thread it
-  through the readers.
-- [ ] Delete the re-entrancy special case `ivt_f2_dim_slots(raw, m =)` (exists
-  only so the count reconcile does not re-enter the descriptor parse).
-- [ ] Collapse `ivt_f2_dim_dir_labels()` / `ivt_f2_dim_dir_ordinals()`
-  (structurally identical wrappers, dimdir.R) into one pass over cached
-  directories.
-- [ ] `ivt_f2_check_geo_count()` stops re-parsing the descriptor per call.
+Landed as a TRANSPARENT per-raw memo (`R/memo.R`) rather than an explicit
+`ctx` argument threaded through ~40 signatures: same wins, no signature
+churn, internals stay directly callable with a plain raw vector (as the
+tests and detection gate do). Design points:
 
-Nearly every duplication in §4 exists partly because functions cannot assume
-shared state — do this before the big dedups.
+- [x] `ivt_memo(raw, key, compute)`: single slot keyed by
+  `identical(raw, slot$raw)` (byte-exact — a doctored copy never reuses the
+  original's parse). Memoized: `ivt_f2_descriptor`, `ivt_layout`,
+  `ivt_f2_dim_dir` (per k), `ivt_f2_geo_dim_index`, `ivt_f2_geo_count`,
+  `ivt_f2_geo_schema`, `ivt_f2_find_directory`.
+- [x] Warnings raised inside a memoized compute are recorded and REPLAYED on
+  every hit, so a warm cache is exactly as loud as a cold one (the loud-
+  fallback contract survives memoization); errors are never cached (strict
+  mode stays strict). `read_ivt()`/`ivt_metadata()` clear the slot on exit.
+- [x] The memo made the metadata-driven gates free to consult, which exposed
+  and fixed the REAL metadata hot spot: `ivt_f2_geo_inline()`'s marker-region
+  fallback scan had no schema gate (unlike `flow_dir`/`inline_dir`), so every
+  large schema'd table walked its whole multi-MB geography codebook through
+  the pure-R Pascal scanner. Gated on `ivt_f2_geo_schema()`:
+  `ivt_metadata(98-10-0023)` 20 s → 1.7 s.
+- The `ivt_f2_dim_slots(raw, m =)` parameter STAYS: it is what breaks the
+  descriptor → reconcile → slots cycle *while the descriptor compute is in
+  flight* (memoization cannot help mid-compute).
+- The `ivt_f2_dim_dir_labels()` / `ivt_f2_dim_dir_ordinals()` wrappers stay
+  as-is — with `ivt_f2_dim_dir` memoized their duplicate directory decode is
+  gone; merging them is now a ~15-line cosmetic item (fold into §4's helper
+  work if convenient).
+- [x] `ivt_f2_check_geo_count()` no longer re-parses the descriptor per call.
 
 ## 4. Duplicated logic → shared helpers (by payoff)
 
