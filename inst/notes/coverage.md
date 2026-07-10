@@ -846,6 +846,118 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   so label blocks containing `Total - <name>` never match). Corpus-diffed:
   the ONLY output change on all 28 supported tables is ct8 dim 3 gaining
   `members_fr`/`name_fr` (its EN labels are identical to the old fallback's).
+- [x] **1986 census profile `97-570-X1986002` — DECODED, SUPPORTED** (2026-07-07).
+  A previously-untested VINTAGE (no 1986 table was in the corpus). It is the
+  ordinary profile lineage, identical in shape to the 1981 profiles: `Values(1) ×
+  Profile of Census Divisions/…(139) × Geography(6288, type 0x0d)`, geography LAST
+  and straddling. Decoded out of the box with **no code change** — 618,723 cells,
+  strict-clean, every geography named (`CANADA`, `Newfoundland - Terre-Neuve`,
+  Division/CSD names + bare GEOUIDs, 0 NA), Canada population 24.3 M. Confirms the
+  profile-lineage machinery generalises across the 1981/1986/1991 vintages.
+- [x] **2011 NHS commuting-flow `99-012-X2011032` — CELLS DECODED, flow geography
+  onboarded** (2026-07-07). A new PRODUCT LINE (the 2011 National Household Survey
+  `99-0xx-X` origin-destination flow tables) with a **new geography descriptor type
+  `0x0f`**, a u16 count the u8 read misread as its high byte 67 — collapsing the 27
+  data pages (9 geography windows × 3 sex groups) to 201 cells. Adding `0x0f` to the
+  u16 width-tag set recovers the true count **17,163** (origin-destination CSD
+  flows, "flows ≥ 20"); the ordinary profile-lineage layout (`Values(1) × Sex(3) ×
+  Geography(17163)`, geography straddling, 8 dense + 19 sparse int32 pages) then
+  decodes **42,655** cells, strict-clean, internal-consistency validated (Total =
+  Male + Female per flow; self-flows average 3,570 commuters vs 328 for
+  cross-flows — confirming the geography member order aligns with the cell decoder).
+  Geography is a genuinely new codebook shape: each member is a flow stored as the
+  combined string `"origin (code) type flag (pct%) / dest (code) type flag (pct%)"`
+  alongside a dedicated `origincode/destcode` uid array. The generic inline reader
+  cannot fit it (each member chunk carries ~11 parallel arrays — two full-flow
+  combined copies EN/FR, a code-less display copy, per-side component arrays and the
+  uid — and the ` / ` flow separator collides with the bilingual split), so
+  `ivt_f2_geo_flow_dir()` anchors on the uid array in member order and **joins each
+  combined label back to its member by the two codes it carries** (order-independent,
+  self-validating). **A flow is decoded as TWO geographies** — the file's own
+  `POR`/`POW` (Place Of Residence / Place Of Work; `LDR`/`LDT` in French) schema:
+  the origin (before the ` / `) is the place of residence, the destination the place
+  of work. `ivt_tidy()` / the geography metadata surface `geo_res_name`/`geo_res_uid`
+  (residence) and `geo_work_name`/`geo_work_uid` (work) as separate columns, keeping
+  the pair as `geo_uid` and the combined string as `geo_label`. **Geography metadata is
+  100% complete** — all 17,163 residence + work uids **and names** (EN + FR). Most names
+  come from the combined-record split; the handful of members whose combined record is
+  missing or truncated in a tail partial chunk (6 remote Nunavut self-flows — Whale Cove,
+  Repulse Bay, Kugaaruk, Kugluktuk, Gjoa Haven, Taloyoak) are backfilled from the file's
+  per-side name arrays (`POR/LDR` · `POW/LDT`) via a `code → name` dictionary, keyed by
+  the residence/work code already held; `geo_label` for those is reconstructed from the
+  recovered halves. It is a loud `canivt_geo_flow` fallback (→ `strict_clean = FALSE`),
+  gated on a complete uid array so no other table engages it. **Pending:** Beyond 20/20
+  viewer-validation of the flow member order.
+- [x] **Commuting-flow generalization across 2016 + 2021 vintages** (2026-07-09). The
+  2011 `0x0f` packed origin-destination flow reader was validated against the sibling
+  flow products of the 2016 and 2021 censuses. StatCan uses **three different
+  encodings** for the same "commuting flow from residence to work" product:
+  - **`0x0f` packed flow (2011 + 2016 census-subdivision level).** `98-400-X2016325`
+    (2016 CSD) decodes with the *identical* `0x0f` flow path: **23,565** O-D flow
+    members, `Values(1) x Sex(3) x Geography(23565)`, **67,555** cells, `geo_res_*` /
+    `geo_work_*` names + uids **100% populated** (EN + FR, 0 NA). Confirms the flow
+    decoder is portable across the 2011 NHS and 2016 `98-400-X` container generations.
+    Loud `canivt_geo_flow` fallback (`strict_clean = FALSE`).
+  - **Residence x work crosstab (all 2021 levels).** 2021 abandoned the packed format:
+    the flow is a plain crosstab with geography (residence, dim 1, flagged geo) and a
+    second geography-valued **`Place of work`** dimension (both type `0x0d`/`0x09`/`0x08`
+    by level), no `0x0f`. `98-10-0459-01` (CSD, 5161-squared, **93,314** cells),
+    `98-10-0466-01` (CD, 293-squared, **15,520**) and `98-10-0460-01` (CMA, 152-squared
+    x mode x duration, **91,666**) all decode **strict-clean** through the ordinary
+    positional path. The residence geography is a chunked schema'd DGUID table exactly
+    like `98-10-0023`: **uid-only on the default path** (DGUIDs present, `geo_name`
+    recovered via `read_ivt(geo_attributes = TRUE)`, verified all 5161 names +
+    level/type in ~6 s); the small CMA table (152 <= 256) gets its full attribute table
+    by default. The `Place of work` dimension carries the same CSD names as ordinary
+    data-dim labels. **Fixed en route:** `metadata$geographies` packed an undecoded
+    `geo_name` as an explicit `NULL` slot beside the length-`n`
+    `member_id`/`geo_uid`/`has_data` columns, making the list **ragged** (it crashed
+    `as_tibble()`/`as.data.frame()`); it now **omits** undecoded columns so the
+    structure is always rectangular and coercible (`read-f2.R`). This latently affected
+    every uid-only chunked table (`98-10-0023`, ...); cell counts and `ivt_tidy()`
+    output are unchanged (`[["geo_name"]]` still returns `NULL` when absent).
+- [x] **2016 CD/CMA flow (`98-400-X2016391`/`-X2016327`) — the THIRD encoding, now
+  decoded** (2026-07-09). These store the flow as a **single geography dimension of
+  combined `"origin / dest"` flow-pair labels** (neither the `0x0f` packed format nor
+  the 2021 crosstab) — but, crucially, the codebook DOES carry the same dedicated
+  `origincode/destcode` uid array as the `0x0f` tables, just with **shorter codes**
+  (4-digit CDs, 3-digit CMAs/CAs) that the flow reader's `[0-9]{5,9}` regexes rejected.
+  Two changes decode them:
+  - **`0x0b` added to the u16 width-tag set** (`{10,0d,0a,0c,09,0f,0b}`): `327`'s CMA
+    geography descriptor is type `0x0b` and the u8 read took the low byte, reporting
+    **5** members instead of the u16 value `0x0577 = 1399` (framing `77 05 0b 01`),
+    collapsing the decode to 312 cells; the fix gives **1,399** members / **89,122**
+    cells. (`391`'s CD geography is type `0x0d`, already a u16 tag, so its count 4,199
+    was right; only its labels were missing.)
+  - **flow reader generalised to 3-9-digit codes** (`ivt_f2_geo_flow_dir()` /
+    `ivt_f2_flow_sides()` `[0-9]{5,9}` → `[0-9]{3,9}`) and **tried before the plain
+    inline reader** (`ivt_f2_geo_inline()`): the inline reader otherwise latched onto
+    the single-side name array — 239 unique CDs on `391` — and returned the wrong
+    member count. Now both decode with **100% geography coverage** — every residence +
+    work name and code, EN + FR (`391`: 4,199 flows, 0 NA; `327`: 1,399, 0 NA). Loud
+    `canivt_geo_flow` fallback (`strict_clean = FALSE`), added to the corpus ledger.
+    Internal-consistency validated: `391` has exactly **293 self-flows** (residence CD
+    = work CD = Canada's CD count), self-flow mean 37,572 ≫ cross-flow mean 725, and
+    every `Total − (Male + Female)` gap is a multiple of 5 (StatCan base-5 random
+    rounding). **Pending:** Beyond 20/20 viewer-validation of flow member order (shared
+    with the other flow tables).
+
+**Robustness: byte-exact records + a silent-truncation tripwire (2026-07-09).** The
+handful of flow names lost in the first cut were a symptom, not a one-off: the reader
+had been splitting a codebook block with the loose run-scanner
+(`ivt_f2_dir_entry_records()`, `ivt_find_member_blocks`), which fragments/truncates
+records in dense tail chunks. The flow reader now reads every block with the byte-exact
+value-block parser (`ivt_f2_dir_entry_members()`) FIRST and only falls back to the
+run-scanner when that returns NULL, fixing the truncation at the source (100% flow-name
+coverage with no backfill needed; the `code -> name` backfill and the
+`canivt_geo_flow_gap` check remain as belt-and-suspenders). And a general tripwire,
+`ivt_f2_check_geo_names()`, runs on EVERY read: after the name-fills, a residual NA
+`geo_name` means a codebook block was mis-parsed and a member dropped, so it raises
+`canivt_geo_name_gap` (a `canivt_fallback`; a hard error under
+`options(canivt.strict = TRUE)`). Every corpus table decodes a complete `geo_name`, so
+it never fires on a clean read -- it is a regression/new-vintage tripwire for exactly
+the silent metadata truncation the flow tail chunk exhibited (unit-tested in
+`test-fallback.R`).
 
 **The entire test corpus is now decoded — there are no remaining unsupported
 files.** Reconnaissance (sub-format taxonomy, descriptor locations, per-file

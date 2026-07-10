@@ -1653,6 +1653,167 @@ ivt_f2_geo_marker_region <- function(raw) {
 # power-of-two slot padding trimmed back to the chunk size. Every chunk of every
 # run must match its expected size, otherwise the reader bails and the caller
 # falls back to the regex scan. Returns the `ivt_f2_geo_inline()` tibble or NULL.
+# Origin-destination commuting-flow geography (the 2011 NHS 99-0xx-X flow tables,
+# geography descriptor type 0x0f). Each geography MEMBER is a flow between two
+# census subdivisions, stored as a paired combined string
+#   "origin (origincode) type flag ( pct%) / dest (destcode) type flag ( pct%)"
+# alongside a dedicated flow-code array whose records are the "origincode/destcode"
+# uid. The generic inline reader (`ivt_f2_geo_inline_dir()`) does not fit this
+# layout: each member chunk carries ~11 parallel arrays (two full-flow combined
+# copies EN/FR, a code-less display copy, several per-side component arrays and the
+# uid), more runs than its group walk assembles, and the " / " flow separator
+# collides with the bilingual EN/FR split. Instead we anchor on the uid array --
+# the one run that is unambiguous (records match `^code/code$`) -- read in block-
+# directory (member) order, and attach the display label to each member by JOINING
+# the combined records back on the two codes they carry (order-independent, self-
+# validating: a flow label's own codes must name a known member). Gated tightly on
+# a COMPLETE flow uid array (chunks summing exactly to the header geography count)
+# so no other table engages this path. Loud fallback: full bilingual label refinement
+# and viewer-validation of member order are follow-ups (see inst/notes/coverage.md).
+ivt_f2_geo_flow_dir <- function(raw) {
+  if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern schema'd layout
+  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
+  if (is.null(d)) return(NULL)
+  n_geo <- ivt_f2_geo_count(raw)
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  # Codes are 3-9 digits: 7-digit CSDs (2011/2016 99-0xx/98-400 CSD flows),
+  # 4-digit CDs (2016 98-400-X2016391) and 3-digit CMAs/CAs (98-400-X2016327).
+  uid_re  <- "^[0-9]{3,9}/[0-9]{3,9}$"
+  code2   <- "\\(([0-9]{3,9})\\).*?/.*?\\(([0-9]{3,9})\\)"   # the two codes in a flow record
+  # collect the uid array in directory (member) order; keep every value block so the
+  # label join below can draw a combined record from wherever it is stored.
+  uids <- character(0)
+  blocks <- list()
+  # code -> single-CSD name, from the file's per-side component name arrays
+  # ("Name (code) type flag"): the clean source for the code->name backfill of any
+  # member whose combined record is missing or truncated in a tail partial chunk.
+  name_dict <- new.env(hash = TRUE, parent = emptyenv())
+  scan_blocks <- 0L                                       # blocks the strict parse could not read
+  for (r in seq_len(nrow(d))) {
+    # BYTE-EXACT records first (`ivt_f2_dir_entry_members`, the two value-block
+    # framings): the loose run-scanner fragments records in dense tail chunks -- how
+    # a handful of names were silently lost before -- so it is only the fallback.
+    e <- ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"])
+    if (!is.null(e)) { t <- e$values }
+    else { t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"]); scan_blocks <- scan_blocks + 1L }
+    if (length(t) < 3L || length(t) > 512L || ivt_f2_is_ordinal(t)) next
+    tt <- trimws(t)
+    nn <- tt[!is.na(tt) & nzchar(tt)]
+    if (!length(nn)) next
+    # uid chunks are clean 256-record arrays; combined-label chunks are sometimes
+    # padded past 256 (a few tail members live only in those, hence the wider cap
+    # -- harmless, the join below places a record only where its own codes match).
+    if (length(t) <= 256L && mean(grepl(uid_re, nn)) >= 0.9) { uids <- c(uids, tt); next }
+    if (any(grepl(" / ", tt, fixed = TRUE))) { blocks[[length(blocks) + 1L]] <- tt; next }
+    # single-side name array: one "Name (code) type flag" per member (no " / ")
+    if (mean(grepl("\\([0-9]{3,9}\\)", nn)) >= 0.8) {
+      p <- ivt_f2_parse_inline(tt)
+      ok <- !is.na(p$code) & !is.na(p$name) & !grepl("^[0-9)([:space:]]", p$name)
+      for (i in which(ok)) if (is.null(name_dict[[p$code[i]]])) name_dict[[p$code[i]]] <- p$name[i]
+    }
+  }
+  if (length(uids) != n_geo || !length(blocks)) return(NULL)   # not a flow codebook
+  # member map: the uid array in directory order IS the codebook member order (the
+  # same logical block-directory order the cell decoder pages geography in).
+  member_of <- new.env(hash = TRUE, parent = emptyenv())
+  for (i in seq_along(uids)) member_of[[uids[i]]] <- i
+  label   <- rep(NA_character_, n_geo)
+  lab_fr  <- rep(NA_character_, n_geo)
+  # join every combined record to its member by the two codes it carries. This is
+  # self-validating (a record only lands where its own codes name a known member),
+  # so we can scan ALL blocks -- purity does not matter -- to maximise coverage.
+  for (tt in blocks) {
+    m <- regmatches(tt, regexec(code2, tt, perl = TRUE))
+    key <- vapply(m, function(x) if (length(x) == 3L) paste0(x[2], "/", x[3]) else NA_character_, "")
+    is_fr <- grepl("[0-9],[0-9]", tt)                     # comma decimals => French copy
+    for (j in which(!is.na(key))) {
+      mi <- member_of[[key[j]]]
+      if (is.null(mi)) next
+      if (is_fr[j]) { if (is.na(lab_fr[mi])) lab_fr[mi] <- tt[j] }
+      else          { if (is.na(label[mi]))  label[mi]  <- tt[j] }
+    }
+  }
+  # English label may be missing where only the French copy carried the member;
+  # fall back to it so every member gets a display string.
+  label[is.na(label)] <- lab_fr[is.na(label)]
+  # A flow is a pair of geographies -- place of residence (the origin, before the
+  # " / ") and place of work (the destination) -- the file's own POR/POW ("Place Of
+  # Residence" / "Place Of Work", LDR/LDT in French) schema. Split both the uid and
+  # the display label so each surfaces as its own geography (`geo_res_*`/`geo_work_*`);
+  # keep the pair as `geo_uid` (member identity) and the combined string as `geo_label`.
+  upart    <- strsplit(uids, "/", fixed = TRUE)
+  res_uid  <- vapply(upart, function(x) if (length(x) >= 1L) x[1L] else NA_character_, "")
+  work_uid <- vapply(upart, function(x) if (length(x) >= 2L) x[2L] else NA_character_, "")
+  en <- ivt_f2_flow_sides(label);  fr <- ivt_f2_flow_sides(lab_fr)
+  # backfill any side name the combined split missed (member's combined record was
+  # missing/truncated) from the single-side name arrays, keyed by the code we hold.
+  from_dict <- function(nm, code) {
+    miss <- is.na(nm) & !is.na(code)
+    if (any(miss)) nm[miss] <- vapply(code[miss], function(cc) {
+      v <- name_dict[[cc]]; if (is.null(v)) NA_character_ else v }, "")
+    nm
+  }
+  res_name  <- from_dict(en$res,  res_uid)
+  work_name <- from_dict(en$work, work_uid)
+  res_fr  <- fr$res;  res_fr[is.na(res_fr)]   <- res_name[is.na(res_fr)]
+  work_fr <- fr$work; work_fr[is.na(work_fr)] <- work_name[is.na(work_fr)]
+  join <- function(a, b) ifelse(is.na(a) & is.na(b), NA_character_,
+            paste(ifelse(is.na(a), "", a), ifelse(is.na(b), "", b), sep = " / "))
+  # complete geo_label (verbatim combined string) for the members whose combined
+  # record was absent, from the recovered "name (code) / name (code)" halves.
+  synth <- is.na(label) & !is.na(res_name) & !is.na(work_name)
+  label[synth] <- paste0(res_name[synth], " (", res_uid[synth], ") / ",
+                         work_name[synth], " (", work_uid[synth], ")")
+  ivt_fallback(paste(
+    "Origin-destination commuting-flow geography ({n_geo} flow members): decoded",
+    "as two geographies -- place of residence (geo_res_*) and place of work",
+    "(geo_work_*) -- with the pair kept as geo_uid. Labels are joined to each member",
+    "by the codes they carry (a few tail members recovered from the per-side name",
+    "arrays); Beyond 20/20 viewer-validation of the flow member order is pending."),
+    class = c("canivt_geo_flow", "canivt_fallback"))
+  # SAFETY CHECK: every flow member must resolve to a residence + work name AND code.
+  # A residual gap means a codebook block was mis-parsed and silently dropped/truncated
+  # a member -- surface it LOUDLY (strict-mode error) instead of emitting NA metadata,
+  # the exact silent-truncation failure this reader is built to avoid.
+  gaps <- sum(is.na(res_name) | is.na(work_name) | is.na(res_uid) | is.na(work_uid))
+  if (gaps > 0L)
+    ivt_fallback(c(
+      paste("{gaps} of {n_geo} commuting-flow geographies did not fully decode",
+            "(missing residence/work name or code) -- a codebook block was likely",
+            "mis-parsed; those members carry NA geography metadata."),
+      i = paste("{scan_blocks} block(s) fell back from the byte-exact parse to the",
+                "run-scanner; inspect those in the geography codebook.")),
+      class = c("canivt_geo_flow_gap", "canivt_fallback"))
+  tibble::tibble(member_id = seq_len(n_geo), geo_label = label,
+                 geo_name = join(res_name, work_name),
+                 geo_name_fr = join(res_fr, work_fr), geouid = uids,
+                 geo_res_name = res_name, geo_res_name_fr = res_fr, geo_res_uid = res_uid,
+                 geo_work_name = work_name, geo_work_name_fr = work_fr, geo_work_uid = work_uid)
+}
+
+# Split a flow's combined display string into its two side names: place of
+# residence (the origin, before " / ") and place of work (the destination).
+# Splitting on " / " can over-split a side whose own name carries a slash, so
+# sides are re-merged greedily to one parenthesised code each; each side's name is
+# the text before its "(code)".
+ivt_f2_flow_sides <- function(label) {
+  res <- rep(NA_character_, length(label)); work <- res
+  for (i in seq_along(label)) {
+    s <- label[i]; if (is.na(s)) next
+    parts <- strsplit(s, " / ", fixed = TRUE)[[1]]
+    sides <- character(0); cur <- ""
+    for (p in parts) {
+      cur <- if (nzchar(cur)) paste(cur, p, sep = " / ") else p
+      if (grepl("\\([0-9]{3,9}\\)", cur)) { sides <- c(sides, cur); cur <- "" }
+    }
+    if (length(cur) && nzchar(cur)) sides <- c(sides, cur)
+    nmn <- trimws(sub("\\s*\\([0-9]{3,9}\\).*$", "", sides))
+    if (length(nmn) >= 1L) res[i]  <- nmn[1L]
+    if (length(nmn) >= 2L) work[i] <- nmn[2L]
+  }
+  list(res = res, work = work)
+}
+
 ivt_f2_geo_inline_dir <- function(raw) {
   if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern layout: not inline
   d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
@@ -1835,6 +1996,13 @@ ivt_f2_inline_table <- function(nm, nm_fr, codes, fl, ty, tnr) {
 #' @keywords internal
 #' @noRd
 ivt_f2_geo_inline <- function(raw) {
+  # Origin-destination flow geography FIRST: it is gated tightly (a complete
+  # code/code uid array summing to the header geography count) so it returns NULL
+  # for every non-flow table, but on the flow tables it must win over the plain
+  # inline reader -- the latter latches onto the single-side name array (e.g. 239
+  # unique CDs on 98-400-X2016391) and returns the wrong member count.
+  g <- ivt_f2_geo_flow_dir(raw)                          # origin-destination flows
+  if (!is.null(g)) return(g)
   g <- ivt_f2_geo_inline_dir(raw)
   if (!is.null(g)) return(g)
   region <- ivt_f2_geo_marker_region(raw)
@@ -1890,6 +2058,25 @@ ivt_f2_check_geo_count <- function(raw, got) {
     ), class = c("canivt_geo_count", "canivt_fallback"))
   }
   invisible(want)
+}
+
+# SAFETY NET against silent parser truncation: after every geography name-fill, no
+# member should be nameless. A residual NA `geo_name` means a codebook block was
+# mis-parsed and a member dropped or truncated -- surface it LOUDLY (`canivt_fallback`,
+# a strict-mode ERROR) rather than emit a nameless geography, the failure mode the
+# loud-fallback design exists to prevent. Every table in the corpus decodes a complete
+# `geo_name`, so this never fires on a clean read; it is a tripwire for regressions and
+# new vintages. `nvals` counts real members even when the count matches by coincidence.
+ivt_f2_check_geo_names <- function(geo_name) {
+  if (is.null(geo_name)) return(invisible(0L))
+  nmiss <- sum(is.na(geo_name)); nvals <- length(geo_name)
+  if (nmiss > 0L)
+    ivt_fallback(c(
+      paste("{nmiss} of {nvals} geographies decoded with no name -- a codebook",
+            "block may have been mis-parsed and members dropped."),
+      i = "The affected members carry NA geo_name; inspect the geography codebook."),
+      class = c("canivt_geo_name_gap", "canivt_fallback"))
+  invisible(nmiss)
 }
 
 #' Decode the geography table, driven by the header metadata.
@@ -2146,13 +2333,19 @@ ivt_f2_descriptor <- function(raw) {
           # characteristics"/detailed-classification data dimensions: 97F0020X's
           # Selected(282) and 98-10-0174's Mother tongue(331), both chunked
           # >256-member codebooks -- the u8 read took the low byte and got 1,
-          # which mis-nested the layout). The small family-1 geography (type
+          # which mis-nested the layout) and 0x0f (the 2011 NHS commuting-flow
+          # geography, an origin-destination flow enumeration, e.g. 17163 in
+          # 99-012-X2011032 -- the u8 read got the high byte 67, collapsing the
+          # 27 data pages to 201 cells) and 0x0b (the 2016 CMA/CA commuting-flow
+          # geography, e.g. 1399 in 98-400-X2016327 -- the u8 read took the low
+          # byte and got 5, collapsing the flow enumeration; framing bytes
+          # `77 05 0b 01` = u16 0x0577). The small family-1 geography (type
           # 0x08, <=255) and the ordinary data dimensions carry a u8 count.
           # Reading 0x0d as u8 misread 2011's 5447 geographies as 21; 0x0a/0x0c
           # as u8 misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09
           # as u8 silently mis-decoded 98-10-0174's cells. (u16 is safe for a
           # small member of any of these types: count_hi is then 00.)
-          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L))
+          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L, 0x0fL, 0x0bL))
                      v[k - 3L] + v[k - 2L] * 256L
                    else v[k - 2L]
         }

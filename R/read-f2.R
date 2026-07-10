@@ -362,18 +362,28 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   g <- ivt_f2_geo_light(raw, n_geo)
   g <- ivt_f2_geo_fill_label(g)
   ivt_f2_check_geo_count(raw, length(g$geo_uid))
+  ivt_f2_check_geo_names(g$geo_name)
   # pack every decoded per-member geography column (bilingual labels/names, uid,
   # aggregation level, geography type / municipal status, quality flag + note,
   # non-response rate, ...), member_id first and all-NA columns dropped -- the
   # attribute set varies by vintage and only what the file stores is exposed.
-  # `geo_name`/`geo_uid` slots stay present (NULL when undecoded) so callers can
-  # test them without guarding for absence.
+  # A column is OMITTED (not stored as a NULL slot) when undecoded, so the result
+  # is always RECTANGULAR (every present column has `member_id` length) and can be
+  # coerced with `tibble::as_tibble()` / `as.data.frame()`. Callers test presence
+  # with `geographies[["geo_name"]]` etc., which returns NULL for an absent column
+  # just as it did for the old NULL slot -- the uid-only chunked tables
+  # (98-10-0023, the 2021 residence x work flow crosstabs) legitimately carry no
+  # `geo_name` on the default path (names via read_ivt(geo_attributes = TRUE)).
   geo_cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr",
                 "geo_uid", "geo_level", "geo_type", "geo_type_abbr",
                 "prov_abbr", "alt_geo_code", "pr_code", "dqf_code", "dqf_note",
                 "tnr_short_form")
-  geographies <- list(geo_name = g$geo_name, geo_uid = g$geo_uid,
-                      member_id = seq_along(g$geo_uid))
+  n_members <- if (!is.null(g$geo_uid)) length(g$geo_uid)
+               else if (!is.null(g$geo_name)) length(g$geo_name)
+               else if (!is.na(n_geo)) as.integer(n_geo) else 0L
+  geographies <- list(member_id = seq_len(n_members))
+  if (!is.null(g$geo_name)) geographies$geo_name <- g$geo_name
+  if (!is.null(g$geo_uid))  geographies$geo_uid  <- g$geo_uid
   for (col in c(intersect(geo_cols, names(g)), setdiff(names(g), geo_cols))) {
     if (col %in% c("geo_name", "geo_uid")) next
     v <- g[[col]]
@@ -490,6 +500,13 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
   if (!is.null(geo[["geo_name"]]))  out$geo_name  <- fix(gval("geo_name"))[cells$geo]
   if (!is.null(geo[["geo_uid"]]))   out$geo_uid   <- geo[["geo_uid"]][cells$geo]
   if (!is.null(geo[["geo_level"]])) out$geo_level <- fix(gval("geo_level"))[cells$geo]
+  # origin-destination flow tables (2011 NHS) decode geography as two geographies:
+  # place of residence (`geo_res_*`) and place of work (`geo_work_*`).
+  for (side in c("geo_res_name", "geo_res_uid", "geo_work_name", "geo_work_uid")) {
+    if (!is.null(geo[[side]]))
+      out[[side]] <- if (grepl("_uid$", side)) geo[[side]][cells$geo]
+                     else fix(gval(side))[cells$geo]
+  }
   if (ncol(out) == 0L) out$geo <- cells$geo
   # the non-geography data columns of `cells` line up with the non-geography
   # dimensions in declaration order; label each from its dimension's member list.

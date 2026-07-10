@@ -64,6 +64,20 @@ test_that("a geography count mismatch is a classed fallback condition", {
   expect_error(ivt_f2_check_geo_count(fake, 5191L), class = "canivt_geo_count_error")
 })
 
+test_that("a nameless geography is a classed fallback (silent-truncation tripwire)", {
+  # every member named -> clean; NULL (name column undecoded) -> clean
+  expect_no_warning(expect_equal(ivt_f2_check_geo_names(c("Canada", "Ontario")), 0L))
+  expect_no_warning(expect_equal(ivt_f2_check_geo_names(NULL), 0L))
+  # any NA name means a codebook block was mis-parsed: warn loudly, subclass first
+  gap <- c("Canada", NA_character_, "Quebec")
+  expect_warning(ivt_f2_check_geo_names(gap), class = "canivt_geo_name_gap")
+  expect_warning(ivt_f2_check_geo_names(gap), class = "canivt_fallback")
+  expect_equal(suppressWarnings(ivt_f2_check_geo_names(gap)), 1L)
+  # and strict mode upgrades it to a hard error rather than emit NA metadata
+  withr::local_options(canivt.strict = TRUE)
+  expect_error(ivt_f2_check_geo_names(gap), class = "canivt_geo_name_gap_error")
+})
+
 test_that("ivt_quietly muffles fallback conditions for detection probes", {
   expect_no_warning(v <- ivt_quietly({ ivt_fallback("probe"); 42L }))
   expect_equal(v, 42L)
