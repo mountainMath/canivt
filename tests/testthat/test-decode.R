@@ -273,13 +273,16 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   # split the arrays at the empty record, shifting every uid after member 25 by
   # one and dropping the count to 90 (which also warned). Validated exact vs the
   # StatCan metadata CSV on all 11 attributes for all 91 members.
-  expect_no_warning(m <- ivt_f2_metadata(raw))
+  # member 26 has no schema GEO_NAME, so ivt_f2_geo_fill_label() backfills its
+  # geo_name from the display label -- a loud canivt_fallback.
+  expect_warning(m <- ivt_f2_metadata(raw), class = "canivt_fallback")
   expect_equal(length(m$geographies$geo_uid), 91L)
   expect_equal(length(m$geographies$geo_name), 91L)
   expect_true(is.na(m$geographies$geo_uid[26]))
-  # member 26 carries no attributes at all, so its GEO_NAME is a true NA hole;
-  # the display Member Name (geo_label), which every member carries, has it
-  expect_true(is.na(m$geographies$geo_name[26]))
+  # member 26 carries no schema GEO_NAME (a true NA hole in the attribute table
+  # below), but the metadata path fills geo_name from the display Member Name
+  # (geo_label), which every member carries, for such synthetic aggregates.
+  expect_equal(m$geographies$geo_name[26], "Canada outside Quebec and New Brunswick")
   expect_equal(m$geographies$geo_label[26], "Canada outside Quebec and New Brunswick")
   expect_equal(m$geographies$geo_uid[27], "2021A000210")  # Newfoundland and Labrador
   at <- ivt_f2_geo_attributes(raw)
