@@ -174,23 +174,13 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
     }
   }
   # the EN/FR member blocks are the first two member-array entries after it
-  cand <- list()
-  for (r in (mk + 1L):nrow(dir)) {
-    len <- dir[r, "len"]
-    if (len <= 8L || len < cnt + 4L) next          # separators / tiny framing
-    win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
-    b <- ivt_find_member_blocks(win, 0L, min_records = 1L)
-    if (!length(b)) next
-    sz <- vapply(b, function(x) length(x$texts), 1L)
-    bi <- which(sz >= cnt & sz <= cnt + 8L)        # the member block (+ slack for
-    if (!length(bi)) next                          #   leading framing misreads)
-    t <- b[[bi[length(bi)]]]$texts
-    t <- t[(length(t) - cnt + 1L):length(t)]       # trailing `count` records
-    if (identical(t, as.character(seq_len(cnt)))) next   # an ordinal block
-    if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) next  # framing garbage
-    cand[[length(cand) + 1L]] <- t
-    if (length(cand) == 2L) break
-  }
+  cand <- ivt_f2_dir_member_arrays(
+    raw, dir, cnt, rows = (mk + 1L):nrow(dir), max_keep = 2L,
+    accept = function(t) {
+      if (identical(t, as.character(seq_len(cnt)))) return(NULL)  # ordinal block
+      if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) return(NULL)  # garbage
+      t
+    })
   if (!length(cand)) return(NULL)
   if (length(cand) == 1L)
     return(list(en = cand[[1L]], fr = NULL, name_fr = NA_character_))
@@ -200,6 +190,52 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   en <- if (en_first) cand[[1L]] else cand[[2L]]
   fr <- if (en_first) cand[[2L]] else cand[[1L]]
   list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr))
+}
+
+# Walk a dimension slot directory's entries for candidate member arrays of
+# exactly `cnt` records, calling `accept(t)` on each candidate's values and
+# collecting up to `max_keep` accepted results (in directory order). Shared by
+# the label and ordinal readers, which differ only in the rows they walk and
+# the predicate they accept with.
+#
+# Values are read STRICT-FIRST: the byte-exact entry parse
+# (`ivt_f2_dir_entry_members()`, with the power-of-two slot padding trimmed
+# back to `cnt`) supplies them whenever the entry carries a value-block
+# framing -- the Pascal run-scanner can misread leading framing bytes as
+# records (98-10-0077's Ages) and fragments dense blocks, so it is only the
+# fallback. The scanner path keeps its established shape: the largest block of
+# cnt..cnt+8 records, sliced to the trailing `cnt`.
+ivt_f2_dir_member_arrays <- function(raw, dir, cnt, rows, accept,
+                                     max_keep = .Machine$integer.max) {
+  out <- list()
+  for (r in rows) {
+    len <- dir[r, "len"]
+    if (len <= 8L || len < cnt + 4L) next          # separators / tiny framing
+    t <- NULL
+    e <- tryCatch(ivt_f2_dir_entry_members(raw, dir[r, "off"], len),
+                  error = function(e) NULL)
+    if (!is.null(e)) {
+      v <- e$values
+      if (!e$dense && length(v) > cnt && all(is.na(v[(cnt + 1L):length(v)])))
+        v <- v[seq_len(cnt)]                       # pow-2 slot padding
+      if (length(v) == cnt && !anyNA(v)) t <- v
+    }
+    if (is.null(t)) {                              # run-scanner fallback
+      win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
+      b <- ivt_find_member_blocks(win, 0L, min_records = 1L)
+      if (!length(b)) next
+      sz <- vapply(b, function(x) length(x$texts), 1L)
+      bi <- which(sz >= cnt & sz <= cnt + 8L)      # + slack for leading framing
+      if (!length(bi)) next
+      tt <- b[[bi[length(bi)]]]$texts
+      t <- tt[(length(tt) - cnt + 1L):length(tt)]  # trailing `cnt` records
+    }
+    v <- accept(t)
+    if (is.null(v)) next
+    out[[length(out) + 1L]] <- v
+    if (length(out) >= max_keep) break
+  }
+  out
 }
 
 # Language order of a dimension's two member-label blocks when the dictionary
@@ -426,23 +462,14 @@ ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
 ivt_f2_dim_dir_ordinal1 <- function(raw, dim, dir) {
   cnt <- as.integer(dim$count)
   if (is.na(cnt) || cnt < 1L) return(NULL)
-  cand <- NULL
-  for (r in seq_len(nrow(dir))) {
-    len <- dir[r, "len"]
-    if (len <= 8L || len < cnt + 4L) next          # separators / tiny framing
-    win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
-    b <- ivt_find_member_blocks(win, 0L, min_records = 1L)
-    if (!length(b)) next
-    sz <- vapply(b, function(x) length(x$texts), 1L)
-    bi <- which(sz >= cnt & sz <= cnt + 8L)
-    if (!length(bi)) next
-    t <- b[[bi[length(bi)]]]$texts
-    t <- t[(length(t) - cnt + 1L):length(t)]       # trailing `count` records
-    iv <- suppressWarnings(as.integer(t))
-    if (anyNA(iv) || !identical(sort(iv), seq_len(cnt))) next
-    cand <- iv
-  }
-  cand
+  cand <- ivt_f2_dir_member_arrays(
+    raw, dir, cnt, rows = seq_len(nrow(dir)),
+    accept = function(t) {
+      iv <- suppressWarnings(as.integer(t))
+      if (anyNA(iv) || !identical(sort(iv), seq_len(cnt))) return(NULL)
+      iv
+    })
+  if (length(cand)) cand[[length(cand)]] else NULL   # the LAST permutation wins
 }
 
 # Member ordinals for every dimension, read from the header slot table. Returns

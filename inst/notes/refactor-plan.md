@@ -90,24 +90,30 @@ tests and detection gate do). Design points:
 
 ## 4. Duplicated logic → shared helpers (by payoff)
 
-- [ ] **Four chunk-group walkers.** The "groups of G chunks
-  (`ivt_f2_geo_group_sizes()`), each attribute = G language-A blocks then G
-  language-B blocks, chunk size `min(256, remaining)`, trim pow-2 slot
-  padding" walk is implemented four times with different tolerances:
-  `ivt_f2_geo_dguids_dir()` (identical-copy check),
+- [ ] **Four chunk-group walkers — DEFERRED to a dedicated session.** The
+  "groups of G chunks (`ivt_f2_geo_group_sizes()`), each attribute = G
+  language-A blocks then G language-B blocks, chunk size `min(256,
+  remaining)`, trim pow-2 slot padding" walk is implemented four times with
+  different tolerances: `ivt_f2_geo_dguids_dir()` (identical-copy check),
   `ivt_f2_dim_dir_label_chunks()` (skip-nonmatching `take_run`),
   `ivt_f2_geo_attrs_dir()` (NA-hole pattern + dense re-alignment),
   `ivt_f2_geo_inline_dir()` (partial-first rotation + `skip` prefix). One
   parameterized group-run consumer carrying all four behaviors (~200 lines).
-- [ ] **Strict-first entry parsing everywhere** (also a §6 sharpening item):
-  the flow reader does byte-exact `ivt_f2_dir_entry_members()` first with the
-  run-scanner as fallback (that ordering fixed the silently-truncated flow
-  names), but `ivt_f2_geo_attrs_dir()`, `ivt_f2_geo_inline_dir()` and
-  `ivt_f2_dir_entry_records()` still *classify* entries via the run-scanner
-  first — the same fragmentation risk sits in the classification gates (a
-  fragmented dense tail can flunk the `k == 2·nattr·Σsizes` count and
-  needlessly trip the stride fallback). One shared "read directory entry:
-  strict, else scanner (tracked)" helper replaces three inlined loops.
+  Deferred deliberately (2026-07-10): it is the deepest redesign of the
+  section with the highest drift risk and a maintainability-only payoff —
+  each walker's tolerance set is load-bearing for specific vintages, so the
+  unification needs a fresh session with the corpus run before/after each
+  walker is folded in (start with `dguids_dir` + `label_chunks`, the two
+  simplest; `inline_dir`'s rotation/skip handling last).
+- [x] **Strict-first entry parsing** (2026-07-10, scoped):
+  `ivt_f2_dim_dir_label1()` / `ivt_f2_dim_dir_ordinal1()` — the only readers
+  that were *purely* run-scanner — now read values strict-first through the
+  shared `ivt_f2_dir_member_arrays()` walk (see next item). The flow reader
+  was already strict-first. `ivt_f2_geo_attrs_dir()` /
+  `ivt_f2_geo_inline_dir()` keep run-scanner CLASSIFICATION by documented
+  design (the `k == 2·nattr·Σsizes` gate must see a stable block set; their
+  VALUES are already strict-first) — revisit only as part of the walker
+  unification above, where the gate itself gets restated on strict counts.
 - [x] **EN/FR pair pick** (2026-07-10): `ivt_f2_pick_en(a, b)` →
   `list(en, fr, en_first)` replaces the inlined idiom in
   `ivt_f2_dim_dir_label1()` (both sites, via the shared loud
@@ -137,11 +143,12 @@ tests and detection gate do). Design points:
   width checks in `ivt_value_trailer()` / `ivt_decode_page()` /
   `ivt_page_preflight()` use the same constant, so the two expressions of the
   model can no longer drift.
-- [ ] **`ivt_f2_dim_dir_label1()` / `ivt_f2_dim_dir_ordinal1()`** share the
-  entire candidate-entry walk (len window, `ivt_find_member_blocks`,
-  `cnt..cnt+8` size gate, trailing-`cnt` slice); factor a shared member-array
-  iterator (label1 skips ordinal blocks, ordinal1 keeps permutations). Both
-  should also try the strict entry parse first (see strict-first above).
+- [x] **`ivt_f2_dim_dir_label1()` / `ivt_f2_dim_dir_ordinal1()`**
+  (2026-07-10): the shared `ivt_f2_dir_member_arrays(raw, dir, cnt, rows,
+  accept, max_keep)` iterator now carries the candidate walk for both
+  (label1: first two non-ordinal clean arrays after the marker; ordinal1: the
+  last 1..cnt permutation anywhere), with strict-first values and the
+  run-scanner's established trailing-`cnt` slice as the fallback.
 - [x] **Geography column ordering** (2026-07-10): `IVT_GEO_COLS` +
   `ivt_geo_col_order()` (read-f2.R) now order both `metadata$geographies` and
   `ivt_f2_geographies()` identically (the documented leading schema
