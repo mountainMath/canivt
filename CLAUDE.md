@@ -4,6 +4,12 @@ Guidance for working on **canivt**, an R package that downloads and parses
 StatCan *Beyond 20/20* `.ivt` tables into tidy data / Parquet / CSV, and extracts
 their metadata (dimension members, geographic identifiers/DGUIDs, footnotes).
 
+All data parsing should be driven by metadata and markers found in the IVT files, external
+ground truth like the 2021 CSV data and metadata, or the earlier web-based data should
+be used for validation only and not result in hidden hard-coded parsing paths. The goal
+is to build parsers that generalize to data the validator and test suite have not yet
+seen, and emit loud warnings when hitting unexpected obstacles and fallback paths.
+
 This folder is self-contained. Companion docs under `inst/notes/`:
 
 - [`ivt-format.md`](inst/notes/ivt-format.md) — the authoritative byte-format
