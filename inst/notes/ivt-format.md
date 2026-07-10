@@ -251,7 +251,8 @@ viewer's dropdown re-sorts — join viewer ground truth by NAME).
 ## Geography index
 
 - Per-geography page directories start at `IVT_IDX0 = 37167`, stride
-  `IVT_IDX_STRIDE = 0x1000` (4096 bytes). Directory `n` (0-based) is metadata
+  `0x1000` (4096 bytes; a property of this table — strides are computed
+  per file from the descriptor, see `ivt_layout()`). Directory `n` (0-based) is metadata
   **Member ID `n + 1`** — i.e. geographies are in metadata member order.
 - ⚠️ **Critical gotcha:** the directories are grouped 8 per `0x8000` region (the
   first 288 of each 0x1000 slot are used, the rest is zero padding). An early

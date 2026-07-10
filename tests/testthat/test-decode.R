@@ -47,11 +47,11 @@ test_that("the descriptor recovers the reference-period (facet) dimension of 98-
   expect_match(year$name, "^Year")
   # the descriptor geography count is 174. Year is the innermost *in-page*
   # dimension (the value run carries the 2020 and 2015 values consecutively),
-  # NOT a geography facet -- so the uniform decoder keys 174 geographies. The
-  # legacy 0x1000-stride counter returns 348 here only as an artefact of striding
-  # a directory whose real per-geography stride is 0x2000 (see ivt_layout()).
+  # NOT a geography facet -- so the uniform decoder keys 174 geographies. (The
+  # retired legacy 0x1000-stride counter read 348 here, an artefact of striding
+  # a directory whose real per-geography stride is 0x2000 -- ivt_layout() now
+  # computes the stride per table.)
   expect_equal(ivt_f2_geo_count(raw), 174L)
-  expect_equal(ivt_geography_count(raw), 348L)
 })
 
 test_that("all six 98-10-0077 data dimensions label, incl. Ages and Year", {

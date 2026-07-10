@@ -199,10 +199,11 @@ count 2).
   at the bottom of the presence-bitmap nesting: the dense value run carries the
   2020 then 2015 value for each cell consecutively. The descriptor count
   `ivt_f2_geo_count()` = **174** is the true geography count the decoder keys on.
-  The legacy `ivt_geography_count()` (stride at `0x1000`) returns **348** here only
+  The legacy `ivt_geography_count()` (stride at `0x1000`) returned **348** here only
   as an artefact — 98-10-0077's real per-geography directory stride is `0x2000`,
   and striding it at `0x1000` lands on every other geography's mid-block, doubling
-  the count. It is no longer used for decoding (only the family-1 detection gate).
+  the count. It has been removed (2026-07-10): nothing decodes or detects through
+  it — `ivt_layout()` computes directory strides per table.
 
 ## [x] One unified cell decoder — "family 1 / family 2" are one pattern (DONE)
 
@@ -372,7 +373,7 @@ units) and the directory entries (8-byte entry units).
   (`@824` on the small chunked tables, indexing the geography codebook blocks; also
   `@572`/`@712`) holds a table of `[u32 off][u16 len][u16 len]` entries, the same
   entry shape as the page directory. `ivt_f2_geo_dict_block()` decodes it
-  (`ivt_f2_read_block_dir()`) and confirms the block by its `GEO_NAME_EN` field name,
+  (`ivt_f2_read_dir_at()`) and confirms the block by its `GEO_NAME_EN` field name,
   so the dictionary start comes **from the file, not a scan**, on **every** table:
   `ivt_f2_geo_block_dir()` tries two indirection depths per slot — the slot value is
   the directory itself on the small chunked tables (0013/0478/0241), but a small

@@ -70,7 +70,7 @@ Key semantics to know:
 |------|------|
 | `utils-bytes.R` | low-level readers: `rd_u16/rd_u32/rd_int_run/rd_pascal`; latin-1 decode. **All offsets are 0-based** (binary layout); helpers convert to R's 1-based indexing. |
 | `fallback.R`    | **loud fallbacks**: `ivt_fallback(msg, class)` — classed warning (`canivt_fallback` by default) raised whenever a content-heuristic fallback supplies values or pages are skipped; `options(canivt.strict = TRUE)` upgrades to a classed error. `ivt_quietly()` muffles both for speculative probes (family detection). Wire every new fallback path through this. |
-| `container.R`   | page-directory anchor `ivt_idx0()` (reads `u16@558`, validates by checking the first entry points at a page marker) + the legacy 0x1000-stride `ivt_geography_count()` (kept only for the family detector / regression). `IVT_IDX0_DEFAULT=37167` is a fallback. |
+| `container.R`   | page-directory anchor `ivt_idx0()` (reads `u16@558`, validates by checking the first entry points at a page marker). `IVT_IDX0_DEFAULT=37167` is a fallback. (The legacy 0x1000-stride geography counter is retired; `ivt_layout()` computes directory strides.) |
 | `decode.R`      | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides. `ivt_decode()` walks the paged-coordinate cartesian and decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`; dense pages via `ivt_decode_page_dense()`) → cell tibble (`geo` + one slug column per data dimension). Handles the former family 1 and family 2 identically. |
 | `container-f2.R`| family-2 page-directory finder (used by the metadata path) + the marker byte model (`ivt_f2_is_marker()`: `b0` width/variant nibbles, `b3 ∈ {08,09,0a,0c}` head-block codes); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
 | `decode-f2.R`   | shared presence-bitmap primitives used for **every** table (the `ivt_f2_` prefix is historical): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()` (power-of-two-nested strides), `ivt_f2_cell_grid()` (cells in dense value order), `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read). |
@@ -215,8 +215,8 @@ The *rules*; the measurements and original bugs behind them are in
 - A **reference-period / facet** dimension (type `0x0e`, e.g. "Year (2)") is **not**
   geography-folded: in 98-10-0077 *Year* is the **innermost in-page dimension** (the
   value run carries the 2020 then 2015 value consecutively). `ivt_f2_geo_count()`
-  (descriptor) gives the true 174 geographies; the legacy `ivt_geography_count()`
-  (0x1000 stride) is used only by the family detector.
+  (descriptor) gives the true 174 geographies (the legacy 0x1000-stride counter,
+  which mis-read 348 here, is retired).
 
 ## Dev workflow
 

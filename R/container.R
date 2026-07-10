@@ -1,19 +1,16 @@
-#' IVT container: page-directory anchor and the legacy geography counter
+#' IVT container: the page-directory anchor
 #'
 #' The unified decoder (`decode.R`) addresses the page directory positionally from
 #' `ivt_idx0(raw)` (the header pointer) using descriptor-derived strides, so it no
 #' longer needs the reverse-engineered per-geography geometry that used to live
-#' here. What remains is the directory anchor and the legacy 0x1000-stride
-#' geography counter (kept only for the family detector / regression checks).
+#' here (the legacy 0x1000-stride geography counter is retired; per-geography
+#' directory strides are computed by `ivt_layout()`).
 #'
 #' @keywords internal
 #' @noRd
 NULL
 
 IVT_IDX0_DEFAULT <- 37167L # fallback first page-directory offset (98-10-0241)
-IVT_IDX_STRIDE <- 0x1000   # 4096 bytes; the per-geography directory stride of the
-                           # large 2021 family-1 tables (not universal -- 98-10-0662
-                           # uses 0x80 -- so only the legacy counter relies on it)
 
 # First page-directory offset. The file states it in the header at
 # IVT_HDR_DIR_PTR = 558 -- but the u16 field holds only the LOW 16 BITS of the
@@ -39,36 +36,4 @@ ivt_idx0 <- function(raw) {
     }
   }
   IVT_IDX0_DEFAULT
-}
-
-# An index entry is valid when both size fields agree and the offset points into
-# the data region (not the header / not past EOF). Used only by the legacy counter.
-ivt_entry_valid <- function(off, s1, s2, n) {
-  s1 == s2 && s1 > 0 && off > 1e6 && off < n
-}
-
-#' Legacy 0x1000-stride geography counter.
-#'
-#' Counts contiguous valid page directories at the historical `IVT_IDX_STRIDE`.
-#' Correct for the large 2021 family-1 tables (e.g. 166 for 98-10-0241), but only
-#' a heuristic in general -- it reads 348 for 98-10-0077 (whose real per-geography
-#' stride is 0x2000) and 0 for small tables -- so the decoder uses the descriptor
-#' geography count (`ivt_f2_geo_count()`) instead. Retained for the family detector
-#' and regression tests.
-#' @keywords internal
-#' @noRd
-ivt_geography_count <- function(raw) {
-  n <- length(raw)
-  idx0 <- ivt_idx0(raw)
-  g <- 0L
-  repeat {
-    b <- idx0 + g * IVT_IDX_STRIDE
-    if (b + 8 > n) break
-    off <- rd_u32(raw, b)
-    s1 <- rd_u16(raw, b + 4L)
-    s2 <- rd_u16(raw, b + 6L)
-    if (!ivt_entry_valid(off, s1, s2, n)) break
-    g <- g + 1L
-  }
-  g
 }

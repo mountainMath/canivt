@@ -402,5 +402,6 @@ original bugs behind each rule.
   data; the high nibble only changes the pad/`0xFF` trailer length.
 - **A reference-period / facet dimension (`0x0e`) is not geography-folded:** in 98-10-0077
   *Year* is the innermost in-page dimension (the value run carries 2020 then 2015
-  consecutively). The legacy `ivt_geography_count()` (0x1000 stride) returns 348 here
-  only as an artefact of striding a directory whose real per-geography stride is 0x2000.
+  consecutively). The legacy `ivt_geography_count()` (0x1000 stride, since removed)
+  returned 348 here only as an artefact of striding a directory whose real
+  per-geography stride is 0x2000.

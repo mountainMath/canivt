@@ -370,12 +370,6 @@ ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L, relaxed = FALSE)
   cbind(off = offs, len = lens)
 }
 
-# Decode the block directory a header `slot` points at (`slot` holds the directory's
-# start offset). Kept for the family detector / legacy callers.
-ivt_f2_read_block_dir <- function(raw, slot, max_entries = 8000L) {
-  ivt_f2_read_dir_at(raw, rd_u32(raw, slot), max_entries)
-}
-
 # Does a decoded directory `d` list the geography dictionary block (`GEO_NAME_EN`)?
 ivt_f2_dir_has_geo <- function(raw, d) {
   if (is.null(d)) return(FALSE)
@@ -1412,6 +1406,12 @@ IVT_HDR_CODEBOOK_PTR <- 572L   # u32: codebook region start
 #' table that follows (codebook sub-blocks, dimension member blocks, the notes
 #' block) tags entries with a type byte (16 = member/data block, 15 = notes); those
 #' offsets are format-specific and not part of this fixed-offset map.
+#'
+#' This is a DIAGNOSTIC / documentation entry point, not part of the decode path:
+#' it is the reference implementation of the header map described in
+#' `inst/notes/ivt-format.md` ("Header layout map") and is exercised by the header
+#' regression tests. The decode path reads the same fields through its own
+#' anchors (`ivt_idx0()`, `ivt_f2_descriptor()`, `ivt_f2_find_directory()`).
 #'
 #' @keywords internal
 #' @noRd

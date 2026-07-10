@@ -20,14 +20,12 @@
 #' @noRd
 NULL
 
-# Default geos-per-page / presence-record size for the original 3-dimension
-# reference tables (98-10-0023, 1003011: 4 geos/page, 64-byte records). Both are
-# now *computed* per file from the header descriptor (`ivt_f2_geos_per_page()`,
-# `ivt_f2_rec_bytes()`) so arbitrary-dimension tables decode; these remain only as
-# fallbacks when the descriptor is unavailable.
+# Default geos-per-page for the original 3-dimension reference tables
+# (98-10-0023, 1003011: 4 geos/page). It is *computed* per file from the header
+# descriptor (`ivt_f2_geos_per_page()`; the presence-record size comes from
+# `ivt_f2_bit_layout()`) so arbitrary-dimension tables decode; this remains only
+# as the fallback when the descriptor is unavailable.
 IVT_F2_GEOS_PER_PAGE <- 4L
-IVT_F2_REC_BYTES     <- 64L                  # one presence record per geography
-IVT_F2_PRESENCE_LEN  <- IVT_F2_GEOS_PER_PAGE * IVT_F2_REC_BYTES  # 256
 
 # A family-2 page marker is `[b0] 01 [b2] [b3]` where b0's high nibble is 0x8 or
 # 0xa (the plain vs 0xFF-run variants, as in family 1) and its low nibble is the

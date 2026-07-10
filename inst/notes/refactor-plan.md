@@ -29,22 +29,27 @@ fallbacks — run it for every step below.
   now appends the umbrella itself (warning **and** strict-mode `_error`
   classes); the manual appends at the call sites are gone.
 
-## 2. Dead code to retire
+## 2. Dead code to retire — DONE 2026-07-10
 
 Confirmed by grep: definition + tests only, no production callers.
 
-- [ ] `ivt_f2_read_block_dir()` (codebook-f2.R) — zero callers anywhere.
-- [ ] `IVT_F2_REC_BYTES` / `IVT_F2_PRESENCE_LEN` (container-f2.R) — only
-  reference each other; the comment mentions `ivt_f2_rec_bytes()`, which no
-  longer exists.
-- [ ] `ivt_geography_count()` + `ivt_entry_valid()` + `IVT_IDX_STRIDE`
-  (container.R) — one regression test only (`test-decode.R:54`); `ivt_family()`
-  no longer touches it (CLAUDE.md's "kept for the family detector" is stale).
-  Move into the test file or drop with the test rewritten against
-  `ivt_layout()`.
-- [ ] `ivt_f2_header_layout()` (codebook-f2.R) — test-only; either export
-  intent or fold the two test assertions onto its components.
-- [ ] Update CLAUDE.md / coverage.md "legacy counter" caveats when these go.
+- [x] `ivt_f2_read_block_dir()` (codebook-f2.R) — removed (zero callers;
+  coverage.md now names `ivt_f2_read_dir_at()`).
+- [x] `IVT_F2_REC_BYTES` / `IVT_F2_PRESENCE_LEN` (container-f2.R) — removed
+  (only referenced each other; the comment mentioned `ivt_f2_rec_bytes()`,
+  which no longer existed).
+- [x] `ivt_geography_count()` + `ivt_entry_valid()` + `IVT_IDX_STRIDE`
+  (container.R) — removed with the single regression assertion
+  (test-decode.R keeps the 174-geography fact and a comment recording the
+  348 artefact); `ivt_family()` had not used it since detection moved to
+  `ivt_f2_decodable()`.
+- [x] `ivt_f2_header_layout()` — KEPT deliberately: it is the reference
+  implementation of the header map documented in ivt-format.md ("Header
+  layout map") and the vignette, exercised by the header regression tests.
+  Its docstring now states it is a diagnostic/documentation entry point,
+  not part of the decode path.
+- [x] CLAUDE.md / coverage.md / ivt-format.md / decode-history.md "legacy
+  counter" caveats updated.
 
 ## 3. Per-read parse context (the enabling refactor)
 
