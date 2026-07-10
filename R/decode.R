@@ -68,7 +68,7 @@ IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 ivt_value_trailer <- function(b0, b2, b3 = 0x08L) {
   w <- bitwAnd(b0, 0x0FL)
   hi <- bitwAnd(b0, 0xF0L)
-  if (!w %in% c(2L, 4L, 8L) || !hi %in% c(0x80L, 0xa0L) ||
+  if (!w %in% IVT_MARKER_WIDTHS || !hi %in% c(0x80L, 0xa0L) ||
       !b3 %in% ivt_f2_marker_b3) {
     cli::cli_abort(
       "Unrecognised IVT page marker bytes {.val {sprintf('0x%02x .. 0x%02x', b0, b3)}}: cannot derive the value-run start.",
@@ -152,7 +152,7 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
   b3 <- as.integer(raw[off + 4L])
   w <- bitwAnd(b0, 0x0FL)
-  if (!w %in% c(2L, 4L, 8L)) {
+  if (!w %in% IVT_MARKER_WIDTHS) {
     cli::cli_abort(
       "Unrecognised IVT page marker byte {.val {sprintf('0x%02x', b0)}}: unknown value-width code.",
       class = "canivt_unknown_marker")
@@ -243,14 +243,14 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   for (k in 0:4095) {
     o <- idx0 + 8L * k
     if (o + 8L > n) break
-    off <- rd_u32(raw, o); s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
-    if (s1 != s2 || s1 <= 0L || off < 1L || off + 4L > n) next
-    if (!ivt_f2_is_marker(raw, off)) next
+    en <- ivt_dir_entry(raw, o, n)
+    if (is.null(en) || !en$marker) next
+    off <- en$off; s1 <- en$size
     valid <- valid + 1L
     b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
     b3 <- as.integer(raw[off + 4L])
     w <- bitwAnd(b0, 0x0FL)
-    if (!w %in% c(2L, 4L, 8L)) return(FALSE)
+    if (!w %in% IVT_MARKER_WIDTHS) return(FALSE)
     if (b0 < 0x80L) {
       # dense variant: `count` positional values right after the 4-byte header,
       # and the page fits its directory allocation EXACTLY (every dense corpus
@@ -292,11 +292,8 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   ostride <- lay$estride[ne]; ocount <- lay$ent_counts[ne]
   hi_k <- -1L
   for (k in (ocount * ostride - 1L):max(0L, ocount * ostride - 65536L)) {
-    o <- idx0 + 8L * k
-    if (o + 8L > n) next
-    off <- rd_u32(raw, o); s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
-    if (s1 == s2 && s1 > 0L && off >= 1L && off + 4L <= n &&
-        ivt_f2_is_marker(raw, off)) { hi_k <- k; break }
+    en <- ivt_dir_entry(raw, idx0 + 8L * k, n)
+    if (!is.null(en) && en$marker) { hi_k <- k; break }
   }
   hi_k >= 0L && (hi_k %/% ostride + 1L) * 2L > ocount
 }
@@ -329,11 +326,10 @@ ivt_decode <- function(raw, lay = NULL) {
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
   skipped <- 0L; skipped_ex <- character()
   for (r in seq_len(nrow(coord))) {
-    o <- idx0 + eidx[r] * 8L
-    if (o + 8L > n) next
-    off <- rd_u32(raw, o); s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
-    if (s1 != s2 || s1 <= 0L || off < 1L || off + 4L > n) next
-    if (!ivt_f2_is_marker(raw, off)) {
+    en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
+    if (is.null(en)) next
+    off <- en$off; s1 <- en$size
+    if (!en$marker) {
       # A valid directory entry (agreeing sizes, in-range offset) that does not
       # point at a known page marker is a page variant we cannot decode -- on
       # every validated table this never happens (0 entries corpus-wide except

@@ -167,14 +167,7 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
     ck <- ivt_f2_dim_dir_label_chunks(raw, cnt, dir, mk)
     if (!is.null(ck)) {
       en_first <- ivt_f2_dim_dict_en_first(raw, dir)
-      if (is.na(en_first)) {
-        diff <- which(ck[[1L]] != ck[[2L]])
-        en_first <- ivt_f2_frscore(ck[[1L]][diff]) <= ivt_f2_frscore(ck[[2L]][diff])
-        ivt_fallback(paste(
-          "Dimension {.val {nm}} carries no English Desc/Desc Fran schema block;",
-          "its English vs French label blocks were told apart by content score,",
-          "not the schema order."))
-      }
+      if (is.na(en_first)) en_first <- ivt_f2_label_lang_fallback(nm, ck[[1L]], ck[[2L]])
       en <- if (en_first) ck[[1L]] else ck[[2L]]
       fr <- if (en_first) ck[[2L]] else ck[[1L]]
       return(list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr)))
@@ -203,17 +196,22 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
     return(list(en = cand[[1L]], fr = NULL, name_fr = NA_character_))
   # assign languages by the dictionary schema order (English Desc / Desc Francais)
   en_first <- ivt_f2_dim_dict_en_first(raw, dir)
-  if (is.na(en_first)) {
-    diff <- which(cand[[1L]] != cand[[2L]])
-    en_first <- ivt_f2_frscore(cand[[1L]][diff]) <= ivt_f2_frscore(cand[[2L]][diff])
-    ivt_fallback(paste(
-      "Dimension {.val {nm}} carries no English Desc/Desc Fran schema block;",
-      "its English vs French label blocks were told apart by content score,",
-      "not the schema order."))
-  }
+  if (is.na(en_first)) en_first <- ivt_f2_label_lang_fallback(nm, cand[[1L]], cand[[2L]])
   en <- if (en_first) cand[[1L]] else cand[[2L]]
   fr <- if (en_first) cand[[2L]] else cand[[1L]]
   list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr))
+}
+
+# Language order of a dimension's two member-label blocks when the dictionary
+# schema block is absent: decided by content score (`ivt_f2_pick_en()`), loudly
+# -- the schema order (English Desc before Desc Francais) is the primary read.
+ivt_f2_label_lang_fallback <- function(nm, a, b) {
+  en_first <- ivt_f2_pick_en(a, b)$en_first
+  ivt_fallback(paste(
+    "Dimension {.val {nm}} carries no English Desc/Desc Fran schema block;",
+    "its English vs French label blocks were told apart by content score,",
+    "not the schema order."))
+  en_first
 }
 
 # Index of the directory entry holding a dimension's doubled-name marker block
@@ -233,12 +231,7 @@ ivt_f2_dir_marker_entry <- function(raw, nm, dir) {
     win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
     m <- ivt_f2_codebook_dim_markers(win, 0L)
     if (!nrow(m)) next
-    hit <- which(vapply(m$name, function(x) {
-      if (is.na(x)) return(FALSE)
-      j <- min(nchar(x), nchar(nm))
-      j >= 4L && substr(x, 1L, j) == substr(nm, 1L, j)
-    }, logical(1)))
-    if (length(hit)) return(r)
+    if (any(vapply(m$name, ivt_f2_name_match, logical(1), b = nm))) return(r)
     if (nchar(nm) >= 8L && grepl(nm, raw_to_latin1(win), fixed = TRUE))
       return(r)
   }
@@ -577,7 +570,7 @@ ivt_f2_dqf_legend <- function(raw) {
   while (i <= length(code)) {
     if (i < length(code) && code[i + 1L] == code[i]) {
       a <- text[i]; b <- text[i + 1L]
-      en_first <- ivt_f2_frscore(a) <= ivt_f2_frscore(b)
+      en_first <- ivt_f2_pick_en(a, b)$en_first
       out_code <- c(out_code, code[i])
       out_en <- c(out_en, if (en_first) a else b)
       out_fr <- c(out_fr, if (en_first) b else a)
@@ -605,11 +598,7 @@ ivt_f2_footnote_bitmap <- function(win) {
   nby <- ceiling(nbits / 16) * 2L                    # bitstream padded to u16
   if (nbits < 1L || 4L + nby > length(win)) return(integer(0))
   bm <- as.integer(win[5:(4L + nby)])
-  ev <- seq.int(1L, nby, 2L); od <- ev + 1L
-  sw <- bm; sw[ev] <- bm[od]; sw[od] <- bm[ev]       # byte-pair-swap
-  set <- which(bitwAnd(bitwShiftR(sw[(seq_len(nbits) - 1L) %/% 8L + 1L],
-                                  7L - (seq_len(nbits) - 1L) %% 8L), 1L) == 1L)
-  set
+  which(ivt_bits_pairswap_msb(bm, seq_len(nbits) - 1L))
 }
 
 # Footnotes read from the per-dimension slot directories, each attributed to its

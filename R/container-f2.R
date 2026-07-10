@@ -46,8 +46,14 @@ IVT_F2_GEOS_PER_PAGE <- 4L
 # cells stored as literal zeros; `count` may exceed the grid for zero padding).
 # No presence record, no trailer, no head -- bytes 3-4 are the value COUNT, not
 # b2/b3, so the whole-marker test cannot constrain them beyond count > 0.
-ivt_f2_marker_b0 <- c(0x82L, 0x84L, 0x88L, 0xa2L, 0xa4L, 0xa8L)
-ivt_f2_marker_b0_dense <- c(0x02L, 0x04L, 0x08L)
+# The marker byte model, single-sourced: b0's LOW nibble is the value-width
+# code (int16 / int32 / float64), its HIGH nibble the page variant -- 0x8
+# plain, 0xa the 0xFF-run/mask-tail variant, 0x0 the dense variant. The sets
+# below are DERIVED from that decomposition, and `ivt_value_trailer()`
+# (decode.R) validates the same nibbles, so the two can never drift.
+IVT_MARKER_WIDTHS <- c(2L, 4L, 8L)
+ivt_f2_marker_b0 <- as.integer(outer(IVT_MARKER_WIDTHS, c(0x80L, 0xa0L), "+"))
+ivt_f2_marker_b0_dense <- IVT_MARKER_WIDTHS
 ivt_f2_marker_b3 <- c(0x08L, 0x09L, 0x0aL, 0x0cL)
 ivt_f2_is_marker_byte0 <- function(b) b %in% ivt_f2_marker_b0
 
@@ -65,6 +71,22 @@ ivt_f2_is_marker <- function(raw, off) {
 # former hard-coded six-marker trailer table lived here; the formula reproduces
 # it exactly.
 
+# Read + validate the 8-byte directory entry at 0-based offset `o`:
+# `[u32 off][u16 size][u16 size]`, the two sizes agreeing and positive, the
+# offset in range. THE entry shape shared by the page directory, the
+# per-dimension block directories and the master directory. Returns
+# list(off, size, marker) -- `marker` telling whether `off` points at a page
+# marker, which callers that must distinguish "invalid entry" from "valid
+# entry at an undecodable page" (`ivt_decode()`'s loud skip) check separately
+# -- or NULL when the entry does not validate.
+ivt_dir_entry <- function(raw, o, n = length(raw)) {
+  if (o + 8L > n) return(NULL)
+  off <- rd_u32(raw, o)
+  s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
+  if (is.na(off) || s1 != s2 || s1 <= 0L || off < 1L || off + 4L > n) return(NULL)
+  list(off = off, size = s1, marker = ivt_f2_is_marker(raw, off))
+}
+
 # A directory record is valid when both size fields agree, the size is positive,
 # and the offset points at a page marker past the fixed header region. (The
 # floor used to be a hard-coded 1e5, a content guess from the big census files;
@@ -72,13 +94,8 @@ ivt_f2_is_marker <- function(raw, off) {
 # start at ~7 KB, so the perfectly valid header pointer was rejected and the
 # marker-scan fallback found only the 6 of 22 pages above 100 KB.)
 ivt_f2_entry_valid <- function(raw, o, n) {
-  if (o + 8L > n) return(FALSE)
-  s1 <- rd_u16(raw, o + 4L)
-  s2 <- rd_u16(raw, o + 6L)
-  if (s1 != s2 || s1 <= 0L) return(FALSE)
-  off <- rd_u32(raw, o)                      # u32 at o
-  if (off < 1024L || off + 4 > n) return(FALSE)
-  ivt_f2_is_marker(raw, off)
+  e <- ivt_dir_entry(raw, o, n)
+  !is.null(e) && e$marker && e$off >= 1024L
 }
 
 # Header field (0-based): u16 pointer to the page-directory start. The file states

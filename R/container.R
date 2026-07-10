@@ -29,10 +29,9 @@ ivt_idx0 <- function(raw) {
     lo <- rd_u16(raw, IVT_HDR_DIR_PTR)
     for (k in 0:max(0L, (n - lo) %/% 65536L)) {
       off <- lo + k * 65536L
-      if (off <= 0L || off + 8L > n) next
-      e <- rd_u32(raw, off); s1 <- rd_u16(raw, off + 4L); s2 <- rd_u16(raw, off + 6L)
-      if (s1 == s2 && s1 > 0L && e > 0L && e + 4L <= n && ivt_f2_is_marker(raw, e))
-        return(off)
+      if (off <= 0L) next
+      en <- ivt_dir_entry(raw, off, n)
+      if (!is.null(en) && en$marker) return(off)
     }
   }
   IVT_IDX0_DEFAULT

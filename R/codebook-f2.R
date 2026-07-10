@@ -211,13 +211,7 @@ ivt_f2_codebook_dim_markers <- function(raw, search_start) {
 # truncated harder than the other, so match when the shorter is a prefix of the
 # longer (>= 4 shared characters). Returns the matched descriptor dimension or NULL.
 ivt_f2_match_dim <- function(name, dims) {
-  if (is.na(name) || !nzchar(name)) return(NULL)
-  for (d in dims) {
-    a <- d$name
-    if (is.null(a) || is.na(a) || !nzchar(a)) next
-    k <- min(nchar(a), nchar(name))
-    if (k >= 4L && substr(a, 1L, k) == substr(name, 1L, k)) return(d)
-  }
+  for (d in dims) if (ivt_f2_name_match(d$name, name)) return(d)
   NULL
 }
 
@@ -546,22 +540,12 @@ ivt_f2_geo_root_dir <- function(raw, n_geo) {
   }
   npair <- length(vals) %/% 2L
   if (npair < 2L) return(NULL)                       # need at least display + GEO_NAME
-  pick <- function(a, b) {                           # return list(en, fr)
-    diff <- which(a != b)
-    if (ivt_f2_frscore(a[diff]) <= ivt_f2_frscore(b[diff])) list(en = a, fr = b)
-    else list(en = b, fr = a)
-  }
-  # schema field stem -> output column, by prefix in either direction (stems may be
-  # stored truncated, e.g. GEO_LEVEL_DES vs GEO_LEVEL); same rule as ivt_f2_geo_slot_map.
-  stem_col <- function(stem) {
-    hit <- which(startsWith(stem, IVT_F2_ATTR_FIELD) | startsWith(IVT_F2_ATTR_FIELD, stem))
-    if (length(hit)) names(IVT_F2_ATTR_FIELD)[hit[1L]] else NA_character_
-  }
-  pr <- lapply(seq_len(npair), function(k) pick(vals[[2L * k - 1L]], vals[[2L * k]]))
+  pr <- lapply(seq_len(npair), function(k)
+    ivt_f2_pick_en(vals[[2L * k - 1L]], vals[[2L * k]]))
   out <- list(geo_label = pr[[1L]]$en, geo_label_fr = pr[[1L]]$fr)
   for (i in seq_along(schema)) {
     if (i + 1L > npair) break
-    col <- stem_col(schema[i])                       # schema stem -> output column
+    col <- ivt_f2_stem_col(schema[i])                # schema stem -> output column
     if (is.na(col)) next
     out[[col]] <- pr[[i + 1L]]$en
     if (col == "geo_name") out[["geo_name_fr"]] <- pr[[i + 1L]]$fr
@@ -627,11 +611,7 @@ ivt_f2_geo_simple_schema <- function(raw, n_geo, blocks, search_start) {
   geo <- ivt_f2_geo_dim(if (is.null(d)) NULL else d$dims)   # geography is dim 1
   if (is.null(geo)) return(NULL)
   markers <- ivt_f2_codebook_dim_markers(raw, search_start)
-  hit <- which(vapply(markers$name, function(nm) {
-    if (is.na(nm)) return(FALSE)
-    k <- min(nchar(nm), nchar(geo$name))
-    k >= 4L && substr(nm, 1L, k) == substr(geo$name, 1L, k)
-  }, logical(1)))
+  hit <- which(vapply(markers$name, ivt_f2_name_match, logical(1), b = geo$name))
   if (!length(hit)) return(NULL)
   geomk <- markers$offset[hit[1]]
   after <- Filter(function(b) b$start > geomk && length(b$texts) == n_geo, blocks)
@@ -856,6 +836,16 @@ IVT_F2_ATTR_FIELD <- c(
   alt_geo_code = "ALT_GEO_CODE", pr_code = "PR_CODE", dqf_code = "DQF_CODE",
   dqf_note = "DQF_NOTE", tnr_short_form = "TNR_SHORT")
 
+# Output column for one schema field stem, by prefix match in either direction
+# (stems may be stored truncated: GEO_LEVEL_DES vs GEO_LEVEL, TNR_SHORT_FOR).
+# NA for a field outside the attribute set (e.g. TNR_LONG_FORM -- consumed
+# positionally and skipped). `ivt_f2_geo_slot_map()` applies the same matching
+# rule in the field -> slot direction.
+ivt_f2_stem_col <- function(stem) {
+  hit <- which(startsWith(stem, IVT_F2_ATTR_FIELD) | startsWith(IVT_F2_ATTR_FIELD, stem))
+  if (length(hit)) names(IVT_F2_ATTR_FIELD)[hit[1L]] else NA_character_
+}
+
 # Slot index (0-based) of every geography attribute, read from the file's schema
 # field list. Falls back to the fixed `IVT_F2_ATTR_SLOTS` order when the schema is
 # absent or does not name every attribute. Validated to reproduce `IVT_F2_ATTR_SLOTS`
@@ -1036,6 +1026,32 @@ ivt_f2_frscore <- function(v) {
     sum(grepl(IVT_F2_EN_TOK, v, ignore.case = TRUE))
 }
 
+# Assign languages to a pair of parallel member-value runs (the EN and FR
+# copies of one attribute / label block): English is the run with the lower
+# French-ness score over the members where the two DIFFER -- identical members
+# carry no signal, and a tie means the runs are identical (code-only
+# geographies), so either assignment is correct (English first). This is the
+# one shared implementation of the idiom formerly inlined at every
+# language-pair site. Returns list(en, fr, en_first).
+ivt_f2_pick_en <- function(a, b) {
+  d <- which(!is.na(a) & !is.na(b) & a != b)
+  en_first <- ivt_f2_frscore(a[d]) <= ivt_f2_frscore(b[d])
+  if (en_first) list(en = a, fr = b, en_first = TRUE)
+  else list(en = b, fr = a, en_first = FALSE)
+}
+
+# Do two stored name copies refer to the same dimension? The descriptor and
+# the codebook markers draw the name from the same doubled-name field, but
+# either copy may be truncated (the first descriptor copy caps at ~14 chars),
+# so match when the shorter is a prefix of the longer, sharing at least
+# `min_chars` characters. NA/empty never matches.
+ivt_f2_name_match <- function(a, b, min_chars = 4L) {
+  if (is.null(a) || is.null(b) || is.na(a) || is.na(b) ||
+      !nzchar(a) || !nzchar(b)) return(FALSE)
+  k <- min(nchar(a), nchar(b))
+  k >= min_chars && substr(a, 1L, k) == substr(b, 1L, k)
+}
+
 # Locate one group's four name runs (display EN/FR-order pair `da`/`db`, GEO_NAME
 # pair `ga`/`gb`) as member-parallel value vectors. Returns NULL if the anchor
 # falls out of range. Language is NOT assigned here (see `ivt_f2_geo_names()`).
@@ -1081,8 +1097,7 @@ ivt_f2_geo_names <- function(blocks, groups, dguid_slot, n_geo) {
   for (g in groups) {
     r <- ivt_f2_geo_name_runs(blocks, g, dguid_slot, n_geo)
     if (is.null(r)) next
-    d <- which(!is.na(r$da) & !is.na(r$db) & r$da != r$db)
-    a_en <- ivt_f2_frscore(r$da[d]) <= ivt_f2_frscore(r$db[d])
+    a_en <- ivt_f2_pick_en(r$da, r$db)$en_first
     idx <- r$ms + seq_len(r$mcount) - 1L
     out$geo_label[idx]    <- if (a_en) r$da else r$db
     out$geo_label_fr[idx] <- if (a_en) r$db else r$da
@@ -1169,10 +1184,6 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   nattr <- length(schema) + 1L                       # display Member Name + schema fields
   if (k != 2L * nattr * sum(sizes)) return(NULL)     # irregular layout -> fall back
   starts <- cumsum(c(1L, utils::head(sizes, -1L) * 256L))   # member start per group
-  stem_col <- function(stem) {
-    hit <- which(startsWith(stem, IVT_F2_ATTR_FIELD) | startsWith(IVT_F2_ATTR_FIELD, stem))
-    if (length(hit)) names(IVT_F2_ATTR_FIELD)[hit[1L]] else NA_character_
-  }
   cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr", "dguid",
             "geo_level", "geo_type", "geo_type_abbr", "prov_abbr", "alt_geo_code",
             "pr_code", "dqf_code", "dqf_note", "dqf_note_strict", "tnr_short_form")
@@ -1225,17 +1236,15 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
       pa <- pos; pb <- pos + G; pos <- pos + 2L * G   # run A then run B (G chunks each)
       va <- place(pa); vbv <- place(pb)
       if (is.null(va) || is.null(vbv)) return(NULL)   # unalignable dense block
-      col <- if (a == 1L) "geo_label" else stem_col(schema[a - 1L])
+      col <- if (a == 1L) "geo_label" else ivt_f2_stem_col(schema[a - 1L])
       if (is.na(col)) next                            # unmapped field (e.g. TNR_LONG_FORM)
-      dd <- which(!is.na(va) & !is.na(vbv) & va != vbv)
-      a_en <- ivt_f2_frscore(va[dd]) <= ivt_f2_frscore(vbv[dd])
-      en <- if (a_en) va else vbv; fr <- if (a_en) vbv else va
+      p <- ivt_f2_pick_en(va, vbv)
       idx <- s:(s + M - 1L)
-      out[[col]][idx] <- en
-      if (a == 1L) out[["geo_label_fr"]][idx] <- fr
-      if (col == "geo_name") out[["geo_name_fr"]][idx] <- fr
+      out[[col]][idx] <- p$en
+      if (a == 1L) out[["geo_label_fr"]][idx] <- p$fr
+      if (col == "geo_name") out[["geo_name_fr"]][idx] <- p$fr
       if (col == "dqf_note")                          # per-slot provenance (see below)
-        out[["dqf_note_strict"]][idx] <- place(if (a_en) pa else pb, strict_only = TRUE)
+        out[["dqf_note_strict"]][idx] <- place(if (p$en_first) pa else pb, strict_only = TRUE)
     }
   }
   # every member must be accounted for by the display name or the DGUID (an absent
@@ -1651,11 +1660,7 @@ ivt_f2_geo_marker_region <- function(raw) {
   if (is.null(d) || !length(d$dims)) return(NULL)
   geo <- ivt_f2_geo_dim(d$dims, ivt_f2_geo_dim_index(raw, d))
   if (is.null(geo) || is.null(geo$name) || is.na(geo$name)) return(NULL)
-  is_geo_mk <- function(nm) {
-    if (is.na(nm)) return(FALSE)
-    k <- min(nchar(nm), nchar(geo$name))
-    k >= 4L && substr(nm, 1L, k) == substr(geo$name, 1L, k)
-  }
+  is_geo_mk <- function(nm) ivt_f2_name_match(nm, geo$name)
   span <- ivt_f2_geo_dir_span(raw)
   if (!is.null(span) && span[2] > span[1]) {
     win <- raw[(span[1] + 1L):span[2]]
@@ -1959,9 +1964,7 @@ ivt_f2_geo_inline_dir <- function(raw) {
   # blocks, so geo_name_fr collapses to geo_name (French falls back to it in tidy).
   en_i <- cmb[1L]; fr_i <- NA_integer_
   if (length(cmb) >= 2L) {
-    a <- runs[[cmb[1L]]]; b <- runs[[cmb[2L]]]
-    dd <- which(!is.na(a) & !is.na(b) & a != b)
-    if (ivt_f2_frscore(a[dd]) <= ivt_f2_frscore(b[dd])) {
+    if (ivt_f2_pick_en(runs[[cmb[1L]]], runs[[cmb[2L]]])$en_first) {
       en_i <- cmb[1L]; fr_i <- cmb[2L]
     } else {
       en_i <- cmb[2L]; fr_i <- cmb[1L]
@@ -2163,8 +2166,7 @@ ivt_f2_geographies <- function(raw) {
     names(g)[names(g) == "dguid"] <- "geo_uid"
   }
   g <- ivt_f2_flag_dqf_note_truncation(g)
-  front <- intersect(c("member_id", "geo_label", "geo_name", "geo_uid"), names(g))
-  g[, c(front, setdiff(names(g), front))]
+  g[, ivt_geo_col_order(names(g))]
 }
 
 # --- Header dimension descriptor ----------------------------------------------

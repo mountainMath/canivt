@@ -108,44 +108,55 @@ tests and detection gate do). Design points:
   fragmented dense tail can flunk the `k == 2·nattr·Σsizes` count and
   needlessly trip the stride fallback). One shared "read directory entry:
   strict, else scanner (tracked)" helper replaces three inlined loops.
-- [ ] **EN/FR pair pick ×7**: the `diff <- which(a != b);
-  frscore(a[diff]) <= frscore(b[diff])` idiom is inlined in
-  `ivt_f2_dim_dir_label1()` twice (including a verbatim-duplicated fallback
-  warning), `ivt_f2_geo_root_dir()`, `ivt_f2_geo_names()`,
-  `ivt_f2_geo_attrs_dir()`, `ivt_f2_geo_inline_dir()`, `ivt_f2_dqf_legend()`
-  and the identity readers. One `ivt_f2_pick_en(a, b)` →
-  `list(en, fr, en_first)`.
-- [ ] **Name prefix-match ×4** ("shorter is a prefix of the longer, ≥4
-  chars"): `ivt_f2_match_dim()`, `ivt_f2_dir_marker_entry()`,
-  `ivt_f2_geo_simple_schema()`, `ivt_f2_geo_marker_region()` `is_geo_mk`.
-- [ ] **Schema-stem → column mapping ×3**: identical `stem_col()` closures in
-  `ivt_f2_geo_root_dir()` and `ivt_f2_geo_attrs_dir()`, plus the inverted
-  match in `ivt_f2_geo_slot_map()`.
-- [ ] **Pair-swap + MSB-first bit reads ×2 (+1 partial)**:
-  `ivt_f2_record_present()` (decode-f2.R) and `ivt_f2_footnote_bitmap()`
-  (dimdir.R) reimplement the same swap/shift; the DGUID `probe()`
-  (codebook-f2.R) reimplements the dense `[81 01]` header skip that
-  `ivt_f2_dir_entry_members()` already knows.
-- [ ] **Directory-entry validation ×5**: the `[u32 off][u16 s1][u16 s2]`,
-  `s1 == s2 && s1 > 0 && off in-range && is_marker` check is inlined in
-  `ivt_idx0()`, `ivt_page_preflight()` (twice), `ivt_decode()` and
-  `ivt_f2_entry_valid()`. One reader returning `list(off, size)`/NULL.
-- [ ] **The page-marker byte model is expressed twice**: `ivt_f2_marker_b0`
-  (container-f2.R) and `ivt_value_trailer()`'s nibble decomposition
-  (`w ∈ {2,4,8} && hi ∈ {0x80,0xa0}`, decode.R) describe the same set
-  independently — they agree today but can drift. Define the marker test once
-  via the nibble model.
+- [x] **EN/FR pair pick** (2026-07-10): `ivt_f2_pick_en(a, b)` →
+  `list(en, fr, en_first)` replaces the inlined idiom in
+  `ivt_f2_dim_dir_label1()` (both sites, via the shared loud
+  `ivt_f2_label_lang_fallback()` — the verbatim-duplicated warning is gone),
+  `ivt_f2_geo_root_dir()`, `ivt_f2_geo_names()`, `ivt_f2_geo_attrs_dir()`,
+  `ivt_f2_geo_inline_dir()`, `ivt_f2_dqf_legend()` and
+  `ivt_f2_legacy_identity()`. (`ivt_f2_inline_table()`'s strict-inequality
+  variant and `ivt_f2_master_identity()`'s which.min-over-candidates shape
+  stay explicit.)
+- [x] **Name prefix-match** (2026-07-10): `ivt_f2_name_match(a, b)` replaces
+  the four copies in `ivt_f2_match_dim()`, `ivt_f2_dir_marker_entry()`,
+  `ivt_f2_geo_simple_schema()`, `ivt_f2_geo_marker_region()`.
+- [x] **Schema-stem → column mapping** (2026-07-10): `ivt_f2_stem_col()`
+  beside `IVT_F2_ATTR_FIELD` replaces the two identical closures;
+  `ivt_f2_geo_slot_map()` keeps its field→slot direction (same rule, noted).
+- [x] **Pair-swap + MSB-first bit reads** (2026-07-10):
+  `ivt_bits_pairswap_msb(bytes, bit)` (decode-f2.R) now backs both
+  `ivt_f2_record_present()` and `ivt_f2_footnote_bitmap()`. The DGUID
+  `probe()`'s dense-header skip stays (it is a cheap O(1) prefix probe, not a
+  bitstream read).
+- [x] **Directory-entry validation** (2026-07-10): `ivt_dir_entry(raw, o, n)`
+  → `list(off, size, marker)`/NULL (container-f2.R) replaces the five inlined
+  copies in `ivt_idx0()`, `ivt_page_preflight()` (×2), `ivt_decode()` and
+  `ivt_f2_entry_valid()` (which adds its 1024 header floor on top).
+- [x] **Marker byte model single-sourced** (2026-07-10): `ivt_f2_marker_b0` is
+  now DERIVED from `IVT_MARKER_WIDTHS {2,4,8} × high nibble {0x8,0xa}`; the
+  width checks in `ivt_value_trailer()` / `ivt_decode_page()` /
+  `ivt_page_preflight()` use the same constant, so the two expressions of the
+  model can no longer drift.
 - [ ] **`ivt_f2_dim_dir_label1()` / `ivt_f2_dim_dir_ordinal1()`** share the
   entire candidate-entry walk (len window, `ivt_find_member_blocks`,
   `cnt..cnt+8` size gate, trailing-`cnt` slice); factor a shared member-array
   iterator (label1 skips ordinal blocks, ordinal1 keeps permutations). Both
   should also try the strict entry parse first (see strict-first above).
-- [ ] **Geography column ordering ×3**: the `ivt_f2_geo_attrs_dir()` tibble,
-  `geo_cols` in `ivt_f2_metadata()`, `front` in `ivt_f2_geographies()`. One
-  `IVT_GEO_COLS` constant.
-- [ ] **uid naming**: inline readers emit `geouid`, attrs emit `dguid`,
-  renamed to `geo_uid` at two different downstream sites. Emit `geo_uid` at
-  the source; drop both renames.
+- [x] **Geography column ordering** (2026-07-10): `IVT_GEO_COLS` +
+  `ivt_geo_col_order()` (read-f2.R) now order both `metadata$geographies` and
+  `ivt_f2_geographies()` identically (the documented leading schema
+  member_id/label/name/uid first, then the French copies, then attributes;
+  undecoded columns skipped, extras like the flow sides / has_data appended).
+  The two entry points previously imposed *different* orders. (`ivt_f2_geo_attrs_dir()`'s internal tibble keeps its own order —
+  it feeds through the shared ordering at the boundary.)
+- [x] **uid naming — resolved as WON'T DO** (2026-07-10): the internal reader
+  columns (`dguid` in the attribute table, `geouid` in the inline table)
+  deliberately mirror the file's own field vocabulary (schema DGUID vs the
+  bare pre-DGUID GEOUID) and are asserted throughout the test suite as the
+  reader contract; the public surface is already uniformly `geo_uid`, renamed
+  at exactly the two path boundaries (`ivt_f2_geo_light()`,
+  `ivt_f2_geographies()`). Renaming at source would be wide churn for no
+  behavioral gain.
 
 ## 5. Harmonization
 

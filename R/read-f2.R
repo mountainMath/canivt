@@ -231,8 +231,7 @@ ivt_f2_legacy_identity <- function(raw) {
       if (length(p) >= 2) trimws(p[2]) else NA_character_)
   }
   e <- split2(rd(IVT_HDR_TITLE_EN_PTR)); f <- split2(rd(IVT_HDR_TITLE_FR_PTR))
-  if (!is.na(e[2]) && !is.na(f[2]) && e[2] != f[2] &&
-      ivt_f2_frscore(e[2]) > ivt_f2_frscore(f[2])) {
+  if (!ivt_f2_pick_en(e[2], f[2])$en_first) {          # NA / equal titles: no swap
     tmp <- e; e <- f; f <- tmp
   }
   list(product_id = e[1], title_en = e[2], title_fr = f[2], universe = NA_character_)
@@ -395,6 +394,20 @@ ivt_f2_attach_legacy_refs <- function(footnotes, dims, geo_names) {
   })
 }
 
+# Canonical geography column order, shared by `metadata$geographies` and the
+# full attribute table (`ivt_f2_geographies()`): the KEY columns first
+# (member_id, display label, schema name, uid -- the documented leading
+# schema), then the French copies, then the attribute set. Columns a vintage
+# does not store are skipped; decoded columns outside the set (the flow sides
+# geo_res_*/geo_work_*, has_data) follow in their own order.
+IVT_GEO_COLS <- c("member_id", "geo_label", "geo_name", "geo_uid",
+                  "geo_label_fr", "geo_name_fr", "geo_level", "geo_type",
+                  "geo_type_abbr", "prov_abbr", "alt_geo_code", "pr_code",
+                  "dqf_code", "dqf_note", "dqf_note_truncated", "tnr_short_form")
+
+ivt_geo_col_order <- function(nms)
+  c(intersect(IVT_GEO_COLS, nms), setdiff(nms, IVT_GEO_COLS))
+
 # Read the full codebook metadata for ANY supported family. The descriptor-driven
 # dimension model and the codebook member/footnote scans are format-agnostic; only
 # the geography layout differs, and that is keyed off the header (`inline` for the
@@ -438,20 +451,17 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   # just as it did for the old NULL slot -- the uid-only chunked tables
   # (98-10-0023, the 2021 residence x work flow crosstabs) legitimately carry no
   # `geo_name` on the default path (names via read_ivt(geo_attributes = TRUE)).
-  geo_cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr",
-                "geo_uid", "geo_level", "geo_type", "geo_type_abbr",
-                "prov_abbr", "alt_geo_code", "pr_code", "dqf_code", "dqf_note",
-                "dqf_note_truncated", "tnr_short_form")
   n_members <- if (!is.null(g$geo_uid)) length(g$geo_uid)
                else if (!is.null(g$geo_name)) length(g$geo_name)
                else if (!is.na(n_geo)) as.integer(n_geo) else 0L
   geographies <- list(member_id = seq_len(n_members))
-  if (!is.null(g$geo_name)) geographies$geo_name <- g$geo_name
-  if (!is.null(g$geo_uid))  geographies$geo_uid  <- g$geo_uid
-  for (col in c(intersect(geo_cols, names(g)), setdiff(names(g), geo_cols))) {
-    if (col %in% c("geo_name", "geo_uid")) next
+  for (col in ivt_geo_col_order(setdiff(names(g), "member_id"))) {
     v <- g[[col]]
-    if (!is.null(v) && !all(is.na(v))) geographies[[col]] <- v
+    if (is.null(v)) next
+    # all-NA attribute columns are dropped; geo_name / geo_uid are kept even
+    # all-NA (their presence is the path marker downstream consumers key on)
+    if (!col %in% c("geo_name", "geo_uid") && all(is.na(v))) next
+    geographies[[col]] <- v
   }
   list(
     product_id        = info$product_id,

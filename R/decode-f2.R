@@ -48,12 +48,19 @@ ivt_f2_cell_grid <- function(counts, stride) {
   list(tuples = tuples + 1L, bit = as.integer(tuples %*% stride))
 }
 
+# Read bit positions `bit` (0-based) from a byte-pair-swapped, MSB-first
+# bitstream (`bytes` as an integer vector of even length). THE bitmap
+# convention of the container -- shared by the page presence records and the
+# codebook member bitmaps (`ivt_f2_footnote_bitmap()`). Returns a logical
+# vector aligned with `bit` (TRUE = bit set).
+ivt_bits_pairswap_msb <- function(bytes, bit) {
+  ev <- seq.int(1L, length(bytes), 2L); od <- ev + 1L
+  sw <- bytes; sw[ev] <- bytes[od]; sw[od] <- bytes[ev]
+  bitwAnd(bitwShiftR(sw[bit %/% 8L + 1L], 7L - (bit %% 8L)), 1L) == 1L
+}
+
 # Decode the presence of a single `rec_bytes`-byte record at 0-based offset `ps`:
 # byte-pair-swap the record, then read each precomputed cell `bit` MSB-first.
 # Returns a logical vector aligned with the cell grid (TRUE = cell present).
-ivt_f2_record_present <- function(raw, ps, rec_bytes, bit) {
-  rec <- as.integer(raw[(ps + 1L):(ps + rec_bytes)])
-  ev <- seq.int(1L, rec_bytes, 2L); od <- ev + 1L
-  sw <- rec; sw[ev] <- rec[od]; sw[od] <- rec[ev]
-  bitwAnd(bitwShiftR(sw[bit %/% 8L + 1L], 7L - (bit %% 8L)), 1L) == 1L
-}
+ivt_f2_record_present <- function(raw, ps, rec_bytes, bit)
+  ivt_bits_pairswap_msb(as.integer(raw[(ps + 1L):(ps + rec_bytes)]), bit)
