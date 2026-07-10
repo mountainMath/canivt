@@ -43,11 +43,25 @@ test_that("ivt_fallback warns with a classed condition", {
                  class = "canivt_skipped_pages")
 })
 
+test_that("a custom class never opts a fallback out of the umbrella class", {
+  # ivt_quietly(), strict mode and the corpus ledger all key on canivt_fallback,
+  # so ivt_fallback() appends it itself -- a caller passing only a subclass
+  # (canivt_skipped_pages, canivt_descriptor_reloc) still carries the umbrella.
+  expect_warning(ivt_fallback("pages missing", class = "canivt_skipped_pages"),
+                 class = "canivt_fallback")
+  expect_no_warning(ivt_quietly(ivt_fallback("probe", class = "canivt_skipped_pages")))
+})
+
 test_that("strict mode turns fallbacks into classed errors", {
   withr::local_options(canivt.strict = TRUE)
   expect_error(ivt_fallback("test fallback engaged"), class = "canivt_fallback_error")
   expect_error(ivt_fallback("pages missing", class = "canivt_skipped_pages"),
                class = "canivt_skipped_pages_error")
+  # the strict error carries the umbrella _error class too, so detection probes
+  # (ivt_quietly) read a refused custom-class fallback as "not found"
+  expect_error(ivt_fallback("pages missing", class = "canivt_skipped_pages"),
+               class = "canivt_fallback_error")
+  expect_null(ivt_quietly({ ivt_fallback("probe", class = "canivt_skipped_pages"); 1L }))
 })
 
 test_that("a geography count mismatch is a classed fallback condition", {

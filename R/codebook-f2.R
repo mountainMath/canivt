@@ -1822,7 +1822,7 @@ ivt_f2_geo_flow_dir <- function(raw) {
     "by the codes they carry (a few tail members recovered from the per-side name",
     "arrays). Member order is residence-major, SGC-code ascending (viewer-validated",
     "content-exact across 2011/2016 flow tables; the viewer re-sorts for display)."),
-    class = c("canivt_geo_flow", "canivt_fallback"))
+    class = "canivt_geo_flow")
   # SAFETY CHECK: every flow member must resolve to a residence + work name AND code.
   # A residual gap means a codebook block was mis-parsed and silently dropped/truncated
   # a member -- surface it LOUDLY (strict-mode error) instead of emitting NA metadata,
@@ -1835,7 +1835,7 @@ ivt_f2_geo_flow_dir <- function(raw) {
             "mis-parsed; those members carry NA geography metadata."),
       i = paste("{scan_blocks} block(s) fell back from the byte-exact parse to the",
                 "run-scanner; inspect those in the geography codebook.")),
-      class = c("canivt_geo_flow_gap", "canivt_fallback"))
+      class = "canivt_geo_flow_gap")
   tibble::tibble(member_id = seq_len(n_geo), geo_label = label,
                  geo_name = join(res_name, work_name),
                  geo_name_fr = join(res_fr, work_fr), geouid = uids,
@@ -2107,7 +2107,7 @@ ivt_f2_check_geo_count <- function(raw, got) {
     ivt_fallback(c(
       "Decoded {got} geographies but the header declares {want}.",
       i = "The geography codebook stitch may have dropped or duplicated a chunk."
-    ), class = c("canivt_geo_count", "canivt_fallback"))
+    ), class = "canivt_geo_count")
   }
   invisible(want)
 }
@@ -2127,7 +2127,7 @@ ivt_f2_check_geo_names <- function(geo_name) {
       paste("{nmiss} of {nvals} geographies decoded with no name -- a codebook",
             "block may have been mis-parsed and members dropped."),
       i = "The affected members carry NA geo_name; inspect the geography codebook."),
-      class = c("canivt_geo_name_gap", "canivt_fallback"))
+      class = "canivt_geo_name_gap")
   invisible(nmiss)
 }
 
@@ -2508,9 +2508,27 @@ ivt_f2_data_dims <- function(raw) {
   data <- d$dims[idx]
   if (!length(data)) return(list(counts = integer(0), slugs = character(0)))
   counts <- vapply(data, `[[`, 1L, "count")
-  slugs <- vapply(seq_along(data), function(i) ivt_dim_slug(data[[i]]$name, idx[i]), "")
-  if (anyDuplicated(slugs)) slugs <- make.unique(slugs, sep = "")
-  list(counts = as.integer(counts), slugs = slugs)
+  nms <- vapply(data, function(d)
+    if (is.null(d$name)) NA_character_ else as.character(d$name), "")
+  list(counts = as.integer(counts), slugs = ivt_dim_slugs(nms, idx))
+}
+
+# Column names `ivt_decode()` assigns outside the data-dimension slugs: the
+# geography member-id column (`ivt_layout()` slugs the geography dimension
+# "geo") and the cell value column appended after the id columns. A data
+# dimension whose leading word slugs to one of these -- "Value of dwelling" ->
+# "value" is a real census dimension -- would collide silently: `out$value <-`
+# overwrites the member-id column and `ivt_f2_tidy()`'s
+# `setdiff(names, c("geo", "value"))` then drops the dimension entirely.
+IVT_RESERVED_SLUGS <- c("geo", "value")
+
+# Slugs for the data dimensions at descriptor positions `idx`, made unique
+# against the reserved output names above AND each other (a colliding slug
+# gets a numeric suffix: "value" -> "value1").
+ivt_dim_slugs <- function(names, idx = seq_along(names)) {
+  slugs <- vapply(seq_along(names), function(i) ivt_dim_slug(names[[i]], idx[i]), "")
+  nres <- length(IVT_RESERVED_SLUGS)
+  make.unique(c(IVT_RESERVED_SLUGS, slugs), sep = "")[-seq_len(nres)]
 }
 
 # Generic, name-agnostic column slug for a data dimension at 1-based descriptor

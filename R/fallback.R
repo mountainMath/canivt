@@ -15,6 +15,11 @@
 #' @keywords internal
 #' @noRd
 ivt_fallback <- function(msg, class = "canivt_fallback", .envir = parent.frame()) {
+  # every fallback carries the umbrella class (subclass first), so a caller's
+  # custom class can never opt a path out of the canivt_fallback contract --
+  # ivt_quietly() muffling, strict-mode upgrade, and the corpus ledger's
+  # fallback assertions all key on it.
+  class <- union(class, "canivt_fallback")
   if (isTRUE(getOption("canivt.strict", FALSE))) {
     cli::cli_abort(c(msg, i = paste(
       "Strict mode ({.code options(canivt.strict = TRUE)}) refuses",

@@ -22,6 +22,9 @@ This folder is self-contained. Companion docs under `inst/notes/`:
   how each table/vintage was cracked, per-table validation records, and the
   derivations behind the key invariants. Not needed day-to-day; consult it for the
   *why* behind a rule.
+- [`refactor-plan.md`](inst/notes/refactor-plan.md) — the **consolidation /
+  harmonization backlog** from the 2026-07 parser review (dedup targets, the
+  per-read `ctx` refactor, fallback paths to retire). Check items off as they land.
 
 ## What works today
 
