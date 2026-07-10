@@ -174,13 +174,17 @@ tests and detection gate do). Design points:
   re-runs everything. One entry `ivt_f2_geographies(raw, full = FALSE)`; state
   the `n_geo <= 256` cost gate in metadata terms ("one group of one chunk",
   `length(sizes) == 1`).
-- [ ] **`ivt_idx0()` vs `ivt_f2_find_directory()`**: both anchor the page
-  directory from `@558`, but only `ivt_idx0()` knows the field stores the low
-  16 bits (the `+ k·65536` unwrap). `ivt_f2_dir_anchor_header()` does the
-  plain u16 read, so on a >64 KiB-directory file the metadata-side finder
-  falls to the loud marker scan (which still carries the elsewhere-removed
-  `mk >= 1e5` floor) for something the decode side resolves positionally.
-  Anchor `ivt_f2_find_directory()` on `ivt_idx0()`.
+- [x] **`ivt_idx0()` vs `ivt_f2_find_directory()`** (2026-07-11): the low-16-bit
+  `+ k·65536` unwrap now lives once in `ivt_f2_dir_anchor_header()`
+  (container-f2.R), and `ivt_idx0()` (container.R) is a thin wrapper over it
+  (unwrap → validated anchor, else the historical constant). Both the decode and
+  metadata sides now resolve a >64 KiB directory positionally instead of the
+  metadata finder falling to the loud marker scan (verified: 98100013 k=1 /
+  95F0250 k=2 give equal `ivt_idx0()` == `ivt_f2_dir_anchor_header()` ==
+  `ivt_f2_find_directory()$lo`, decodes unchanged). Validation now uses the
+  documented `>= 1024` header floor (`ivt_f2_entry_valid()`) on both sides. The
+  fallback marker scan's `mk >= 1e5` floor is now truly last-resort (only if
+  `@558` is absent/corrupt) and left as-is.
 - [ ] **Loudness of content-based language assignment**:
   `ivt_f2_dim_dir_label1()` warns when it falls back to `frscore` (no schema
   block), but the geography paths (`attrs_dir`, `geo_names`, `root_dir`,
@@ -193,36 +197,63 @@ tests and detection gate do). Design points:
 
 ## 6. Sharpening toward metadata-driven (retiring fallback paths)
 
-- [ ] **Decode the `[81 01]` dense bitstream** (highest-value sharpening).
-  `ivt_f2_dir_entry_members()` notes "the bitstream's per-member coding is not
-  yet decoded" and callers re-align dense values against the NA pattern of
-  *sibling plain arrays* — a heuristic with a bail-out (→ stride fallback).
-  The same writer's `[84 01]` footnote bitmap decodes as pair-swapped
-  MSB-first presence (`ivt_f2_footnote_bitmap()`); if the `81 01` bitstream is
-  the same convention, dense chunks become positional in their own right, the
-  sibling-alignment heuristic goes away, and a real format gap closes (then
-  update ivt-format.md / coverage.md / decode-history.md).
-- [ ] **Identify the doubled-name marker entry structurally, not by name.**
-  `ivt_f2_dir_marker_entry()` prefix-matches the descriptor name — which is
-  why the five-heuristic `ivt_f2_descriptor_name()` recovery stack is
-  load-bearing for label reads. Within a slot directory already validated by
-  index + `n_entries`, the marker block is the entry opening `81 02 02 00`
-  (the dictionary block has a different field count). If a structural scan
-  finds exactly one such entry per directory across the corpus, demote the
-  name match to a cross-check.
-- [ ] **`ivt_geo_arrays()` still hard-codes `"^2021[A-Z]"` and
-  `texts[1] == "Canada"`** (codebook.R) — the only remaining year/country
-  literals, against the project rule; reachable via `ivt_f2_geo_simple()`'s
-  content fallback. Minimum: use `IVT_F2_DGUID_RE` and drop the "Canada"
-  anchor (name block = the equal-length block that is neither DGUID-shaped nor
-  all-numeric). Better: verify `ivt_f2_geo_attrs_dir()` now covers every table
-  that needed it and retire the function.
-- [ ] **`ivt_f2_geo_schema()`'s ±128 KiB content window** carries the comment
-  "routed through a deeper pointer chain we do not decode yet" — likely stale
-  since `ivt_f2_dim_dir()`'s two-depth indirection landed. Verify on
-  98-10-0023 / 98-10-0174 whether `ivt_f2_geo_dict_block()` resolves through
-  the slot table; if so retire the window scan (it is not even loud today) or
-  make it loud.
+- [~] **Decode the `[81 01]` dense bitstream — INVESTIGATED, hypothesis
+  FALSIFIED** (2026-07-11). The premise was that the `[81 01]` bitstream might be
+  the same pair-swap/MSB-first *member*-presence convention as the `[84 01]`
+  footnote bitmap, which would make dense chunks positional in their own right and
+  retire the sibling-alignment heuristic. Measured on 98-10-0662's six bit-headed
+  dense geography arrays: it is **not** member-granular. For each entry
+  `nbits` (449, 446, 641, …) ≫ the ~91 members, and crucially the bitstream's
+  **popcount == the records-region byte length + 1** exactly (282 = 281+1,
+  279 = 278+1, 474 = 473+1, …), where the records region is `Σ(1 length byte +
+  text bytes)` over the packed records. So the bitstream is a **per-byte** map of
+  the packed records region, not a per-member presence map — it cannot place
+  members positionally, and understanding it fully would still need the record
+  lengths. The sibling-alignment heuristic (spread dense values into the NA
+  pattern of the entry's plain-array siblings) is the correct approach and already
+  decodes these **cell-exact** (98-10-0662: 91/91). Leaving it in place;
+  `ivt_f2_dir_entry_members()`'s comment is accurate. No format gap to close here.
+- [x] **Doubled-name marker entry identified STRUCTURALLY** (2026-07-11).
+  Confirmed the hypothesis empirically across the corpus: within a slot directory
+  already validated by index + `n_entries`, the marker is the entry that OPENS
+  with `81 02 02 00` **and carries a printable name** — and there is **never more
+  than one** such entry per directory (152 of 155 dimension directories have
+  exactly one; the other 3, the ord-08035 custom export, have none, exactly where
+  the descriptor name also fails). The `len ~16` nameless `81 02 02 00` stubs that
+  7 directories additionally carry are excluded (no printable run).
+  `ivt_f2_dir_marker_entry()` (dimdir.R) now resolves the marker structurally and
+  keeps the descriptor name only to disambiguate the never-observed >1-named case
+  (prefix match or the >=8-char SHORT/LONG cro-pair hit). Byte-identical to the old
+  name-match on all 155 directories; the win is robustness — a dimension whose name
+  is misread (NA or wrong) still resolves its labels (verified on 98-10-0241), so
+  the five-heuristic `ivt_f2_descriptor_name()` recovery is demoted from
+  load-bearing to a cross-check. Corpus ledger clean.
+- [x] **`ivt_geo_arrays()` retired** (2026-07-11) — took the plan's "Better"
+  path. A full-corpus branch trace of `ivt_f2_geo_light()` showed **no** table
+  ever reaches the content fallback (`2b-SIMPLE`): every file resolves via inline
+  (step 1), `attrs_dir` (step 2) or uid-only (step 3). So the last year/country
+  literals (`"^2021[A-Z]"`, `texts[1] == "Canada"`) went away by deletion rather
+  than by patching: `ivt_geo_arrays()` is gone from codebook.R and
+  `ivt_f2_geo_simple()` is now schema-only (`ivt_f2_geo_simple_schema()`).
+  Verified 98-10-0241 still returns 166 names/DGUIDs byte-identical, and the five
+  tables that used to *reach* the content path directly (94F0009 / 98-10-0044 /
+  2016387 / 0662 / 2016019) still decode full geography via their real branches.
+  (The minimum patch — a cardinality-based name block — was tried and rejected:
+  it picked the inline-combined block over the clean-names block, since the
+  `"Canada"` literal was silently disambiguating the two.)
+- [x] **`ivt_f2_geo_schema()`'s ±128 KiB content window — made LOUD, comment
+  de-staled** (2026-07-11). Verified across the whole corpus: all 12 schema'd
+  tables (incl. the big 98-10-0023 / 98-10-0174) resolve the geography dictionary
+  through the header slot-table `ivt_f2_geo_dict_block()` — the window scan fires
+  on **zero** tables, so the "routed through a deeper pointer chain we do not
+  decode yet" note was stale (the two-depth `ivt_f2_dim_dir()` indirection covers
+  it). Rather than retire (losing robustness on unseen layouts), kept it as a
+  genuine last-resort but fixed the real latent bug: it was a **silent**
+  content-heuristic scan, against the loud-fallback invariant. It now warns
+  `canivt_fallback` *only when it actually supplies a schema the slot table
+  could not* (so inline tables, which return NULL, stay quiet), and the comment
+  states it never fires on the current corpus. Schema output byte-identical on all
+  12 tables.
 
 ## Suggested order
 

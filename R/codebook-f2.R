@@ -450,10 +450,15 @@ ivt_f2_dir_entry_records <- function(raw, off, len) {
 #       chunk size.
 #   [81 01][u16 nbits][bitstream, u16-padded: 2*ceil(nbits/16) bytes][80|01]
 #       <records>   bit-headed DENSE array: records are unterminated `[len][text]`
-#       and absent members are skipped entirely (the bitstream's per-member coding
-#       is not yet decoded; the caller re-aligns the dense values with the NA
-#       pattern of the entry's plain siblings). The one-byte marker before the
-#       records is 0x80 or 0x01 (semantics unknown; both observed).
+#       and absent members are skipped entirely, so the caller re-aligns the dense
+#       values with the NA pattern of the entry's plain siblings. The bitstream is
+#       NOT a per-member presence map (unlike the `[84 01]` footnote bitmap):
+#       measured on 98-10-0662's dense arrays, `nbits` >> the member count and the
+#       popcount == the records-region byte length + 1, i.e. it is a per-BYTE map
+#       of the packed records region, not a per-member one -- so it cannot supply
+#       member positions and the sibling NA pattern is the right alignment (see
+#       refactor-plan.md §6.1). The one-byte marker before the records is 0x80 or
+#       0x01 (semantics unknown; both observed).
 #
 # Returns list(values, dense) -- `values` with NA holes for a plain array, the
 # packed values for a dense one -- or NULL when the entry does not carry either
@@ -565,15 +570,19 @@ ivt_f2_geo_schema_impl <- function(raw, tail_bytes = 600000L) {
   # given layout is skipped. Works on the small chunked tables (98-10-0013 / -0478).
   blk <- ivt_f2_geo_dict_block(raw)
   n <- length(raw)
+  via_window <- is.null(blk)
   if (!is.null(blk)) {
     s <- raw_to_latin1(raw[(blk[["off"]] + 1L):min(n, blk[["off"]] + blk[["len"]])])
   } else {
-    # Fallback (the big tail-codebook tables, whose dictionary is routed through a
-    # deeper pointer chain we do not decode yet): the dictionary sits near the
-    # codebook pointer but off-centre (~14 KB before to ~16 KB after), so search a
-    # generous window *centred* on it, anchored by the `GEO_NAME_EN` field name --
-    # not the old `[cb-8000, EOF]` half-window, which missed a dictionary lying more
-    # than 8 KB before the pointer and scanned ~18 MB on the big files.
+    # Last-resort content scan, for a layout whose geography block directory the
+    # header slot table did not resolve. On the whole local corpus the slot-table
+    # `ivt_f2_geo_dict_block()` above resolves EVERY schema'd table -- including the
+    # big tail-codebook ones (98-10-0023 / -0174), since `ivt_f2_dim_dir()`'s
+    # two-depth indirection landed -- so this branch never fires today (it used to
+    # carry the stale note "routed through a deeper pointer chain we do not decode
+    # yet"). Kept as a loud safety net for unseen files: the dictionary sits near
+    # the codebook pointer but off-centre (~14 KB before to ~16 KB after), so search
+    # a generous window *centred* on it, anchored by the `GEO_NAME_EN` field name.
     cb <- rd_u32(raw, IVT_HDR_CODEBOOK_PTR)
     if (!is.na(cb) && cb >= 1) {
       lo <- max(1L, as.integer(cb) - 131072L); hi <- min(n, as.integer(cb) + 131072L)
@@ -587,6 +596,11 @@ ivt_f2_geo_schema_impl <- function(raw, tail_bytes = 600000L) {
   win <- substr(s, m, m + 600L)
   en <- regmatches(win, gregexpr("[A-Z][A-Z0-9_]*_EN", win))[[1]]
   if (!length(en)) return(NULL)
+  if (via_window)
+    ivt_fallback(paste(
+      "The geography attribute schema (GEO_NAME_EN ...) was located by a content",
+      "scan of a byte window around the codebook pointer, not through the header",
+      "slot-table dictionary block -- the primary metadata path did not resolve it."))
   unique(sub("_EN$", "", en))
 }
 
@@ -625,28 +639,22 @@ ivt_f2_geo_simple_schema <- function(raw, n_geo, blocks, search_start) {
 
 # Cheap geography names + DGUIDs for tables whose geography codebook is a single
 # clean block per attribute (the small family-1 reference tables, e.g. 166
-# geographies in 98-10-0241). Prefers the schema-driven, content-free path
-# (`ivt_f2_geo_simple_schema()`); falls back to the content-based array detector
-# (`ivt_geo_arrays()`) for layouts without the marker/schema. Returns NULL when no
-# single length-`n_geo` name block exists -- the large family-2 tables (tens of
-# thousands of geographies) store the attributes attribute-major in 256-member
+# geographies in 98-10-0241), located schema-driven and content-free via
+# `ivt_f2_geo_simple_schema()` (each attribute array addressed by its schema
+# field name, not sniffed by content). Returns NULL when the schema does not
+# resolve a single length-`n_geo` name block -- the large family-2 tables (tens
+# of thousands of geographies) store the attributes attribute-major in 256-member
 # chunks, so their names need the slower `ivt_f2_geo_attributes()` path (via
-# read_ivt(geo_attributes = TRUE)) instead.
+# read_ivt(geo_attributes = TRUE)) instead. (The former content-based array
+# detector `ivt_geo_arrays()` -- with its "^2021"/"Canada" literals -- was
+# retired 2026-07-11: a full-corpus branch trace showed no table ever reached it
+# in `ivt_f2_geo_light()`; inline / attrs_dir / uid-only cover every file.)
 ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
   start <- max(0L, length(raw) - tail_bytes)
   blocks <- ivt_find_member_blocks(raw, start, min_records = 3L)
   if (!length(blocks)) return(NULL)
-  sd <- ivt_f2_geo_simple_schema(raw, n_geo, blocks, start)
-  if (!is.null(sd)) return(sd)
-  ga <- ivt_geo_arrays(blocks, n_geo)
-  if (is.null(ga$names)) return(NULL)
-  ivt_fallback(paste(
-    "Geography names were located by content (clean length-{n_geo} member",
-    "blocks in the codebook tail), not read positionally from a directory or",
-    "schema."))
-  list(name = ga$names$texts,
-       dguid = if (!is.null(ga$dguids)) ga$dguids$texts else NULL)
+  ivt_f2_geo_simple_schema(raw, n_geo, blocks, start)
 }
 
 # Light geography table for the metadata path, family-agnostic and located from

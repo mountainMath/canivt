@@ -275,8 +275,10 @@ units) and the directory entries (8-byte entry units).
   arrays **by schema slot/name** — DGUID and GEO_NAME are no longer found by sniffing
   a `"2021…"` prefix or a `"Canada"` first entry. DGUIDs are byte-identical to the
   legacy `"2021"` scan; `GEO_NAME` is now the canonical short name (e.g. `Corner
-  Brook`). Falls back to `ivt_geo_arrays()` for tables whose attribute arrays aren't
-  clean `n_geo`-blocks (0662).
+  Brook`). (The former content-based array detector `ivt_geo_arrays()`, with its
+  `"^2021"`/`"Canada"` literals, was retired 2026-07-11 — a full-corpus branch trace
+  showed no table ever reached it in `ivt_f2_geo_light()`; inline / `attrs_dir` /
+  uid-only cover every file, so `ivt_f2_geo_simple()` is now schema-only.)
   **Stage 2 (schema-absent tables, 1991 / 2006 / 2011 / 2016): done.** There are two
   storage strategies, not one: the 2021 census tables store geography as **separate
   schema-named arrays** (above), while every **schema-absent** table (older *and*, it

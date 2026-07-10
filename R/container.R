@@ -17,22 +17,12 @@ IVT_IDX0_DEFAULT <- 37167L # fallback first page-directory offset (98-10-0241)
 # offset (the directory start modulo 65536): tables whose directory sits past
 # 64 KiB wrap (98-10-0013's directory is at 44761 + 1*65536 -- its cell decode
 # was silently EMPTY under the unwrapped read; the 1996 table 95F0250XDB96001
-# needs k = 2). Recover the true start as the smallest offset with that residue
-# whose entry validates as a real page-directory record (sizes agree, offset
-# points at a page marker) -- for every table whose directory sits below 64 KiB
-# this is k = 0, the plain u16 read. Falls back to the historical constant when
-# no candidate validates (the page pre-flight then rejects the file rather than
-# decode from a wrong base).
+# needs k = 2). The low-16-bit unwrap + entry validation live in
+# `ivt_f2_dir_anchor_header()` (container-f2.R), shared with the metadata-side
+# page-directory finder. Falls back to the historical constant when no candidate
+# validates (the page pre-flight then rejects the file rather than decode from a
+# wrong base).
 ivt_idx0 <- function(raw) {
-  n <- length(raw)
-  if (n >= IVT_HDR_DIR_PTR + 2L) {
-    lo <- rd_u16(raw, IVT_HDR_DIR_PTR)
-    for (k in 0:max(0L, (n - lo) %/% 65536L)) {
-      off <- lo + k * 65536L
-      if (off <= 0L) next
-      en <- ivt_dir_entry(raw, off, n)
-      if (!is.null(en) && en$marker) return(off)
-    }
-  }
-  IVT_IDX0_DEFAULT
+  anchor <- ivt_f2_dir_anchor_header(raw)
+  if (!is.null(anchor)) anchor else IVT_IDX0_DEFAULT
 }

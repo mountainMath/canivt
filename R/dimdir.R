@@ -250,27 +250,42 @@ ivt_f2_label_lang_fallback <- function(nm, a, b) {
   en_first
 }
 
-# Index of the directory entry holding a dimension's doubled-name marker block
-# (`81 02 02 00` + the dimension's name; prefix-matched because the descriptor's
-# first name copy may be truncated). The cro custom exports store the marker
-# name as a SHORT/LONG pair ("Characteristics" `01 03 32` "Selected
-# Characteristics"): the first printable run is the short copy, so when no
-# run prefix-matches, a verbatim full-name hit anywhere inside a marker-bearing
-# entry also matches (>= 8 chars, and only entries that DO carry the
-# `81 02 02 00` marker -- label blocks containing "Total - <name>" cannot
-# qualify). 0 when no entry matches -- the caller then treats the directory as
-# not resolving this dimension.
+# Index of the directory entry holding a dimension's doubled-name marker block.
+# Identified STRUCTURALLY: within a slot directory already validated by index +
+# `n_entries`, the marker is the entry that OPENS with `81 02 02 00` and carries a
+# printable name. Across the whole corpus there is never more than one such entry
+# per directory (152 of 155 dimension directories have exactly one; the other 3 --
+# the ord-08035 custom export -- have none, exactly where the descriptor name also
+# fails to recover), so the marker resolves WITHOUT the descriptor name. That
+# demotes the five-heuristic `ivt_f2_descriptor_name()` recovery from load-bearing
+# to a mere cross-check for label reads: a dimension whose name is misread still
+# gets its labels as long as its slot directory carries the (unique) named marker.
+# Some directories also carry a small (len ~16) `81 02 02 00` stub with no name --
+# excluded because it yields no printable run. The descriptor name is kept only to
+# disambiguate the (never-yet-observed) case of >1 named marker in one directory --
+# prefix-matched, or a verbatim >=8-char hit for the SHORT/LONG cro name pair
+# ("Characteristics" / "Selected Characteristics"). 0 when no named marker exists
+# -- the caller then treats the directory as not resolving this dimension.
 ivt_f2_dir_marker_entry <- function(raw, nm, dir) {
+  named <- integer(0); named_at <- character(0)
   for (r in seq_len(nrow(dir))) {
-    len <- dir[r, "len"]
+    len <- dir[r, "len"]; off <- dir[r, "off"]
     if (len < 12L || len > 4000L) next
-    win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
-    m <- ivt_f2_codebook_dim_markers(win, 0L)
+    if (off + 4L > length(raw) ||
+        as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 3L]) != 0x02L || as.integer(raw[off + 4L]) != 0x00L) next
+    m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(length(raw), off + len)], 0L)
     if (!nrow(m)) next
-    if (any(vapply(m$name, ivt_f2_name_match, logical(1), b = nm))) return(r)
-    if (nchar(nm) >= 8L && grepl(nm, raw_to_latin1(win), fixed = TRUE))
-      return(r)
+    got <- m$name[!is.na(m$name) & nchar(m$name) >= 3L]
+    if (!length(got)) next
+    named <- c(named, r); named_at <- c(named_at, got[1L])
   }
+  if (length(named) == 1L) return(named[1L])          # the corpus case: unique
+  if (!length(named)) return(0L)
+  for (i in seq_along(named))                         # disambiguate by name
+    if (ivt_f2_name_match(named_at[i], nm) ||
+        (!is.na(nm) && nchar(nm) >= 8L && grepl(nm, named_at[i], fixed = TRUE)))
+      return(named[i])
   0L
 }
 

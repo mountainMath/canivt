@@ -65,23 +65,6 @@ ivt_table_info <- function(raw) {
   )
 }
 
-# Geography arrays: among the equal-length member blocks, the name block starts
-# with "Canada" and is not all-numeric; the DGUID block's entries all look like
-# "2021<letter><digits>".
-ivt_geo_arrays <- function(blocks, n) {
-  sized <- Filter(function(b) length(b$texts) == n, blocks)
-  name_block <- NULL
-  dguid_block <- NULL
-  for (b in sized) {
-    if (is.null(dguid_block) && all(grepl("^2021[A-Z][0-9]", b$texts)))
-      dguid_block <- b
-    if (is.null(name_block) && b$texts[1] == "Canada" &&
-        !all(grepl("^[0-9]+$", b$texts)))
-      name_block <- b
-  }
-  list(names = name_block, dguids = dguid_block)
-}
-
 # A "text byte": printable ASCII, tab/newline/carriage-return, or latin-1
 # accented range. Footnote prose is built only from these; the record framing
 # (`00 01 01 <u16 length>`) always contains a NUL or sub-0x09 control byte, so

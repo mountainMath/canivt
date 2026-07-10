@@ -348,6 +348,40 @@ tails".
   `ivt_f2_legacy_footnotes()`, and the **`@712` DQF legend** is decoded
   (`ivt_f2_dqf_legend()`) and exposed as `dqf_legend` on `ivt_metadata()`.
 
+### Parser consolidation & sharpening (2026-07-11) — refactor-plan §5/§6
+
+The 2026-07 parser review's backlog (`refactor-plan.md`). Each change validated
+against the corpus regression ledger (byte-exact cell counts + fallback
+cleanliness, FAIL 0 / PASS 120):
+
+- **Page-directory anchor single-sourced** (§5.2). The low-16-bit `@558` pointer
+  unwrap (`+ k·65536`, for directories past 64 KiB) now lives once in
+  `ivt_f2_dir_anchor_header()`; `ivt_idx0()` is a thin wrapper. Previously only the
+  decode side unwrapped, so the metadata-side finder fell to the loud marker scan
+  on a >64 KiB directory. Verified 98100013 (k=1) / 95F0250 (k=2) equal across
+  `ivt_idx0()` / `ivt_f2_dir_anchor_header()` / `ivt_f2_find_directory()$lo`.
+- **`ivt_geo_arrays()` retired** (§6.3), removing the last year/country literals
+  (`"^2021[A-Z]"`, `texts[1] == "Canada"`). A full-corpus branch trace of
+  `ivt_f2_geo_light()` proved its content fallback (`ivt_f2_geo_simple()`'s
+  `2b-SIMPLE`) is **never reached** — every file resolves via inline / attrs_dir /
+  uid-only — so it went away by deletion; `ivt_f2_geo_simple()` is now schema-only.
+- **`ivt_f2_geo_schema()` window scan made LOUD** (§6.4). All 12 schema'd tables
+  resolve the geography dictionary through the header slot table
+  (`ivt_f2_geo_dict_block()`), so the ±128 KiB content-window fallback fires on
+  zero tables (its "deeper pointer chain we do not decode yet" note was stale since
+  the two-depth `ivt_f2_dim_dir()` indirection). Kept as a last resort but now
+  warns `canivt_fallback` when it actually supplies a schema (was silent).
+- **Doubled-name marker identified STRUCTURALLY** (§6.2). Empirically, within a
+  slot directory validated by index + `n_entries` the marker is the unique entry
+  OPENING `81 02 02 00` and carrying a name: 152/155 dimension directories have
+  exactly one (never >1); the 3 nameless cases are the ord-08035 custom export,
+  where the descriptor name also fails. `ivt_f2_dir_marker_entry()` now resolves it
+  without the descriptor name (kept only to disambiguate the never-observed
+  >1-named case). Byte-identical to the old name-match on all 155 directories; the
+  win is robustness — a dimension with a misread/NA name still reads its labels
+  (verified on 98-10-0241), demoting the `ivt_f2_descriptor_name()` recovery stack
+  from load-bearing to a cross-check.
+
 ## Invariant derivations & historical bugs
 
 Why the "Key invariants" in `CLAUDE.md` are what they are — the measurements and the

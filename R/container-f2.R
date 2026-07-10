@@ -102,12 +102,23 @@ ivt_f2_entry_valid <- function(raw, o, n) {
 # where the directory is, so we do not have to scan for page markers to find it.
 IVT_HDR_DIR_PTR <- 558L
 
-# The directory anchor from the header pointer, when it validates.
+# The directory anchor from the header pointer, when it validates. The u16 field
+# @558 holds only the LOW 16 BITS of the true offset, so tables whose directory
+# sits past 64 KiB wrap: recover the true start as the smallest offset sharing
+# that residue whose entry validates as a page-directory record (below 64 KiB
+# this is k = 0, the plain u16 read). This is the SAME unwrap `ivt_idx0()` does on
+# the decode side -- shared here so the metadata-side finder resolves a >64 KiB
+# directory positionally instead of falling to the loud marker scan.
 ivt_f2_dir_anchor_header <- function(raw) {
   n <- length(raw)
   if (n < IVT_HDR_DIR_PTR + 2L) return(NULL)
-  off <- rd_u16(raw, IVT_HDR_DIR_PTR)
-  if (off > 0L && ivt_f2_entry_valid(raw, off, n)) off else NULL
+  lo <- rd_u16(raw, IVT_HDR_DIR_PTR)
+  if (lo <= 0L) return(NULL)
+  for (k in 0:max(0L, (n - lo) %/% 65536L)) {
+    off <- lo + k * 65536L
+    if (ivt_f2_entry_valid(raw, off, n)) return(off)
+  }
+  NULL
 }
 
 # Fallback only: locate a directory record by scanning for the first page marker
