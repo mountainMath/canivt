@@ -67,6 +67,20 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   data-quality flag (`dqf_code`, with `dqf_note` and the table-level
 #'   `dqf_legend`), and the total non-response rate (`tnr_short_form`).
 #'
+#'   Where `dqf_note` is present it is accompanied by a `dqf_note_truncated`
+#'   logical flag: StatCan's writer stores each note in a single-byte-length
+#'   record, so notes longer than 252 characters are truncated **in the source
+#'   file** (2,448 of 63,404 geographies in 98-10-0129, 90 of 6,297 in
+#'   98-10-0478). The read is byte-exact -- this is a container limitation, not a
+#'   decode gap, and there is no continuation to recover -- but the flag marks the
+#'   affected members and a classed `canivt_dqf_note_truncated` warning is raised
+#'   so the loss is never silent. (Unlike a heuristic fallback it is *not* upgraded
+#'   to an error by `options(canivt.strict = TRUE)`: the bytes are exactly what the
+#'   file holds.) The truncation is a container limit of the `.ivt` export only --
+#'   StatCan's authoritative metadata (the WDS `getCubeMetadata` `geoAttribute` or
+#'   the CSV-download metadata) stores the full untruncated note, so a consumer who
+#'   needs the complete text can recover it there.
+#'
 #'   Each footnote in `metadata$footnotes` carries a `scope` (`"table"`,
 #'   `"dimension"` or `"member"`), the owning `dimension` name and, for member
 #'   notes, the `member_id`(s) it annotates -- `member_id` for a single member and

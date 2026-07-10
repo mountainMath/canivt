@@ -319,7 +319,9 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   # StatCan metadata CSV on all 11 attributes for all 91 members.
   # member 26 has no schema GEO_NAME, so ivt_f2_geo_fill_label() backfills its
   # geo_name from the display label -- a loud canivt_fallback.
-  expect_warning(m <- ivt_f2_metadata(raw), class = "canivt_fallback")
+  ws <- testthat::capture_warnings(m <- ivt_f2_metadata(raw))
+  expect_match(ws, "aggregate", all = FALSE)   # cli may wrap the phrase across lines
+  expect_warning(ivt_f2_metadata(raw), class = "canivt_fallback")
   expect_equal(length(m$geographies$geo_uid), 91L)
   expect_equal(length(m$geographies$geo_name), 91L)
   expect_true(is.na(m$geographies$geo_uid[26]))
@@ -328,6 +330,10 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   # (geo_label), which every member carries, for such synthetic aggregates.
   expect_equal(m$geographies$geo_name[26], "Canada outside Quebec and New Brunswick")
   expect_equal(m$geographies$geo_label[26], "Canada outside Quebec and New Brunswick")
+  # accepted by design: an aggregate has no DGUID and no aggregation level in the
+  # file -- both genuinely absent, so they stay NA (the name is the only recoverable
+  # attribute, and it comes from the display label, not a synthesized value).
+  expect_true(is.na(m$geographies$geo_level[26]))
   expect_equal(m$geographies$geo_uid[27], "2021A000210")  # Newfoundland and Labrador
   at <- ivt_f2_geo_attributes(raw)
   expect_equal(nrow(at), 91L)

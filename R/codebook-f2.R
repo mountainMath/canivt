@@ -763,6 +763,56 @@ ivt_f2_geo_fill_label <- function(g) {
   g
 }
 
+# The DQF_NOTE suppression text is stored in a Pascal record whose length prefix
+# is a SINGLE byte, so the container cannot hold a note longer than 252 chars
+# (0xFC -- the maximum record length observed across the corpus). StatCan's own
+# writer stores longer notes truncated at that ceiling (2,448 members on 98-10-0129,
+# 90 on 98-10-0478). Confirmed at the byte level: a truncated record is
+# `[FC][252 text bytes][00]`, the text cut mid-word, and the byte immediately after
+# the 0x00 terminator opens the NEXT member's record (a fresh `[len][text]`) -- there
+# is NO continuation record, so the tail is genuinely absent from the file, not
+# something we fail to read. Our read is therefore byte-exact: this is a container
+# limitation, not a decode gap -- but it IS silent data loss, so we mark which
+# members carry a note sitting at the ceiling (presumed truncated -- the ceiling is
+# the only signal the format offers; a complete note that happens to be exactly 252
+# chars is an unavoidable false positive) and warn loudly
+# (`ivt_f2_flag_dqf_note_truncation()`). The UNtruncated text is not in the .ivt but
+# IS in StatCan's authoritative metadata (WDS `getCubeMetadata` `geoAttribute.valueEn`,
+# or the table's CSV-download metadata) -- confirmed: 98-10-0478 CT 0010.00 is 252
+# chars here vs the WDS's full 375. We do not fetch it (per the metadata-driven,
+# no-external-ground-truth rule); the flag tells a consumer where to look if needed.
+IVT_DQF_NOTE_CAP <- 252L
+
+ivt_f2_dqf_note_truncated <- function(note) {
+  if (is.null(note)) return(NULL)
+  out <- nchar(note) >= IVT_DQF_NOTE_CAP
+  out[is.na(note)] <- NA
+  out
+}
+
+# Attach a `dqf_note_truncated` companion flag beside `dqf_note` (works on the
+# geography list of the default path and the attribute tibble of
+# `ivt_f2_geographies()`) and, when any note is truncated at the container ceiling,
+# raise a loud classed notice. A no-op when the object carries no `dqf_note` -- most
+# tables, and the uid-only default path of the big chunked tables (their notes are
+# read only via `read_ivt(geo_attributes = TRUE)`).
+ivt_f2_flag_dqf_note_truncation <- function(g) {
+  note <- g[["dqf_note"]]
+  if (is.null(note)) return(g)
+  trunc <- ivt_f2_dqf_note_truncated(note)
+  g[["dqf_note_truncated"]] <- trunc
+  n <- sum(trunc, na.rm = TRUE)
+  n_notes <- sum(!is.na(note)); cap <- IVT_DQF_NOTE_CAP
+  if (n > 0L)
+    ivt_source_truncation(c(
+      paste("{n} of {n_notes} DQF_NOTE value(s) are stored TRUNCATED in the file at",
+            "the container's {cap}-character single-byte record ceiling."),
+      i = paste("The read is byte-exact -- this is a container limit, not a decode",
+                "gap; `dqf_note_truncated` marks the affected geography members.")),
+      class = "canivt_dqf_note_truncated")
+  g
+}
+
 # The uid-only read: the positional block-directory parse first (it sees the
 # logical member order the byte scan cannot -- 98-10-0013's reverse-stored root
 # chunk sits below the marker region and the scan silently dropped members 1-256),
@@ -2101,6 +2151,7 @@ ivt_f2_geographies <- function(raw) {
     g <- ivt_f2_geo_attributes(raw)
     names(g)[names(g) == "dguid"] <- "geo_uid"
   }
+  g <- ivt_f2_flag_dqf_note_truncation(g)
   front <- intersect(c("member_id", "geo_label", "geo_name", "geo_uid"), names(g))
   g[, c(front, setdiff(names(g), front))]
 }

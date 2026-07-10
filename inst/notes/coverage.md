@@ -499,7 +499,21 @@ units) and the directory entries (8-byte entry units).
     fills slots whose block the strict parse could not decode. The only residual is
     the **container's own 252-byte record cap** (`0xFC` max length byte): notes
     longer than 252 chars are stored truncated in the file (2,448 members on
-    98-10-0129, 90 on 0478) — byte-faithful, not a decode gap.
+    98-10-0129, 90 on 0478) — byte-faithful, not a decode gap. **Verified at the
+    byte level (2026-07-10)**: a truncated record is `[FC][252 text bytes][00]` cut
+    mid-word, and the byte after the `00` opens the next member's record — no
+    continuation exists, so nothing is missed. Now **flagged, not silent**: a
+    companion `dqf_note_truncated` column rides beside `dqf_note` and a classed
+    `canivt_dqf_note_truncated` (`canivt_source_truncation`) warning fires
+    (`ivt_f2_flag_dqf_note_truncation()`). It is a faithful read, so strict mode
+    keeps it a warning rather than an error. On the chunked tables the note + flag
+    decode only via `read_ivt(geo_attributes = TRUE)`. **The truncation is the .ivt
+    export's alone** — StatCan's authoritative WDS metadata carries the full text:
+    98-10-0478 CT 0010.00 is 252 chars in the .ivt vs the WDS `getCubeMetadata`
+    `geoAttribute.valueEn`'s complete 375 (the .ivt dropped a whole "Long-form
+    income data suppressed…" clause). A consumer needing the full note can recover
+    it from WDS / the CSV-download metadata; we don't fetch it (no-external-ground-
+    truth rule).
   - **0478's 153-member code-partial residual is FIXED**: `geo_name` and
     `alt_geo_code` are now exact 6,297/6,297 (the strict parse does not fragment
     the code chunk the scanner broke).

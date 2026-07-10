@@ -429,6 +429,39 @@ test_that("family-2 decodes a 4-dimension table (98-10-0129) cell-exact", {
   expect_equal(v(1, 2, 1), 17626005)   # Married or living common law
 })
 
+test_that("98-10-0129 flags DQF_NOTE truncated at the container ceiling (loud)", {
+  p <- sample_ivt_f2_4d()
+  skip_if(p == "", "no 4-dim family-2 sample (set CANIVT_SAMPLE_IVT_F2_4D)")
+  raw <- readBin(p, "raw", n = file.info(p)$size)
+
+  # The long suppression texts are stored TRUNCATED by StatCan's writer at the
+  # 252-char (0xFC) single-byte Pascal-record length ceiling: verified at the byte
+  # level, a truncated note record is `[FC][252 text bytes][00]` cut mid-word, and
+  # the byte after the 00 terminator opens the NEXT member's record -- there is no
+  # continuation, so nothing is missed. On the default (uid-only) metadata path
+  # dqf_note is not decoded, so nothing is flagged.
+  m0 <- ivt_f2_metadata(raw)
+  expect_null(m0$geographies$dqf_note_truncated)
+
+  # The full geography table (the geo_attributes = TRUE path) carries the companion
+  # flag: it marks exactly the 2,448 notes at the ceiling and a classed notice fires
+  # (accepted by design: a byte-faithful read of a container limit).
+  ws <- testthat::capture_warnings(g <- ivt_f2_geographies(raw))
+  expect_true("dqf_note_truncated" %in% names(g))
+  expect_equal(sum(g$dqf_note_truncated, na.rm = TRUE), 2448L)
+  # the flag is exactly "note sits at the ceiling": no false negatives/positives,
+  # and every flagged note is exactly 252 chars (never longer -- the byte cap)
+  present <- !is.na(g$dqf_note)
+  expect_equal(g$dqf_note_truncated[present], nchar(g$dqf_note[present]) >= 252L)
+  expect_true(all(nchar(g$dqf_note[which(g$dqf_note_truncated)]) == 252L))
+  expect_match(ws, "stored TRUNCATED", all = FALSE)
+
+  # it is NOT a heuristic fallback: strict mode leaves it a warning, never an error
+  withr::local_options(canivt.strict = TRUE)
+  expect_no_error(expect_warning(ivt_f2_geographies(raw),
+                                 class = "canivt_dqf_note_truncated"))
+})
+
 # Inline-codebook geography for the pre-DGUID 1991 layout (table 1003011 / E9101).
 # Point CANIVT_SAMPLE_IVT_1991 at a copy of 1003011.IVT to run; skips otherwise.
 sample_ivt_1991 <- function() {

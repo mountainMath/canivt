@@ -303,9 +303,28 @@ attribute table are all **done** — the corpus is fully supported. That work lo
 - Fixed a latent `metadata$geographies` crash en route: an undecoded `geo_name` NULL
   slot made the list ragged (`as_tibble()` failed) — now undecoded columns are omitted
   so it is always rectangular (`read-f2.R`).
-- **`DQF_NOTE` texts > 252 chars are stored truncated in the file** (the 1-byte
-  record length caps at `0xFC`) — 2,448 members on 0129, 90 on 0478. Not a decode
-  gap; byte-faithful to the container.
+- **`DQF_NOTE` truncation — DETECTED + FLAGGED, accepted by design** (2026-07-10).
+  `DQF_NOTE` texts are stored in a single-byte-length Pascal record, so notes longer
+  than 252 chars (`0xFC`) are truncated **by StatCan's writer in the source file** —
+  2,448 members on 98-10-0129, 90 on 98-10-0478. **Verified at the byte level**: a
+  truncated record is `[FC][252 text bytes][00]` cut mid-word, and the byte after the
+  `00` terminator opens the *next member's* record — there is **no continuation to
+  recover**, the tail is genuinely absent. Our read is byte-exact, so this is a
+  container limitation, not a decode gap. Now **surfaced, not silent**: wherever
+  `dqf_note` is present a companion `dqf_note_truncated` logical column marks the
+  affected members (`ivt_f2_dqf_note_truncated()` / `ivt_f2_flag_dqf_note_truncation()`,
+  `codebook-f2.R`), and a classed `canivt_dqf_note_truncated` /
+  `canivt_source_truncation` warning fires (`ivt_source_truncation()`, `fallback.R`).
+  Because it is a *faithful* read (not a heuristic path), `options(canivt.strict = TRUE)`
+  leaves it a warning rather than upgrading it to an error. On the big chunked tables
+  `dqf_note` (and the flag) only decode via `read_ivt(geo_attributes = TRUE)`.
+- **Synthetic-aggregate `geo_uid`/`geo_level` NA — accepted by design** (2026-07-06).
+  A geography member constructed at tabulation time (98-10-0662's member 26, "Canada
+  outside Quebec and New Brunswick") carries only a display label; the schema attribute
+  arrays (DGUID, level, type, …) store nothing for it. `ivt_f2_geo_fill_label()`
+  backfills its `geo_name` from `geo_label` (loud `canivt_fallback`), but `geo_uid` and
+  `geo_level` are genuinely absent in the file and correctly stay `NA` — an aggregate
+  has no DGUID. Regression-guarded in `test-decode.R` (0662) and `test-fallback.R`.
 - **Footnote scope (table / dimension / member) — DONE** (2026-07-09). Every
   footnote carries `scope`, `dimension` and `member_id`, matching StatCan's WDS
   links exactly (validated on 98-10-0241/0077/0023/0129). Member notes come from a

@@ -32,6 +32,20 @@ abbreviation and codes (\code{prov_abbr}, \code{alt_geo_code}, \code{pr_code}), 
 data-quality flag (\code{dqf_code}, with \code{dqf_note} and the table-level
 \code{dqf_legend}), and the total non-response rate (\code{tnr_short_form}).
 
+Where \code{dqf_note} is present it is accompanied by a \code{dqf_note_truncated}
+logical flag: StatCan's writer stores each note in a single-byte-length
+record, so notes longer than 252 characters are truncated \strong{in the source
+file} (2,448 of 63,404 geographies in 98-10-0129, 90 of 6,297 in
+98-10-0478). The read is byte-exact -- this is a container limitation, not a
+decode gap, and there is no continuation to recover -- but the flag marks the
+affected members and a classed \code{canivt_dqf_note_truncated} warning is raised
+so the loss is never silent. (Unlike a heuristic fallback it is \emph{not} upgraded
+to an error by \code{options(canivt.strict = TRUE)}: the bytes are exactly what the
+file holds.) The truncation is a container limit of the \code{.ivt} export only --
+StatCan's authoritative metadata (the WDS \code{getCubeMetadata} \code{geoAttribute} or
+the CSV-download metadata) stores the full untruncated note, so a consumer who
+needs the complete text can recover it there.
+
 Each footnote in \code{metadata$footnotes} carries a \code{scope} (\code{"table"},
 \code{"dimension"} or \code{"member"}), the owning \code{dimension} name and, for member
 notes, the \code{member_id}(s) it annotates -- \code{member_id} for a single member and

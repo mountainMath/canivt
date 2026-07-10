@@ -29,6 +29,19 @@ ivt_fallback <- function(msg, class = "canivt_fallback", .envir = parent.frame()
   invisible(NULL)
 }
 
+# A LOUD notice of a FAITHFUL-but-lossy read: the container itself stores a value
+# truncated (a fixed-width record length cap), so our read is byte-exact yet the
+# value is incomplete through no fault of the decoder. Unlike `ivt_fallback()` this
+# is NOT a heuristic/content path -- the bytes we return are exactly what the file
+# holds -- so strict mode does NOT upgrade it to an error (strict mode refuses
+# risky reads, and there is nothing risky here, only a source limitation). It is
+# classed so callers can detect it (e.g. cross-reference the companion flag column)
+# or muffle it.
+ivt_source_truncation <- function(msg, class, .envir = parent.frame()) {
+  cli::cli_warn(msg, class = c(class, "canivt_source_truncation"), .envir = .envir)
+  invisible(NULL)
+}
+
 # Run a speculative probe silently: format DETECTION (ivt_family) tries readers
 # on files it may then reject, so a fallback engaging there is not yet a read of
 # anything -- muffle the classed warning (and, under strict mode, treat the

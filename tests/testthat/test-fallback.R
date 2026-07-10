@@ -78,6 +78,46 @@ test_that("a nameless geography is a classed fallback (silent-truncation tripwir
   expect_error(ivt_f2_check_geo_names(gap), class = "canivt_geo_name_gap_error")
 })
 
+test_that("DQF_NOTE truncation is detected at the container's record ceiling", {
+  # a note stored at the 252-char (0xFC) single-byte record ceiling is presumed
+  # truncated; shorter notes are complete; NA propagates as NA (no note at all)
+  note <- c(strrep("x", 252L), "short", NA_character_, strrep("y", 251L))
+  expect_equal(ivt_f2_dqf_note_truncated(note), c(TRUE, FALSE, NA, FALSE))
+  expect_null(ivt_f2_dqf_note_truncated(NULL))
+})
+
+test_that("truncation flag rides beside dqf_note and warns loudly, faithfully", {
+  # no dqf_note -> untouched, no flag, no warning (most tables / the uid-only path)
+  g0 <- list(member_id = 1:3, geo_uid = c("a", "b", "c"))
+  expect_no_warning(g0b <- ivt_f2_flag_dqf_note_truncation(g0))
+  expect_identical(g0b, g0)
+
+  # dqf_note present but none at the ceiling -> flag added (all FALSE), no warning
+  clean <- list(member_id = 1:2, dqf_note = c("ok", "also ok"))
+  expect_no_warning(gc <- ivt_f2_flag_dqf_note_truncation(clean))
+  expect_equal(gc$dqf_note_truncated, c(FALSE, FALSE))
+
+  # a truncated note -> flag marks it AND a classed notice fires
+  dirty <- list(member_id = 1:2, dqf_note = c(strrep("z", 252L), "ok"))
+  expect_warning(gd <- ivt_f2_flag_dqf_note_truncation(dirty),
+                 class = "canivt_dqf_note_truncated")
+  expect_warning(ivt_f2_flag_dqf_note_truncation(dirty),
+                 class = "canivt_source_truncation")
+  expect_equal(suppressWarnings(ivt_f2_flag_dqf_note_truncation(dirty))$dqf_note_truncated,
+               c(TRUE, FALSE))
+})
+
+test_that("source truncation is a faithful read, NOT upgraded by strict mode", {
+  # unlike a heuristic fallback, a container-truncated value is exactly what the
+  # file holds, so strict mode leaves it a warning (it refuses risky reads, and
+  # there is nothing risky here) -- a strict pipeline reading geo_attributes on
+  # 98-10-0129 must not error on its 2,448 truncated notes.
+  dirty <- list(dqf_note = strrep("z", 252L))
+  withr::local_options(canivt.strict = TRUE)
+  expect_no_error(expect_warning(ivt_f2_flag_dqf_note_truncation(dirty),
+                                 class = "canivt_dqf_note_truncated"))
+})
+
 test_that("ivt_quietly muffles fallback conditions for detection probes", {
   expect_no_warning(v <- ivt_quietly({ ivt_fallback("probe"); 42L }))
   expect_equal(v, 42L)

@@ -424,6 +424,7 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   n_geo <- ivt_f2_geo_count(raw)
   g <- ivt_f2_geo_light(raw, n_geo)
   g <- ivt_f2_geo_fill_label(g)
+  g <- ivt_f2_flag_dqf_note_truncation(g)
   ivt_f2_check_geo_count(raw, length(g$geo_uid))
   ivt_f2_check_geo_names(g$geo_name)
   # pack every decoded per-member geography column (bilingual labels/names, uid,
@@ -440,7 +441,7 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   geo_cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr",
                 "geo_uid", "geo_level", "geo_type", "geo_type_abbr",
                 "prov_abbr", "alt_geo_code", "pr_code", "dqf_code", "dqf_note",
-                "tnr_short_form")
+                "dqf_note_truncated", "tnr_short_form")
   n_members <- if (!is.null(g$geo_uid)) length(g$geo_uid)
                else if (!is.null(g$geo_name)) length(g$geo_name)
                else if (!is.na(n_geo)) as.integer(n_geo) else 0L
