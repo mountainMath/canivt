@@ -579,14 +579,43 @@ ivt_f2_dqf_legend <- function(raw) {
   tibble::tibble(code = out_code, text_en = out_en, text_fr = out_fr)
 }
 
+# Decode a footnote member bitmap (the `84 01`-framed dense record that precedes a
+# dimension's MEMBER footnotes) into the 1-based member positions it flags. Format
+# is the standard dense value block: `[84 01][u16 nbits][ceil(nbits/16)*2-byte
+# bitstream][int32 values]`. The bitstream is read with the presence convention --
+# byte-pair-swapped, then MSB-first -- so a set bit at 0-based position p means
+# member p+1 carries a footnote (the trailing int32s are block-index framing, not
+# used). Returns integer(0) for a non-bitmap window.
+ivt_f2_footnote_bitmap <- function(win) {
+  if (length(win) < 6L ||
+      win[1] != as.raw(0x84L) || win[2] != as.raw(0x01L)) return(integer(0))
+  nbits <- as.integer(win[3]) + 256L * as.integer(win[4])
+  nby <- ceiling(nbits / 16) * 2L                    # bitstream padded to u16
+  if (nbits < 1L || 4L + nby > length(win)) return(integer(0))
+  bm <- as.integer(win[5:(4L + nby)])
+  ev <- seq.int(1L, nby, 2L); od <- ev + 1L
+  sw <- bm; sw[ev] <- bm[od]; sw[od] <- bm[ev]       # byte-pair-swap
+  set <- which(bitwAnd(bitwShiftR(sw[(seq_len(nbits) - 1L) %/% 8L + 1L],
+                                  7L - (seq_len(nbits) - 1L) %% 8L), 1L) == 1L)
+  set
+}
+
 # Footnotes read from the per-dimension slot directories, each attributed to its
-# owning dimension (`dimension` = the full display name when `dim_names` is
-# given, else the descriptor name). Every footnote is stored as an entry of the
-# directory of the dimension it annotates -- the linkage the tail text-scan
-# cannot provide. `number` keeps the established semantics (position within its
-# language, here in slot/directory order). Returns NULL when the slot table is
-# absent (caller falls back to the tail scan); an empty list when the
-# directories resolve but carry no footnotes.
+# owning dimension AND, within the dimension, to a scope: a MEMBER note (annotates
+# one member) or a DIMENSION note (annotates the whole dimension -- geography
+# included). The linkage is structural: each dimension's footnote region opens with
+# a `84 01` member bitmap (an EN copy and an identical FR copy) listing which
+# members carry a member note, in member order; the footnote text entries then
+# follow in that same order -- the first `popcount(bitmap)` per language are the
+# member notes (assigned to the bitmapped members in order), the rest are dimension
+# notes. Validated against StatCan's own WDS footnote links (dimensionPositionId /
+# memberId) on 98-10-0241/0023/0129/0077 -- every (dimension, member) target exact.
+# Each record carries `scope` ("member"/"dimension"), `dimension` (the full display
+# name when `dim_names` is given, else the descriptor name) and `member_id` (the
+# 1-based member id for member notes, NA otherwise). `number` keeps the established
+# semantics (position within its language, in slot/directory order). Returns NULL
+# when the slot table is absent (caller falls back to the tail scan); an empty list
+# when the directories resolve but carry no footnotes.
 ivt_f2_dir_footnotes <- function(raw, dim_names = NULL) {
   slots <- ivt_f2_dim_slots(raw)
   if (is.null(slots)) return(NULL)
@@ -601,10 +630,20 @@ ivt_f2_dir_footnotes <- function(raw, dim_names = NULL) {
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) next
     resolved <- TRUE
+    members <- integer(0); seen_bitmap <- FALSE
+    seq_lang <- c(en = 0L, fr = 0L)                  # member-notes seen, per language
+    dim_name <- if (k <= length(dim_names)) dim_names[[k]] else NA_character_
     for (r in seq_len(nrow(dir))) {
       len <- dir[r, "len"]
-      if (len < 24L) next                          # too short to frame a footnote
-      win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
+      off <- dir[r, "off"]
+      win <- raw[(off + 1L):min(length(raw), off + len)]
+      # the member bitmap opens the footnote region (EN then an identical FR copy);
+      # take the member set from the first one encountered.
+      if (length(win) >= 6L && win[1] == as.raw(0x84L) && win[2] == as.raw(0x01L)) {
+        if (!seen_bitmap) { members <- ivt_f2_footnote_bitmap(win); seen_bitmap <- TRUE }
+        next
+      }
+      if (len < 24L) next                            # too short to frame a footnote
       # cheap byte prefilter: the text-run isolation is too slow to run over every
       # entry of a 6,000-block geography directory. Both footnote framings: the
       # modern "Footnote N"/"Renvoi N" and the 1981 profile "FOOTNOTE:"/"RENVOI :".
@@ -612,15 +651,54 @@ ivt_f2_dir_footnotes <- function(raw, dim_names = NULL) {
           !length(grepRaw("Renvoi", win, fixed = TRUE)) &&
           !length(grepRaw("FOOTNOTE", win, fixed = TRUE)) &&
           !length(grepRaw("RENVOI", win, fixed = TRUE))) next
-      fns <- ivt_footnote_texts(raw, dir[r, "off"], dir[r, "off"] + len)
+      fns <- ivt_footnote_texts(raw, off, off + len)
       for (f in fns) {
         counts[f$language] <- counts[f$language] + 1L
+        seq_lang[f$language] <- seq_lang[f$language] + 1L
+        i <- seq_lang[[f$language]]
+        is_member <- i <= length(members)
         out[[length(out) + 1L]] <- list(
           language = f$language, number = counts[[f$language]], text = f$text,
-          dimension = if (k <= length(dim_names)) dim_names[[k]] else NA_character_)
+          scope = if (is_member) "member" else "dimension",
+          dimension = dim_name,
+          member_id = if (is_member) members[[i]] else NA_integer_)
       }
     }
   }
   if (!resolved) return(NULL)
+  out
+}
+
+# Table-level (cube) footnotes: the notes that annotate the whole table rather than
+# any one dimension. They are stored in the master-directory identity blob (the
+# same EN/FR sections that carry the product id + title), framed with the modern
+# "Footnote N"/"Renvoi N" markers -- NOT in any dimension slot directory. The
+# marker sits mid-blob (after the "Product ID / Title / Footnotes :" preamble), so
+# it is located by a numbered-marker regex (which ignores the bare "Footnotes :"
+# section header that empty-note tables still carry). scope = "table", with no
+# dimension / member. Returns list() when the table carries none.
+ivt_f2_table_footnotes <- function(raw) {
+  md <- ivt_f2_master_dir(raw)
+  if (is.null(md)) return(list())
+  marker <- "(Footnote|Renvoi)[[:space:]]*([0-9]+)[[:space:]]*[\r\n]"
+  out <- list()
+  for (r in seq_len(nrow(md))) {
+    off <- md[r, "off"]; len <- md[r, "len"]
+    if (len < 24L || off + len > length(raw)) next
+    txt <- raw_to_latin1(raw[(off + 1L):(off + len)])
+    m <- gregexpr(marker, txt, perl = TRUE)[[1]]
+    if (m[1] == -1L) next
+    starts <- as.integer(m); ml <- attr(m, "match.length")
+    for (i in seq_along(starts)) {
+      lang <- if (substr(txt, starts[i], starts[i] + 7L) == "Footnote") "en" else "fr"
+      body_start <- starts[i] + ml[i]
+      body_end <- if (i < length(starts)) starts[i + 1L] - 1L else nchar(txt)
+      body <- trimws(gsub("[[:space:]]+", " ",
+                          gsub("\u00a0", " ", substr(txt, body_start, body_end))))
+      if (nzchar(body))
+        out[[length(out) + 1L]] <- list(language = lang, text = body,
+          scope = "table", dimension = NA_character_, member_id = NA_integer_)
+    }
+  }
   out
 }

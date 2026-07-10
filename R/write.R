@@ -122,8 +122,17 @@ ivt_write_metadata <- function(x, dir = NULL) {
   wr(geo_df, "geographies.csv")
 
   if (length(meta$footnotes)) {
+    na_chr <- function(x) if (is.null(x)) NA_character_ else x
+    na_int <- function(x) if (is.null(x)) NA_integer_ else x
     fn <- do.call(rbind, lapply(meta$footnotes, function(f)
-      data.frame(language = f$language, number = f$number, text = f$text)))
+      data.frame(language = f$language, number = f$number,
+                 scope = na_chr(f$scope), dimension = na_chr(f$dimension),
+                 member_id = na_int(f$member_id),
+                 # the full set of member ids a note annotates (";"-joined; a
+                 # single legacy "(N)" note can cite many members)
+                 member_refs = if (length(f$member_refs))
+                                 paste(f$member_refs, collapse = ";") else NA_character_,
+                 text = f$text)))
     wr(fn, "footnotes.csv")
   }
 

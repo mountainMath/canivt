@@ -32,6 +32,15 @@ abbreviation and codes (\code{prov_abbr}, \code{alt_geo_code}, \code{pr_code}), 
 data-quality flag (\code{dqf_code}, with \code{dqf_note} and the table-level
 \code{dqf_legend}), and the total non-response rate (\code{tnr_short_form}).
 
+Each footnote in \code{metadata$footnotes} carries a \code{scope} (\code{"table"},
+\code{"dimension"} or \code{"member"}), the owning \code{dimension} name and, for member
+notes, the \code{member_id}(s) it annotates -- \code{member_id} for a single member and
+\code{member_refs} for the full set (geography counts as a dimension). This matches
+StatCan's own footnote linkage on the modern tables; on the pre-DGUID profiles
+the same linkage is recovered from the \code{(N)} reference markers embedded in the
+member labels (a note there can be cited by many members, so \code{member_refs}
+lists them all).
+
 The value store keeps only non-zero cells, so a cell absent from \code{cells}
 is a \strong{zero} -- \emph{within a geography that carries any data}. A geography
 with no stored cells at all is either wholly suppressed or wholly empty,

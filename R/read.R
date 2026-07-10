@@ -67,6 +67,15 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   data-quality flag (`dqf_code`, with `dqf_note` and the table-level
 #'   `dqf_legend`), and the total non-response rate (`tnr_short_form`).
 #'
+#'   Each footnote in `metadata$footnotes` carries a `scope` (`"table"`,
+#'   `"dimension"` or `"member"`), the owning `dimension` name and, for member
+#'   notes, the `member_id`(s) it annotates -- `member_id` for a single member and
+#'   `member_refs` for the full set (geography counts as a dimension). This matches
+#'   StatCan's own footnote linkage on the modern tables; on the pre-DGUID profiles
+#'   the same linkage is recovered from the `(N)` reference markers embedded in the
+#'   member labels (a note there can be cited by many members, so `member_refs`
+#'   lists them all).
+#'
 #'   The value store keeps only non-zero cells, so a cell absent from `cells`
 #'   is a **zero** -- *within a geography that carries any data*. A geography
 #'   with no stored cells at all is either wholly suppressed or wholly empty,

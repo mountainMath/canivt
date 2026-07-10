@@ -168,6 +168,50 @@ test_that("footnotes are extracted in both languages", {
   expect_true(all(nchar(en) > 0L))
 })
 
+test_that("footnotes are attributed to a scope (dimension / member) via the member bitmap", {
+  p <- sample_ivt()
+  skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
+  m <- ivt_metadata(p)
+  # every record carries the uniform field set
+  for (f in m$footnotes)
+    expect_true(all(c("scope", "dimension", "member_id") %in% names(f)))
+  # collapse the English footnotes to their (dimension, member) targets and match
+  # them against StatCan's own WDS footnote links for 98-10-0241 -- exact set.
+  en <- Filter(function(f) f$language == "en", m$footnotes)
+  targets <- unique(vapply(en, function(f)
+    sprintf("%s|%s", f$dimension,
+            if (is.na(f$member_id)) "dim" else f$member_id), ""))
+  dn <- m$dimension_names
+  expect_setequal(targets, c(
+    sprintf("%s|dim", dn[2]), sprintf("%s|1",  dn[2]),   # Age dim + maintainer (m1)
+    sprintf("%s|dim", dn[3]), sprintf("%s|1",  dn[3]),   # Household type dim + m1
+    sprintf("%s|dim", dn[4]), sprintf("%s|13", dn[4]),   # Period dim + "2016 to 2021" (m13)
+    sprintf("%s|dim", dn[6]), sprintf("%s|1",  dn[6]),   # Housing dim + m1
+    sprintf("%s|5",  dn[6]),                             # Housing member 5 (non-Total)
+    sprintf("%s|1",  dn[7])))                            # Tenure member 1 (no dim note)
+  # the member-note member ids come from the 84 01 bitmap (pair-swap, MSB-first)
+  bitmapped <- sort(unique(vapply(Filter(function(f) f$scope == "member", en),
+                                  function(f) f$member_id, 1L)))
+  expect_equal(bitmapped, c(1L, 5L, 13L))
+})
+
+test_that("table-level (cube) footnotes are recovered from the master-directory blob", {
+  p <- sample_ivt_077()
+  skip_if(p == "", "no 98-10-0077 sample (set CANIVT_SAMPLE_IVT_F1_077)")
+  m <- ivt_metadata(p)
+  tbl <- Filter(function(f) identical(f$scope, "table"), m$footnotes)
+  expect_equal(length(tbl), 2L)                          # EN + FR
+  expect_true(all(is.na(vapply(tbl, function(f) f$member_id, 1L))))
+  expect_true(any(grepl("^Historical comparison of geographic areas",
+                        vapply(tbl, function(f) f$text, ""))))
+  # 98-10-0077 also carries member notes on the non-Total members 7 and 8 of the
+  # Economic family structure dimension (bitmap {1,7,8}).
+  en <- Filter(function(f) f$language == "en", m$footnotes)
+  mem <- sort(unique(vapply(Filter(function(f) identical(f$scope, "member") &&
+    identical(f$dimension, m$dimension_names[2]), en), function(f) f$member_id, 1L)))
+  expect_equal(mem, c(1L, 7L, 8L))
+})
+
 test_that("Canada decodes to the published tenure totals", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")

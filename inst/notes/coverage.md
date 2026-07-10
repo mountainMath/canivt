@@ -1056,14 +1056,65 @@ directory slot table**:
 
 ## [ ] Unknown / possibly not in the binary
 
-- [~] **Footnote → member/dimension linkage.** The metadata CSV carries per-member
-  Note IDs. Footnote → *dimension* linkage IS stored and is now decoded: each
-  footnote is an entry of its owning dimension's slot directory (see the header
-  section-pointer table above), and `ivt_f2_footnotes()` emits it as a
-  `dimension` field on every footnote. Per-*member* linkage remains open: the
-  small records preceding each footnote pair in the directory look like member
-  references (plausible, unverified). (The inline `01 01 … 00 01` markers we
-  investigated earlier are block framing, not note references.)
+- [x] **Footnote → table / dimension / member linkage — DECODED and SURFACED**
+  (2026-07-09). Every footnote now carries a `scope` (`"table"` / `"dimension"` /
+  `"member"`), the owning `dimension`, and a `member_id` for member notes, exactly
+  matching the three-tier scope in StatCan's own WDS footnote links
+  (`dimensionPositionId` 0 = table, `memberId` 0 = dimension). Geography is a
+  dimension here too. The three scopes are stored differently and each is read
+  structurally:
+  - **Member notes**: each dimension's footnote region in its slot directory opens
+    with a `84 01`-framed **member bitmap** (an EN copy and an identical FR copy) —
+    a dense record listing which members carry a note, read with the presence
+    convention (byte-pair-swapped, MSB-first). `ivt_f2_footnote_bitmap()` decodes it
+    to 1-based member positions; the footnote text entries then follow in that same
+    order, so the first `popcount(bitmap)` per language are member notes (assigned to
+    the bitmapped members in order) and the rest are dimension notes. (The "small
+    records preceding each footnote pair" from the earlier note ARE this bitmap; the
+    trailing int32s are block-index framing.)
+  - **Dimension notes**: the remaining footnote entries in the dimension directory
+    (`memberId 0`). One directory entry = one scope-target; where StatCan splits a
+    target's note into several Note IDs the IVT stores them concatenated in that one
+    entry (sometimes with an internal `Footnote 2` marker, sometimes merged), so the
+    IVT's granularity is one text per target — the scope/member attribution is exact,
+    the per-Note-ID split is not always recoverable.
+  - **Table notes**: stored in the master-directory identity blob (with the product
+    id / title), framed `Footnote N` / `Renvoi N` mid-blob; `ivt_f2_table_footnotes()`
+    finds them by the numbered marker (ignoring the bare `Footnotes :` section header
+    that empty-note tables still carry).
+
+  Validated **exact against StatCan WDS** on 98-10-0241 (10 targets: 6 member incl.
+  the non-Total member 13 / member 5, 4 dimension), 98-10-0077 (9 targets incl. a
+  table-level note and dim-2 member notes on members 1/7/8), 98-10-0023 and
+  98-10-0129 (member notes on Men+/Women+, two dimension notes each) — every
+  (dimension, member) target matches. `ivt_f2_dir_footnotes()` (dimdir.R) does the
+  member/dimension split, `ivt_f2_table_footnotes()` (dimdir.R) the table notes,
+  `ivt_f2_footnotes()` (read-f2.R) combines + renumbers them, and
+  `ivt_write_metadata()` writes `scope`/`dimension`/`member_id`/`member_refs` to
+  footnotes.csv.
+- [x] **Legacy `(N)` footnote → member linkage — DECODED and SURFACED**
+  (2026-07-09). The pre-DGUID profiles (1991 `98F0172X`/`95F0170X`; the same
+  mechanism would apply to any inline-codebook table) store footnotes as a
+  table-wide numbered `(N) text` list, and a member **cites** a note by embedding
+  its number as a `(N)` marker in its own label — the pre-DGUID analogue of the
+  modern member bitmap (Beyond 20/20 renders it as the superscript link). E.g.
+  `"1307 Other non-university - With certificate (19) (20)"` cites notes 19 & 20;
+  `"2604 Average value of dwelling (26) $"` cites 26 before a unit suffix.
+  `ivt_f2_note_refs()` (read-f2.R) parses these — **only** numeric parens whose
+  value is a valid footnote number (1..n_notes), so the leading profile line number
+  (unparenthesised) and text parentheticals like `(non-institutional)` are ignored,
+  and a modern table (no numeric-paren labels) yields nothing. `ivt_f2_attach_legacy_refs()`
+  turns each cited note into `scope = "member"` with `dimension` (the citing
+  dimension) and `member_refs` (**all** citing member ids — a legacy note is
+  one-to-many: `98F0172X`'s note 2 "knowledge of non-official languages" is cited by
+  30 members; `member_id` is set only when a single member cites it); notes no member
+  cites stay `scope = "table"`. It is **quiet** (not a fallback): the `(N)` marker is
+  the file's own reference notation and the read self-validates (every ref resolves to
+  an existing note), like the quiet indentation-derived `parent_id`/`depth`. Validated
+  on `98F0172X`/`95F0170X` (39 notes each, 131 refs, `member_refs` byte-identical to an
+  independent label scan; semantically coherent — note 2 → the 30 non-official-language
+  rows, note 21 "Postsecondary" → the two postsecondary-qualification members) and
+  `1003011` (a crosstab whose 40 notes are cited by no member → all `scope = "table"`).
 - [x] **Member hierarchy as a structured tree** — DONE (2026-07-06). The
   leading-space indentation of the member labels (preserved verbatim) is parsed
   into both `depth` (already exposed) and now `parent_id` — the `member_id` of
@@ -1085,10 +1136,11 @@ languages** (English + French member labels, dimension names, geography
 names/labels, footnotes, DQF legend and title). The bit-level gaps
 there, by size: (1) a few small header/marker bytes with inferred/unknown
 semantics and the dense value arrays' **bitstream per-member coding** (their
-values decode fully via the plain siblings' NA pattern); plus the
-footnote↔*member* linkage (dimension linkage is decoded) and structured member
-hierarchy that may be absent from the binary. The master directory at 992 and
-the `@712` DQF legend are now read (see the header section-pointer table above).
+values decode fully via the plain siblings' NA pattern). Footnote↔scope linkage
+(table / dimension / member) is now decoded and WDS-validated on the modern tables,
+and the legacy `(N)`-superscript → member linkage on the pre-DGUID profiles is
+decoded too; the master directory at 992 and the `@712` DQF legend are read (see the
+header section-pointer table above). Footnote scope is now complete across the corpus.
 
 The unified decoder handles **arbitrary-dimension** tables (validated on the
 4-dim 98-10-0129, cell-exact) and spans **1991–2021 census vintages**: the 1996

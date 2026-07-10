@@ -332,6 +332,69 @@ ivt_f2_legacy_footnotes <- function(raw, tail_bytes = 200000L) {
   out
 }
 
+# The legacy "(N)" footnotes (`ivt_f2_legacy_footnotes()`) are a table-wide numbered
+# note list; a member CITES a note by embedding its number as a "(N)" marker in the
+# member label (the 1991/2001 profiles: `"1307 Other non-university ... (19) (20)"`
+# cites notes 19 and 20; `"2604 Average value of dwelling (26) $"` cites 26 before a
+# unit suffix). This parses those references from the member labels of every
+# dimension (geography included -- its names come from `geo_names`), returning a
+# data frame (dimension, member_id, note). Only numeric parens whose value is a
+# valid footnote number (1..n_notes) are references -- so the leading profile line
+# number (not parenthesised) and non-numeric parentheticals like
+# "(non-institutional)" are ignored, and a modern table (whose data-dim labels carry
+# no numeric parens at all) yields nothing. `dims` is the metadata dimension list.
+ivt_f2_note_refs <- function(dims, geo_names, n_notes) {
+  if (is.na(n_notes) || n_notes < 1L) return(NULL)
+  rows <- list()
+  for (d in dims) {
+    labs <- if (isTRUE(d$is_geography)) geo_names else d$members
+    if (!length(labs)) next
+    for (mid in seq_along(labs)) {
+      L <- labs[[mid]]
+      if (is.na(L) || !nzchar(L)) next
+      nums <- regmatches(L, gregexpr("\\(([0-9]+)\\)", L))[[1]]
+      if (!length(nums)) next
+      nums <- as.integer(gsub("[()]", "", nums))
+      nums <- unique(nums[!is.na(nums) & nums >= 1L & nums <= n_notes])
+      for (nn in nums)
+        rows[[length(rows) + 1L]] <- data.frame(dimension = d$name,
+                                                member_id = mid, note = nn)
+    }
+  }
+  if (!length(rows)) return(NULL)
+  do.call(rbind, rows)
+}
+
+# Attach the parsed "(N)" member references to the legacy footnote records: a note
+# cited by members becomes scope = "member" (with `dimension`, `member_refs` = the
+# cited member ids, and `member_id` when a single member cites it); a note no member
+# cites stays scope = "table" (a general table note). Only records still carrying an
+# unresolved scope (NA -- the legacy path) are touched, so modern bitmap-attributed
+# notes are never overwritten. This is QUIET (not an `ivt_fallback()`): the "(N)"
+# marker is the file's OWN footnote-reference notation (the pre-DGUID analogue of the
+# modern member bitmap -- Beyond 20/20 renders it as the superscript link), so
+# reading it is the PRIMARY linkage read, not a heuristic fallback for a failed
+# positional one, and it self-validates (every ref resolves to an existing note
+# 1..n_notes) -- exactly like the quiet label-indentation `parent_id`/`depth`
+# derivation. Every corpus legacy note cites members of a single dimension; a note
+# spanning several dimensions keeps `dimension = NA` (member_refs still lists them).
+ivt_f2_attach_legacy_refs <- function(footnotes, dims, geo_names) {
+  if (!length(footnotes)) return(footnotes)
+  n_notes <- suppressWarnings(max(vapply(footnotes, `[[`, 0L, "number"), na.rm = TRUE))
+  refs <- ivt_f2_note_refs(dims, geo_names, n_notes)
+  lapply(footnotes, function(f) {
+    if (!is.na(f$scope)) return(f)                 # keep already-attributed notes
+    r <- if (is.null(refs)) NULL else refs[refs$note == f$number, , drop = FALSE]
+    if (is.null(r) || !nrow(r)) { f$scope <- "table"; return(f) }
+    dref <- unique(r$dimension)
+    f$scope <- "member"
+    f$member_refs <- sort(unique(r$member_id))
+    f$dimension <- if (length(dref) == 1L) dref else NA_character_
+    f$member_id <- if (nrow(r) == 1L) r$member_id[[1]] else NA_integer_
+    f
+  })
+}
+
 # Read the full codebook metadata for ANY supported family. The descriptor-driven
 # dimension model and the codebook member/footnote scans are format-agnostic; only
 # the geography layout differs, and that is keyed off the header (`inline` for the
@@ -404,24 +467,58 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
                           if (is.null(dir)) dir <- ivt_f2_find_directory(raw)
                           ivt_f2_geography_count(raw, dir)
                         },
-    footnotes         = if (inline) ivt_f2_legacy_footnotes(raw)
+    footnotes         = if (inline)
+                          ivt_f2_attach_legacy_refs(
+                            ivt_f2_footnote_finalize(ivt_f2_legacy_footnotes(raw)),
+                            dims, if (!is.null(geographies[["geo_name"]]))
+                                    geographies[["geo_name"]]
+                                  else geographies[["geo_label"]])
                         else ivt_f2_footnotes(raw, dims),
     # the data-quality-flag legend (dimdir.R; NULL when the table carries none)
     dqf_legend        = ivt_f2_dqf_legend(raw)
   )
 }
 
-# Footnotes for the modern (framed "Footnote N"/"Renvoi N") format. Primary: the
-# per-dimension slot directories (dimdir.R), which list each footnote as an entry
-# of the dimension it annotates -- so the result carries a `dimension` field.
-# Falls back to the tail text-scan when the slot table is absent, or when the
-# directories resolve but list no footnotes while the scan finds some (an
-# unknown layout storing them elsewhere degrades gracefully rather than
-# silently losing footnotes).
+# Ensure every footnote record carries the uniform field set (language, number,
+# text, scope, dimension, member_id) and renumber `number` per language over the
+# final ordered list. Keeps the output rectangular across every producing path
+# (dir / table / tail-scan / legacy), so write.R and `as_tibble()` never see a
+# ragged list. `default_scope` tags records a path cannot attribute (the tail
+# scan, the legacy "(N)" list) -- NA there rather than a guessed scope.
+ivt_f2_footnote_finalize <- function(fns, default_scope = NA_character_) {
+  if (!length(fns)) return(fns)
+  counts <- c(en = 0L, fr = 0L)
+  lapply(fns, function(f) {
+    lang <- f$language
+    counts[[lang]] <<- counts[[lang]] + 1L
+    member_id <- if (is.null(f$member_id)) NA_integer_ else f$member_id
+    # `member_refs` is the full set of member ids a note annotates (within
+    # `dimension`); modern member notes annotate exactly one (so it mirrors
+    # member_id), the legacy "(N)" notes can annotate many (attached later).
+    refs <- if (!is.null(f$member_refs)) f$member_refs
+            else if (!is.na(member_id)) member_id else integer(0)
+    list(language = lang, number = counts[[lang]], text = f$text,
+         scope = if (is.null(f$scope)) default_scope else f$scope,
+         dimension = if (is.null(f$dimension)) NA_character_ else f$dimension,
+         member_id = member_id, member_refs = refs)
+  })
+}
+
+# Footnotes for the modern (framed "Footnote N"/"Renvoi N") format, attributed to a
+# scope. Table-level (cube) notes come from the master-directory identity blob
+# (`ivt_f2_table_footnotes()`); dimension- and member-level notes from the
+# per-dimension slot directories (`ivt_f2_dir_footnotes()`, dimdir.R), which list
+# each footnote as an entry of the dimension it annotates and split member vs
+# dimension scope via the member bitmap. Every record carries `scope`
+# ("table"/"dimension"/"member"), `dimension` and `member_id`. Falls back to the
+# tail text-scan when the slot table is absent, or when the directories resolve but
+# list no footnotes while the scan finds some (an unknown layout storing them
+# elsewhere degrades gracefully rather than silently losing footnotes).
 ivt_f2_footnotes <- function(raw, dims = NULL) {
   dim_names <- if (length(dims)) vapply(dims, `[[`, "", "name") else NULL
+  tbl <- ivt_f2_table_footnotes(raw)
   fn <- ivt_f2_dir_footnotes(raw, dim_names = dim_names)
-  if (length(fn)) return(fn)
+  if (length(fn)) return(ivt_f2_footnote_finalize(c(tbl, fn)))
   sc <- ivt_footnotes(raw, max(0L, length(raw) - 200000L))
   if (length(sc)) {
     ivt_fallback(paste(
@@ -429,7 +526,7 @@ ivt_f2_footnotes <- function(raw, dims = NULL) {
       "scan found {length(sc)}; using the scanned footnotes (no dimension",
       "attribution)."))
   }
-  sc
+  ivt_f2_footnote_finalize(c(tbl, sc))
 }
 
 # Output column name per data dimension. `datacols` is the cells' data-column

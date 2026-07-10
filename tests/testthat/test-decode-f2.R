@@ -436,6 +436,38 @@ sample_ivt_1991 <- function() {
                     legacy = path.expand("~/projects/censusmapper-import/data/raw/1003011.IVT"))
 }
 
+# The pre-DGUID legacy footnotes are a table-wide numbered "(N) text" list, and a
+# member cites a note by embedding "(N)" in its label. ivt_f2_note_refs parses those
+# references; ivt_f2_attach_legacy_refs turns each cited note into a member-scope
+# footnote (member_refs = the citing member ids) and leaves uncited notes table-scope.
+# Pure unit test (no sample IVT needed).
+test_that("legacy (N) markers in member labels attribute footnotes to members", {
+  dims <- list(
+    list(name = "Values", is_geography = FALSE, members = "Values"),
+    list(name = "Profile", is_geography = FALSE,
+         members = c("101 A", "102 B (1)", "201 C (2) $", "202 D (1)", "301 E (7)")),
+    list(name = "Geography", is_geography = TRUE, members = character(0)))
+  # numeric parens only: "(1)" cites note 1 (twice), "(2)" cites 2, "(7)" is out of
+  # range (only 3 notes) and is ignored; a non-numeric paren would be ignored too.
+  refs <- ivt_f2_note_refs(dims, geo_names = c("Canada", "Ontario"), n_notes = 3L)
+  expect_equal(refs$note[order(refs$note, refs$member_id)], c(1L, 1L, 2L))
+  expect_setequal(refs$member_id[refs$note == 1L], c(2L, 4L))
+
+  fns <- ivt_f2_footnote_finalize(list(
+    list(language = "en", text = "note one"),
+    list(language = "en", text = "note two"),
+    list(language = "en", text = "note three (uncited)")))
+  out <- ivt_f2_attach_legacy_refs(fns, dims, geo_names = c("Canada", "Ontario"))
+  expect_equal(out[[1]]$scope, "member")          # note 1: cited by members 2 & 4
+  expect_equal(out[[1]]$dimension, "Profile")
+  expect_equal(out[[1]]$member_refs, c(2L, 4L))
+  expect_true(is.na(out[[1]]$member_id))          # >1 citing member -> no single id
+  expect_equal(out[[2]]$scope, "member")          # note 2: single member -> member_id set
+  expect_equal(out[[2]]$member_id, 3L)
+  expect_equal(out[[3]]$scope, "table")           # note 3: cited by nobody
+  expect_length(out[[3]]$member_refs, 0L)
+})
+
 test_that("1991 inline geography codebook decodes GEOUIDs and bilingual names", {
   p <- sample_ivt_1991()
   skip_if(p == "", "no 1991 sample (set CANIVT_SAMPLE_IVT_1991)")
@@ -997,4 +1029,33 @@ test_that("the 2016 income table decodes, with suppression as ABSENT cells", {
   expect_equal(sum(!g$has_data), 888L)
   expect_identical(!g$has_data, substr(g$dqf_code, 5L, 5L) == "9")
   expect_equal(g$geo_name[which(!g$has_data)[1]], "Portugal Cove South")
+})
+
+# The 1991 profile (98F0172X) exercises the legacy "(N)" footnote -> member linkage
+# end to end. Point CANIVT_SAMPLE_IVT_PROFILE_91 at a copy of 98F0172X.ivt to run.
+sample_ivt_profile_91 <- function() {
+  locate_sample_ivt("CANIVT_SAMPLE_IVT_PROFILE_91", "98F0172X")
+}
+
+test_that("legacy (N) footnote linkage decodes on the 1991 profile (98F0172X)", {
+  p <- sample_ivt_profile_91()
+  skip_if(p == "", "no 1991 profile sample (set CANIVT_SAMPLE_IVT_PROFILE_91)")
+  m <- ivt_metadata(p)
+  en <- Filter(function(f) f$language == "en", m$footnotes)
+  expect_equal(length(en), 39L)
+  # every note is cited by >=1 member of the profile dimension (member scope)
+  expect_true(all(vapply(en, function(f) identical(f$scope, "member"), logical(1))))
+  prof <- Filter(function(d) grepl("Profile", d$name), m$dimensions)[[1]]
+  # member_refs matches an independent scan of the profile labels for "(N)"
+  for (f in en) {
+    cited <- which(vapply(prof$members, function(L) {
+      nums <- as.integer(gsub("[()]", "",
+        regmatches(L, gregexpr("\\(([0-9]+)\\)", L))[[1]]))
+      f$number %in% nums
+    }, logical(1)))
+    expect_equal(sort(f$member_refs), unname(cited))
+    expect_equal(f$dimension, prof$name)
+  }
+  # note 2 ("knowledge of ... non-official languages") is cited by 30 members
+  expect_equal(length(en[[2]]$member_refs), 30L)
 })
