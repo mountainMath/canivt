@@ -11,6 +11,9 @@ members, geographic identifiers (names + DGUIDs/GEOUIDs), and footnotes.
 No companion CSV or metadata download is needed: everything, including the
 codebook, is decoded from the single `.ivt` file.
 
+## Documentation
+Please consult the [documentation and example articles](https://mountainmath.github.io/canivt/) for further information.
+
 ## Installation
 
 ```r
