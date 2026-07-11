@@ -676,6 +676,13 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
 #   3. the fast DGUID scan -> the large chunked modern tables (98-10-0023/0129):
 #      uid only (the full table needs the slower read_ivt(geo_attributes = TRUE)
 #      path).
+# The LEAN default geography read for `metadata$geographies` (packed downstream
+# into a list with all-NA columns dropped). Intentionally distinct from the full
+# `ivt_f2_geographies()` (the read_ivt(geo_attributes = TRUE) path): this ladder
+# uses CHEAP readers (uid-only for the big chunked tables), whereas the full path
+# runs the ~30 s complete attribute scan and keeps every column (incl. all-NA
+# ones) as a tibble. They are two deliberately-different contracts, not a merge
+# candidate -- see refactor-plan.md §5.1.
 ivt_f2_geo_light <- function(raw, n_geo) {
   # 1. the marker-anchored combined-block parser is tried before the content-based
   #    single-block detector: it returns NULL for the schema'd DGUID tables (no
@@ -1041,6 +1048,17 @@ ivt_f2_frscore <- function(v) {
 # geographies), so either assignment is correct (English first). This is the
 # one shared implementation of the idiom formerly inlined at every
 # language-pair site. Returns list(en, fr, en_first).
+#
+# LOUDNESS PHILOSOPHY (refactor-plan.md §5.3). Content scoring is the PRIMARY,
+# correct language decider for the geography per-group paths (`geo_attrs_dir`,
+# `geo_names`, `geo_root_dir`, `dqf_legend`) and is SILENT there by design: the
+# physical block language order is not fixed per file -- most groups are EN-first
+# but the geography root group is FR-first -- so there is no schema-declared order
+# to prefer and nothing to warn about; frscore is the read, not a fallback from
+# one. That is the opposite of `ivt_f2_dim_dir_label1()`, whose dictionary schema
+# block (`English Desc` before `Desc Fran...`) DOES fix the order: there frscore
+# is a genuine fallback for when the schema block is absent, so it warns
+# (`ivt_f2_label_lang_fallback()`). Same function, different status by context.
 ivt_f2_pick_en <- function(a, b) {
   d <- which(!is.na(a) & !is.na(b) & a != b)
   en_first <- ivt_f2_frscore(a[d]) <= ivt_f2_frscore(b[d])
@@ -2162,6 +2180,10 @@ ivt_f2_check_geo_names <- function(geo_name) {
 #' against the header, and returns a tibble whose leading columns are always
 #' `member_id`, `geo_name` and `geo_uid` (the DGUID for 2016+ tables, the bare
 #' GEOUID for older ones), followed by any layout-specific attribute columns.
+#'
+#' The FULL attribute table (the `read_ivt(geo_attributes = TRUE)` path): a tibble
+#' keeping every column, including all-NA ones (a tested contract). Intentionally
+#' distinct from the lean `ivt_f2_geo_light()` default -- see refactor-plan.md §5.1.
 #'
 #' @keywords internal
 #' @noRd

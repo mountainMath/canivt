@@ -167,13 +167,28 @@ tests and detection gate do). Design points:
 
 ## 5. Harmonization
 
-- [ ] **`ivt_f2_geo_light()` vs `ivt_f2_geographies()`**: two parallel
-  priority ladders over the same readers; with
-  `read_ivt(geo_attributes = TRUE)` the light path's work (uid scan, fill,
-  truncation flag) is computed then discarded when `ivt_f2_geographies()`
-  re-runs everything. One entry `ivt_f2_geographies(raw, full = FALSE)`; state
-  the `n_geo <= 256` cost gate in metadata terms ("one group of one chunk",
-  `length(sizes) == 1`).
+- [x] **`ivt_f2_geo_light()` vs `ivt_f2_geographies()` — resolved as WON'T MERGE**
+  (2026-07-11). The premise ("parallel ladders over the same readers") does not
+  hold on inspection: the two are **different reader sets** producing **two
+  deliberately-different, separately-tested output contracts**, verified by
+  snapshotting `metadata$geographies` (light) vs `ivt_f2_geographies()` (full)
+  across the whole corpus:
+  - **Different readers, not just shapes.** For the big chunked tables the light
+    path is **uid-only** (98-10-0023 / 98-10-0013 → `member_id, geo_uid`, a fast
+    positional DGUID scan), whereas the full path runs the ~30 s complete
+    attribute scan (all 16 columns). They are not the same read gated differently.
+  - **Different contracts.** The full tibble **keeps all-NA columns by design**
+    (1003011 keeps all-NA `geo_type_abbr`/`tnr_short_form`; 98-10-0013 keeps all-NA
+    `tnr_short_form`) and the tests assert its column set (`dqf_note_truncated %in%
+    names(g)`, the truncation-flag count). The lean default packs a **list with
+    all-NA columns dropped**. Collapsing to one entry would force one contract on
+    the other — breaking either the lean default or the tested full tibble.
+  - **The "recompute" is cheap.** On `geo_attributes = TRUE` the discarded
+    light work is a uid scan (~1 s) in front of the 30 s full scan it precedes;
+    not worth a contract-breaking merge.
+  The only genuinely shared step is the inline-first read + `geouid`→`geo_uid`
+  rename (~3 lines), too small to abstract. Both functions carry a cross-reference
+  comment noting they are intentionally distinct.
 - [x] **`ivt_idx0()` vs `ivt_f2_find_directory()`** (2026-07-11): the low-16-bit
   `+ k·65536` unwrap now lives once in `ivt_f2_dir_anchor_header()`
   (container-f2.R), and `ivt_idx0()` (container.R) is a thin wrapper over it
@@ -185,15 +200,18 @@ tests and detection gate do). Design points:
   documented `>= 1024` header floor (`ivt_f2_entry_valid()`) on both sides. The
   fallback marker scan's `mk >= 1e5` floor is now truly last-resort (only if
   `@558` is absent/corrupt) and left as-is.
-- [ ] **Loudness of content-based language assignment**:
-  `ivt_f2_dim_dir_label1()` warns when it falls back to `frscore` (no schema
-  block), but the geography paths (`attrs_dir`, `geo_names`, `root_dir`,
-  `dqf_legend`) use `frscore` as the *primary* language decider, silently.
-  Defensible (per-group order genuinely varies — the root group is FR-first),
-  but state the philosophy once: either pin language from the schema's
-  `_EN`/`_FR` field naming where block order follows schema order (frscore as
-  validating tiebreak), or document why per-group content scoring is primary
-  there.
+- [x] **Loudness of content-based language assignment — philosophy documented**
+  (2026-07-11). Chose the "document why per-group content scoring is primary"
+  option (not "pin from schema `_EN`/`_FR` naming"): the geography block language
+  order genuinely varies per group (most EN-first, the geography ROOT group
+  FR-first), so there is no schema-declared order to pin against — `frscore` is
+  the correct primary read there, not a fallback, hence silent. That is the
+  opposite of `ivt_f2_dim_dir_label1()`, whose dictionary schema block DOES fix
+  the order, making `frscore` a genuine (loud) fallback when the block is absent.
+  The philosophy is now stated once at the shared `ivt_f2_pick_en()` (codebook-f2.R)
+  with a cross-reference from the loud `ivt_f2_label_lang_fallback()` (dimdir.R).
+  Same function, different status by context — no code change, the asymmetry is
+  correct.
 
 ## 6. Sharpening toward metadata-driven (retiring fallback paths)
 

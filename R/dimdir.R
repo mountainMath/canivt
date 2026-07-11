@@ -241,6 +241,10 @@ ivt_f2_dir_member_arrays <- function(raw, dir, cnt, rows, accept,
 # Language order of a dimension's two member-label blocks when the dictionary
 # schema block is absent: decided by content score (`ivt_f2_pick_en()`), loudly
 # -- the schema order (English Desc before Desc Francais) is the primary read.
+# This is the LOUD counterpart to the geography paths' SILENT primary use of the
+# same score: here a schema order exists to prefer, so content scoring is a
+# fallback and warns; there block order genuinely varies per group, so it is the
+# correct primary read (the philosophy is stated once at `ivt_f2_pick_en()`).
 ivt_f2_label_lang_fallback <- function(nm, a, b) {
   en_first <- ivt_f2_pick_en(a, b)$en_first
   ivt_fallback(paste(
