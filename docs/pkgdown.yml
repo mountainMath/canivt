@@ -1,0 +1,11 @@
+pandoc: '3.10'
+pkgdown: 2.2.0
+pkgdown_sha: ~
+articles:
+  borealis: borealis.html
+  getting-started: getting-started.html
+  ivt-format: ivt-format.html
+last_built: 2026-07-11T05:42Z
+urls:
+  reference: https://mountainmath.github.io/canivt/reference
+  article: https://mountainmath.github.io/canivt/articles
