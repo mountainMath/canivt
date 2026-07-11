@@ -8,15 +8,22 @@
 #'
 #' @inheritParams ivt_download
 #' @param ... Passed to [ivt_download()].
-#' @return An `ivt` object (see [read_ivt()]).
+#' @return An `ivt` object (see [read_ivt()]), or `NULL` (invisibly, with a
+#'   warning) if the table could not be downloaded (e.g. offline).
 #' @examples
-#' \dontrun{
+#' # Downloads from Statistics Canada. Returns NULL with a warning if offline
+#' # (no error), so no try() is needed.
+#' \donttest{
 #' tab <- ivt_read_table("98100241")
-#' ivt_write_parquet(tab, "98100241.parquet")
-#' ivt_write_metadata(tab, "98100241_metadata")
+#' if (!is.null(tab)) {
+#'   ivt_write_parquet(tab, file.path(tempdir(), "98100241.parquet"))
+#'   ivt_write_metadata(tab, file.path(tempdir(), "98100241_metadata"))
+#' }
 #' }
 #' @export
 ivt_read_table <- function(pid, dest_dir = NULL, lang = c("en", "fr"), ...) {
-  path <- ivt_download(pid, dest_dir = dest_dir, lang = match.arg(lang), ...)
-  read_ivt(path)
+  ivt_offline_grace({
+    path <- ivt_download_impl(pid, dest_dir = dest_dir, lang = match.arg(lang), ...)
+    read_ivt(path)
+  })
 }

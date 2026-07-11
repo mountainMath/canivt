@@ -15,7 +15,7 @@ order rather than alphabetically."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -30,6 +30,7 @@ order rather than alphabetically."></head><body>
     <li><a class="dropdown-item" href="../articles/borealis.html">Custom tabulations from the Borealis Dataverse</a></li>
     <li><a class="dropdown-item" href="../articles/ivt-format.html">The Beyond 20/20 IVT file format</a></li>
   </ul></li>
+<li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mountainMath/canivt/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -115,7 +116,7 @@ levels.</p></dd>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p><code>x</code> can be an <code>ivt</code> object from <code><a href="read_ivt.html">read_ivt()</a></code>, the Arrow dataset returned by
-<code><a href="get_statcan_ivt.html">get_statcan_ivt()</a></code> (optionally after <code>dplyr</code> verbs such as <code><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter()</a></code>), or
+<code><a href="get_statcan_ivt.html">get_statcan_ivt()</a></code> (optionally after <code>dplyr</code> verbs such as <code><a href="https://rdrr.io/r/stats/filter.html" class="external-link">filter()</a></code>), or
 a path to a Parquet written by <code><a href="ivt_write_parquet.html">ivt_write_parquet()</a></code>. For the Arrow /
 Parquet forms the member levels come from the <code>&lt;name&gt;_members.parquet</code>
 sidecar written alongside the data (or pass <code>members</code> explicitly, e.g. from
@@ -124,6 +125,22 @@ integer-id table (<code>labels = FALSE</code>), where the member-id columns are 
 to their labels while being converted.</p>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"98100044.ivt"</span>, package <span class="op">=</span> <span class="st">"canivt"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">ivt</span> <span class="op">&lt;-</span> <span class="fu"><a href="read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu">collect_ivt</span><span class="op">(</span><span class="va">ivt</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="co"># data-dimension columns become factors whose levels are the full member list</span></span></span>
+<span class="r-in"><span><span class="va">fac</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">vapply</a></span><span class="op">(</span><span class="va">df</span>, <span class="va">is.factor</span>, <span class="fu"><a href="https://rdrr.io/r/base/logical.html" class="external-link">logical</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span><span class="op">)</span><span class="op">]</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/levels.html" class="external-link">levels</a></span><span class="op">(</span><span class="va">df</span><span class="op">[[</span><span class="va">fac</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Total - Type of collective dwelling"                                                 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [2] "Health care and related facilities"                                                  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [3] "Hospitals"                                                                           </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [4] "Nursing homes"                                                                       </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [5] "Residences for senior citizens"                                                      </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [6] "Facilities that are a mix of both a nursing home and a residence for senior citizens"</span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

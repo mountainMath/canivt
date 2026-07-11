@@ -61,10 +61,21 @@
 #'   `attr(., "members")` -- [collect_ivt()] uses it to convert dimension
 #'   columns into full-level factors.
 #' @seealso [statcan_ivt_catalogue()], [read_ivt()]
+#' @examples
+#' # Downloads, decodes and caches. Returns NULL with a warning if offline
+#' # (no error), so no try() is needed.
+#' \donttest{
+#' ds <- get_statcan_ivt("98-10-0241-01")
+#' # `ds` is an Arrow connection; query it lazily and then collect:
+#' if (!is.null(ds) && requireNamespace("dplyr", quietly = TRUE)) {
+#'   print(dplyr::collect(head(ds)))
+#' }
+#' }
 #' @export
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
                             dim_names = c("slug", "label"), language = "en",
-                            keep_ivt = FALSE, refresh = FALSE, quiet = FALSE) {
+                            keep_ivt = FALSE, refresh = FALSE, quiet = FALSE)
+  ivt_offline_grace({
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to open the parsed Parquet.")
   }
@@ -117,7 +128,7 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
                     language = language)
 
   ivt_parquet_connection(parquet, row)
-}
+})
 
 #' List the canivt cache contents
 #'
@@ -139,6 +150,9 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
 #'   `path`, `bytes`, `modified`, and the catalogue columns `catalogue`, `title`,
 #'   `census_year`, `topic` (`NA` when the key matches no product).
 #' @seealso [get_statcan_ivt()], [statcan_ivt_catalogue()]
+#' @examples
+#' # Lists whatever is in the configured cache directories (empty when unset):
+#' list_ivt_cache()
 #' @export
 list_ivt_cache <- function(catalogue = NULL) {
   ivt_dir  <- ivt_cache_dir("ivt",  create = FALSE)
@@ -289,6 +303,9 @@ ivt_cache_match <- function(rows, wants) {
 #' @return Invisibly, a tibble of the removed (or, for `dry_run`, matched) files
 #'   with `kind` (`"ivt"`/`"parquet"`/`"sidecar"`), `path` and `bytes`.
 #' @seealso [list_ivt_cache()]
+#' @examples
+#' # Preview what a prune would remove without deleting anything:
+#' prune_ivt_cache(dry_run = TRUE)
 #' @export
 prune_ivt_cache <- function(x = NULL, kind = NULL, language = NULL,
                             sidecars = TRUE, dry_run = FALSE) {
@@ -432,7 +449,7 @@ ivt_manual_download <- function(source, key, dest_dir = NULL, overwrite = FALSE,
     if (!quiet) cli::cli_inform("Downloading {.url {source}}")
     tmp <- tempfile(fileext = ".bin")
     on.exit(unlink(tmp), add = TRUE)
-    utils::download.file(source, tmp, mode = "wb", quiet = quiet)
+    ivt_download_to(source, tmp, quiet = quiet)
     return(ivt_store_download(tmp, dest_dir, out_name))
   }
   path <- path.expand(source)
@@ -447,7 +464,7 @@ ivt_manual_download <- function(source, key, dest_dir = NULL, overwrite = FALSE,
 # Resolve a catalogue number to its StatCan catalogue row. Returns NULL when no
 # product matches and `error = FALSE`; aborts otherwise.
 ivt_lookup_catalogue <- function(catalogue, quiet = FALSE, error = TRUE) {
-  catl <- statcan_ivt_catalogue(quiet = quiet)
+  catl <- ivt_build_catalogue(quiet = quiet)
   want <- ivt_catalogue_norm(catalogue)
   norm <- ivt_catalogue_norm(catl$catalogue)
   hit <- which(norm == want)
@@ -479,8 +496,8 @@ ivt_resolve_source <- function(catalogue, quiet = FALSE) {
   if (!is.null(row)) {
     return(list(source = "statcan", row = row,
       download = function(key, overwrite, quiet, dest_dir = NULL)
-        statcan_ivt_download(row$download_url, key = key, dest_dir = dest_dir,
-                             overwrite = overwrite, quiet = quiet)))
+        ivt_statcan_download_impl(row$download_url, key = key, dest_dir = dest_dir,
+                                  overwrite = overwrite, quiet = quiet)))
   }
   brow <- ivt_lookup_borealis(catalogue, quiet = quiet)
   if (!is.null(brow)) {
@@ -517,8 +534,8 @@ ivt_row_source <- function(row) {
   if (all(c("catalogue", "download_url") %in% names(row))) {
     return(list(source = "statcan", row = row,
       download = function(key, overwrite, quiet, dest_dir = NULL)
-        statcan_ivt_download(row$download_url, key = key, dest_dir = dest_dir,
-                             overwrite = overwrite, quiet = quiet)))
+        ivt_statcan_download_impl(row$download_url, key = key, dest_dir = dest_dir,
+                                  overwrite = overwrite, quiet = quiet)))
   }
   cli::cli_abort(c(
     "Unrecognised catalogue row.",
@@ -590,10 +607,28 @@ ivt_lookup_borealis <- function(catalogue, quiet = FALSE) {
 #'   [get_statcan_ivt()] passes a temporary folder when `keep_ivt = FALSE`.
 #' @param overwrite Re-download even if a `.ivt` already exists.
 #' @param quiet Suppress the download message.
-#' @return Path to the local `.ivt` file.
+#' @return Path to the local `.ivt` file, or `NULL` (invisibly, with a warning)
+#'   if the endpoint could not be reached.
+#' @examples
+#' # Downloads from Statistics Canada. Returns NULL with a warning if offline
+#' # (no error), so no try() is needed.
+#' \donttest{
+#' url <- statcan_ivt_resolve_url("Alternative.cfm?PID=55701&EXT=IVT")
+#' path <- statcan_ivt_download(url, key = "97-570-X1981004", dest_dir = tempdir())
+#' }
 #' @export
 statcan_ivt_download <- function(download_url, key = NULL, dest_dir = NULL,
                                  overwrite = FALSE, quiet = FALSE) {
+  ivt_offline_grace(
+    ivt_statcan_download_impl(download_url, key = key, dest_dir = dest_dir,
+                              overwrite = overwrite, quiet = quiet))
+}
+
+# Core StatCan download (raises `canivt_offline` on a connection failure); the
+# exported statcan_ivt_download() wraps this, get_statcan_ivt()'s resolver calls
+# it directly so the offline signal reaches that function's grace boundary.
+ivt_statcan_download_impl <- function(download_url, key = NULL, dest_dir = NULL,
+                                      overwrite = FALSE, quiet = FALSE) {
   if (is.data.frame(download_url)) {
     row <- download_url
     if (nrow(row) != 1L)
@@ -614,6 +649,6 @@ statcan_ivt_download <- function(download_url, key = NULL, dest_dir = NULL,
   if (!quiet) cli::cli_inform("Downloading {.url {download_url}}")
   tmp <- tempfile(fileext = ".bin")
   on.exit(unlink(tmp), add = TRUE)
-  utils::download.file(download_url, tmp, mode = "wb", quiet = quiet)
+  ivt_download_to(download_url, tmp, quiet = quiet)
   ivt_store_download(tmp, dest_dir, paste0(key, ".ivt"))
 }

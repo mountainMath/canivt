@@ -36,6 +36,13 @@ slice, or by a bare numeric \code{file_id}) from the Dataverse access API into t
 ivt cache and returns the local \code{.ivt} path. Requires the Borealis API key
 (\code{BOREALIS_DATAVERSE_KEY}).
 }
+\examples{
+# Requires a Borealis API key (BOREALIS_DATAVERSE_KEY) and network access:
+\dontrun{
+hits <- borealis_ivt_catalogue()
+path <- borealis_ivt_download(hits[1, ], dest_dir = tempdir())
+}
+}
 \seealso{
 \code{\link[=borealis_ivt_catalogue]{borealis_ivt_catalogue()}}, \code{\link[=get_statcan_ivt]{get_statcan_ivt()}}
 }

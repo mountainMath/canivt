@@ -33,6 +33,15 @@ explicit \code{members} table, e.g. from \code{\link[=ivt_members]{ivt_members()
 from the file name marker via \code{\link[=ivt_parquet_language]{ivt_parquet_language()}} unless given, so the
 labels match the language the Parquet was written in.
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+if (requireNamespace("dplyr", quietly = TRUE)) {
+  df <- ivt_tidy(ivt, labels = FALSE)          # slug-named columns
+  labelled <- label_ivt_columns(df, members = ivt_members(ivt))
+  names(labelled)
+}
+}
 \seealso{
 \code{\link[=collect_ivt]{collect_ivt()}}, \code{\link[=ivt_parquet_language]{ivt_parquet_language()}}
 }

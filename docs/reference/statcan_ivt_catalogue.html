@@ -19,7 +19,7 @@ refreshing it.'></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -34,6 +34,7 @@ refreshing it.'></head><body>
     <li><a class="dropdown-item" href="../articles/borealis.html">Custom tabulations from the Borealis Dataverse</a></li>
     <li><a class="dropdown-item" href="../articles/ivt-format.html">The Beyond 20/20 IVT file format</a></li>
   </ul></li>
+<li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mountainMath/canivt/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -91,9 +92,30 @@ Filtering does not avoid building the full cache the first time.</p></dd>
 <code>download_url</code> and <code>http_url</code>. <code>ivt_url</code> is the link as published (the
 <code>Alternative.cfm</code> intermediate page or a direct b2020 <code>.zip</code>);
 <code>download_url</code> is the resolved direct-download URL (see
-<code><a href="statcan_ivt_resolve_url.html">statcan_ivt_resolve_url()</a></code>).</p>
+<code><a href="statcan_ivt_resolve_url.html">statcan_ivt_resolve_url()</a></code>). <code>NULL</code> (invisibly, with a warning) if the
+index had to be scraped and could not be reached.</p>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="co"># Scrapes the StatCan datasets index (and caches it). Returns NULL with a</span></span></span>
+<span class="r-in"><span><span class="co"># warning if offline (no error), so no try() is needed.</span></span></span>
+<span class="r-in"><span><span class="co"># \donttest{</span></span></span>
+<span class="r-in"><span><span class="va">catl</span> <span class="op">&lt;-</span> <span class="fu">statcan_ivt_catalogue</span><span class="op">(</span>temporal <span class="op">=</span> <span class="fl">2021</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">catl</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 6 × 12</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   census_year temporal catalogue   archived release_date date  topic title pid  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span>        <span style="text-decoration: underline;">2</span>021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… <span style="color: #BB0000;">NA</span>   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">2</span>        <span style="text-decoration: underline;">2</span>021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… <span style="color: #BB0000;">NA</span>   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">3</span>        <span style="text-decoration: underline;">2</span>021 2021     98-402-X20… FALSE    2023-03-29   Marc… Popu… Popu… <span style="color: #BB0000;">NA</span>   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">4</span>        <span style="text-decoration: underline;">2</span>021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… <span style="color: #BB0000;">NA</span>   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">5</span>        <span style="text-decoration: underline;">2</span>021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… <span style="color: #BB0000;">NA</span>   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">6</span>        <span style="text-decoration: underline;">2</span>021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… <span style="color: #BB0000;">NA</span>   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 3 more variables: ivt_url &lt;chr&gt;, download_url &lt;chr&gt;, http_url &lt;chr&gt;</span></span>
+<span class="r-in"><span><span class="co"># }</span></span></span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

@@ -38,3 +38,25 @@ no product).
 
 [`get_statcan_ivt()`](https://mountainmath.github.io/canivt/reference/get_statcan_ivt.md),
 [`statcan_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_catalogue.md)
+
+## Examples
+
+``` r
+# Lists whatever is in the configured cache directories (empty when unset):
+list_ivt_cache()
+#> # A tibble: 49 × 10
+#>    kind    key               language catalogue   title census_year topic  bytes
+#>    <chr>   <chr>             <chr>    <chr>       <chr>       <int> <chr>  <dbl>
+#>  1 ivt     1003011           NA       1003011     E910…        1991 Age,… 2.67e7
+#>  2 parquet 1003011           en       1003011     E910…        1991 Age,… 1.31e7
+#>  3 parquet 1003011           NA       1003011     E910…        1991 Age,… 1.27e7
+#>  4 ivt     94F0009XDB96078   NA       94F0009XDB… Cens…        1996 Sour… 1.17e5
+#>  5 ivt     95F0170X          NA       95F0170X    Prof…        1991 Prof… 9.26e6
+#>  6 ivt     95F0200XDB96003   NA       95F0200XDB… Occu…        1996 Occu… 2.40e7
+#>  7 ivt     95F0223XDB96001   NA       95F0223XDB… Tota…        1996 Immi… 3.26e6
+#>  8 ivt     95F0250XDB96001   NA       95F0250XDB… Priv…        1996 Sour… 7.82e5
+#>  9 ivt     97-563-XCB2006072 NA       97-563-XCB… Pres…        2006 Inco… 3.74e7
+#> 10 parquet 97-563-XCB2006072 en       97-563-XCB… Pres…        2006 Inco… 1.75e7
+#> # ℹ 39 more rows
+#> # ℹ 2 more variables: modified <dttm>, path <chr>
+```

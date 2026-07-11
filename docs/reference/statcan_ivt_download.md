@@ -51,4 +51,16 @@ statcan_ivt_download(
 
 ## Value
 
-Path to the local `.ivt` file.
+Path to the local `.ivt` file, or `NULL` (invisibly, with a warning) if
+the endpoint could not be reached.
+
+## Examples
+
+``` r
+# Downloads from Statistics Canada. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+# \donttest{
+url <- statcan_ivt_resolve_url("Alternative.cfm?PID=55701&EXT=IVT")
+path <- statcan_ivt_download(url, key = "97-570-X1981004", dest_dir = tempdir())
+# }
+```

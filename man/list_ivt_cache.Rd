@@ -28,6 +28,10 @@ matches a product in the \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalog
 (\verb{_members.parquet}) and the catalogue cache itself are infrastructure and are
 not listed.
 }
+\examples{
+# Lists whatever is in the configured cache directories (empty when unset):
+list_ivt_cache()
+}
 \seealso{
 \code{\link[=get_statcan_ivt]{get_statcan_ivt()}}, \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}
 }

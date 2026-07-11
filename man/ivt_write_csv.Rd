@@ -40,3 +40,9 @@ carries both languages regardless.}
 \description{
 Write an IVT table to CSV
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+out <- ivt_write_csv(ivt, file.path(tempdir(), "98100044.csv"))
+file.exists(out)
+}

@@ -55,3 +55,13 @@ Path to the local `.ivt` file.
 
 [`borealis_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/borealis_ivt_catalogue.md),
 [`get_statcan_ivt()`](https://mountainmath.github.io/canivt/reference/get_statcan_ivt.md)
+
+## Examples
+
+``` r
+# Requires a Borealis API key (BOREALIS_DATAVERSE_KEY) and network access:
+if (FALSE) { # \dontrun{
+hits <- borealis_ivt_catalogue()
+path <- borealis_ivt_download(hits[1, ], dest_dir = tempdir())
+} # }
+```

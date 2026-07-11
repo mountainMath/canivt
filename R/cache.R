@@ -21,6 +21,9 @@
 #' @param create Create the directory if it does not exist? Default `TRUE`.
 #' @return The cache directory path (a `tempdir()` subfolder when the option is
 #'   unset).
+#' @examples
+#' # With no option set, the cache resolves to a per-session tempdir folder.
+#' ivt_cache_dir("data", create = FALSE)
 #' @export
 ivt_cache_dir <- function(which = c("ivt", "data"), create = TRUE) {
   which <- match.arg(which)

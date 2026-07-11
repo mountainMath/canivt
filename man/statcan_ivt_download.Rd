@@ -31,11 +31,20 @@ folder under the ivt cache (\link[=ivt_cache_dir]{ivt_cache_dir("ivt")});
 \item{quiet}{Suppress the download message.}
 }
 \value{
-Path to the local \code{.ivt} file.
+Path to the local \code{.ivt} file, or \code{NULL} (invisibly, with a warning)
+if the endpoint could not be reached.
 }
 \description{
 Downloads a \code{.ivt} (or its containing \code{.zip}) from a resolved
 \code{\link[=statcan_ivt_resolve_url]{statcan_ivt_resolve_url()}} URL into the ivt cache and returns the local
 \code{.ivt} path. The payload is sniffed: a \code{.zip} is unzipped, a raw IVT is kept
 as-is.
+}
+\examples{
+# Downloads from Statistics Canada. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+\donttest{
+url <- statcan_ivt_resolve_url("Alternative.cfm?PID=55701&EXT=IVT")
+path <- statcan_ivt_download(url, key = "97-570-X1981004", dest_dir = tempdir())
+}
 }

@@ -26,3 +26,9 @@ the footnotes (\code{footnotes.csv}), the data-quality-flag legend
 (\code{dqf_legend.csv}, when the table carries one) and the table identity
 (\code{table_info.csv}).
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+out <- ivt_write_metadata(ivt, file.path(tempdir(), "98100044_metadata"))
+list.files(out)
+}

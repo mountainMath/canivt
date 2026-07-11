@@ -79,8 +79,8 @@ A tibble with the dimension columns converted to factors.
 the Arrow dataset returned by
 [`get_statcan_ivt()`](https://mountainmath.github.io/canivt/reference/get_statcan_ivt.md)
 (optionally after `dplyr` verbs such as
-[`filter()`](https://dplyr.tidyverse.org/reference/filter.html)), or a
-path to a Parquet written by
+[`filter()`](https://rdrr.io/r/stats/filter.html)), or a path to a
+Parquet written by
 [`ivt_write_parquet()`](https://mountainmath.github.io/canivt/reference/ivt_write_parquet.md).
 For the Arrow / Parquet forms the member levels come from the
 `<name>_members.parquet` sidecar written alongside the data (or pass
@@ -89,3 +89,20 @@ For the Arrow / Parquet forms the member levels come from the
 Works on both the labelled table and the compact integer-id table
 (`labels = FALSE`), where the member-id columns are mapped to their
 labels while being converted.
+
+## Examples
+
+``` r
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+df <- collect_ivt(ivt)
+# data-dimension columns become factors whose levels are the full member list
+fac <- names(df)[vapply(df, is.factor, logical(1))]
+head(levels(df[[fac[1]]]))
+#> [1] "Total - Type of collective dwelling"                                                 
+#> [2] "Health care and related facilities"                                                  
+#> [3] "Hospitals"                                                                           
+#> [4] "Nursing homes"                                                                       
+#> [5] "Residences for senior citizens"                                                      
+#> [6] "Facilities that are a mix of both a nursing home and a residence for senior citizens"
+```

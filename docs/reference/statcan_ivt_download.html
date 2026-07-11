@@ -13,7 +13,7 @@ as-is."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -28,6 +28,7 @@ as-is."></head><body>
     <li><a class="dropdown-item" href="../articles/borealis.html">Custom tabulations from the Borealis Dataverse</a></li>
     <li><a class="dropdown-item" href="../articles/ivt-format.html">The Beyond 20/20 IVT file format</a></li>
   </ul></li>
+<li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mountainMath/canivt/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -95,9 +96,20 @@ folder under the ivt cache (<a href="ivt_cache_dir.html">ivt_cache_dir("ivt")</a
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>Path to the local <code>.ivt</code> file.</p>
+    <p>Path to the local <code>.ivt</code> file, or <code>NULL</code> (invisibly, with a warning)
+if the endpoint could not be reached.</p>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="co"># Downloads from Statistics Canada. Returns NULL with a warning if offline</span></span></span>
+<span class="r-in"><span><span class="co"># (no error), so no try() is needed.</span></span></span>
+<span class="r-in"><span><span class="co"># \donttest{</span></span></span>
+<span class="r-in"><span><span class="va">url</span> <span class="op">&lt;-</span> <span class="fu"><a href="statcan_ivt_resolve_url.html">statcan_ivt_resolve_url</a></span><span class="op">(</span><span class="st">"Alternative.cfm?PID=55701&amp;EXT=IVT"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu">statcan_ivt_download</span><span class="op">(</span><span class="va">url</span>, key <span class="op">=</span> <span class="st">"97-570-X1981004"</span>, dest_dir <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir</a></span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="co"># }</span></span></span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

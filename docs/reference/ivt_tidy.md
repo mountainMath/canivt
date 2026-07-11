@@ -65,3 +65,43 @@ ivt_tidy(
 ## Value
 
 A tibble.
+
+## Examples
+
+``` r
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+ivt_tidy(ivt)
+#> # A tibble: 399 × 7
+#>    geo_label geo_name geo_uid        geo_level type            collective  value
+#>    <chr>     <chr>    <chr>          <chr>     <chr>           <chr>       <dbl>
+#>  1 Canada    Canada   2021A000011124 Country   Total - Type o… Collectiv…  24140
+#>  2 Canada    Canada   2021A000011124 Country   Total - Type o… Populatio… 657920
+#>  3 Canada    Canada   2021A000011124 Country   Health care an… Collectiv…  13020
+#>  4 Canada    Canada   2021A000011124 Country   Health care an… Populatio… 485320
+#>  5 Canada    Canada   2021A000011124 Country   Hospitals       Collectiv…    300
+#>  6 Canada    Canada   2021A000011124 Country   Hospitals       Populatio…  11125
+#>  7 Canada    Canada   2021A000011124 Country   Nursing homes   Collectiv…   2435
+#>  8 Canada    Canada   2021A000011124 Country   Nursing homes   Populatio… 184890
+#>  9 Canada    Canada   2021A000011124 Country   Residences for… Collectiv…   2505
+#> 10 Canada    Canada   2021A000011124 Country   Residences for… Populatio… 159750
+#> # ℹ 389 more rows
+ivt_tidy(ivt, dim_names = "label")
+#> # A tibble: 399 × 7
+#>    geo_label geo_name geo_uid        geo_level `Type of collective dwelling`    
+#>    <chr>     <chr>    <chr>          <chr>     <chr>                            
+#>  1 Canada    Canada   2021A000011124 Country   Total - Type of collective dwell…
+#>  2 Canada    Canada   2021A000011124 Country   Total - Type of collective dwell…
+#>  3 Canada    Canada   2021A000011124 Country   Health care and related faciliti…
+#>  4 Canada    Canada   2021A000011124 Country   Health care and related faciliti…
+#>  5 Canada    Canada   2021A000011124 Country   Hospitals                        
+#>  6 Canada    Canada   2021A000011124 Country   Hospitals                        
+#>  7 Canada    Canada   2021A000011124 Country   Nursing homes                    
+#>  8 Canada    Canada   2021A000011124 Country   Nursing homes                    
+#>  9 Canada    Canada   2021A000011124 Country   Residences for senior citizens   
+#> 10 Canada    Canada   2021A000011124 Country   Residences for senior citizens   
+#> # ℹ 389 more rows
+#> # ℹ 2 more variables:
+#> #   `Collective dwellings occupied by usual residents and population in collective dwellings` <chr>,
+#> #   value <dbl>
+```

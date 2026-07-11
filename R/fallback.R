@@ -57,3 +57,46 @@ ivt_quietly <- function(expr) {
                         canivt_fallback = function(w) invokeRestart("muffleWarning")),
     canivt_fallback_error = function(e) NULL)
 }
+
+# --- Graceful offline handling -------------------------------------------------
+# The download / catalogue functions reach the network. CRAN's checks (and the
+# `\donttest` examples they run) may execute without internet, so a connection
+# failure must NOT abort with an error there. Every network access is funnelled
+# through a helper that raises a classed `canivt_offline` error on failure; each
+# exported entry point wraps its body in `ivt_offline_grace()`, which turns that
+# one condition into an informative warning and an invisible `NULL` return.
+# Internal cross-calls use the non-grace `_impl` cores so the signal reaches the
+# right boundary; any error that is NOT a connection failure propagates normally.
+
+ivt_offline_abort <- function(resource, parent = NULL) {
+  cli::cli_abort(
+    c("Could not reach {.url {resource}}.",
+      i = "Check your internet connection; the resource may also be unavailable."),
+    class = "canivt_offline", parent = parent, call = NULL)
+}
+
+# Wrap an exported network function's body. A `canivt_offline` condition becomes
+# a warning + `invisible(NULL)`; everything else (including argument/usage errors)
+# is left to propagate.
+ivt_offline_grace <- function(expr) {
+  tryCatch(
+    expr,
+    canivt_offline = function(cnd) {
+      cli::cli_warn(conditionMessage(cnd), class = "canivt_offline_warning")
+      invisible(NULL)
+    })
+}
+
+# Download `url` to `destfile`, converting any connection failure (an error, or a
+# non-zero status / missing file from `download.file()`) into `canivt_offline`.
+# `headers` is passed through (e.g. the Borealis API key).
+ivt_download_to <- function(url, destfile, quiet = FALSE, headers = NULL) {
+  args <- list(url = url, destfile = destfile, mode = "wb", quiet = quiet)
+  if (!is.null(headers)) args$headers <- headers
+  status <- tryCatch(
+    suppressWarnings(do.call(utils::download.file, args)),
+    error = function(e) ivt_offline_abort(url, parent = e))
+  if (!identical(as.integer(status), 0L) || !file.exists(destfile))
+    ivt_offline_abort(url)
+  invisible(destfile)
+}

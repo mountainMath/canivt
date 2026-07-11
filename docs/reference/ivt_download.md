@@ -45,4 +45,17 @@ ivt_download(
 
 ## Value
 
-Path to the downloaded `.ivt` file.
+Path to the downloaded `.ivt` file, or `NULL` (invisibly, with a
+warning) if the endpoint could not be reached.
+
+## Examples
+
+``` r
+# Downloads from Statistics Canada. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+# \donttest{
+path <- ivt_download("98100241", dest_dir = tempdir())
+#> Downloading <https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip>
+if (!is.null(path)) ivt <- read_ivt(path)
+# }
+```

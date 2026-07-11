@@ -49,3 +49,9 @@ Joins the decoded cells to the codebook so each dimension column holds its
 member label (and geography gains a \code{dguid} column), producing a long table
 analogous to the StatCan CSV download.
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+ivt_tidy(ivt)
+ivt_tidy(ivt, dim_names = "label")
+}

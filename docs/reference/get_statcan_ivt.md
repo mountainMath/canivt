@@ -124,3 +124,30 @@ used as-is, then decoded.
 
 [`statcan_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_catalogue.md),
 [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+
+## Examples
+
+``` r
+# Downloads, decodes and caches. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+# \donttest{
+ds <- get_statcan_ivt("98-10-0241-01")
+#> Downloading <https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip>
+#> Decoding
+#> /var/folders/z4/gcjq2cd93p3bs5bgp8j2vv240000gp/T//RtmpW8DJdI/canivt_tmp_ivt/98-10-0241-01/98100241.ivt
+# `ds` is an Arrow connection; query it lazily and then collect:
+if (!is.null(ds) && requireNamespace("dplyr", quietly = TRUE)) {
+  print(dplyr::collect(head(ds)))
+}
+#> # A tibble: 6 × 11
+#>   geo_label geo_name geo_uid geo_level age   household period statistics housing
+#>   <chr>     <chr>    <chr>   <chr>     <chr> <chr>     <chr>  <chr>      <chr>  
+#> 1 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
+#> 2 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
+#> 3 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
+#> 4 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
+#> 5 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
+#> 6 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
+#> # ℹ 2 more variables: tenure <chr>, value <dbl>
+# }
+```

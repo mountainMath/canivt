@@ -2,6 +2,8 @@
 *.ivt
 *.IVT
 *.zip
+# ...except the tiny bundled sample table shipped for examples/tests
+!inst/extdata/*.ivt
 # only ignore large data CSVs, keep package/test CSVs if any
 /data-raw/*.csv
 

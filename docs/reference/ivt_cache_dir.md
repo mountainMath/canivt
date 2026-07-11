@@ -43,3 +43,11 @@ option is unset).
 Set them either as options (e.g. in `.Rprofile`):
 `options(canivt.data_cache = "~/canivt-cache")`, or as environment
 variables (e.g. in `.Renviron`): `CANIVT_DATA_CACHE=~/canivt-cache`.
+
+## Examples
+
+``` r
+# With no option set, the cache resolves to a per-session tempdir folder.
+ivt_cache_dir("data", create = FALSE)
+#> [1] "/Users/jens/data/ivt_data"
+```

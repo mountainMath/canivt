@@ -22,9 +22,21 @@ IVT_CATALOGUE_MAX_AGE_DAYS <- 30
 #' @return A tibble with one row per version: `temporal` (the URL parameter,
 #'   e.g. `"2017"` for the 2016 long-form), `census` (the human label, e.g.
 #'   `"2016 Census - Part B (long-form questionnaire)"`) and `census_year` (the
-#'   leading 4-digit year of the label as an integer).
+#'   leading 4-digit year of the label as an integer). `NULL` (invisibly, with a
+#'   warning) if the index could not be reached.
+#' @examples
+#' # Scrapes the StatCan datasets index. Returns NULL with a warning if offline
+#' # (no error), so no try() is needed.
+#' \donttest{
+#' statcan_ivt_years()
+#' }
 #' @export
-statcan_ivt_years <- function() {
+statcan_ivt_years <- function() ivt_offline_grace(ivt_scrape_years())
+
+# Core scrape (raises `canivt_offline` on a connection failure); the exported
+# statcan_ivt_years() wraps this, statcan_ivt_catalogue() calls it directly so
+# the offline signal reaches the catalogue's own grace boundary.
+ivt_scrape_years <- function() {
   doc <- ivt_read_html(paste0(STATCAN_DATASETS_BASE, "Index-eng.cfm?Temporal=2021"))
   opts <- rvest::html_elements(doc, "select#Temporal option")
   if (!length(opts)) cli::cli_abort("Could not find the Temporal selector on the StatCan index page.")
@@ -57,9 +69,26 @@ statcan_ivt_years <- function() {
 #'   `download_url` and `http_url`. `ivt_url` is the link as published (the
 #'   `Alternative.cfm` intermediate page or a direct b2020 `.zip`);
 #'   `download_url` is the resolved direct-download URL (see
-#'   [statcan_ivt_resolve_url()]).
+#'   [statcan_ivt_resolve_url()]). `NULL` (invisibly, with a warning) if the
+#'   index had to be scraped and could not be reached.
+#' @examples
+#' # Scrapes the StatCan datasets index (and caches it). Returns NULL with a
+#' # warning if offline (no error), so no try() is needed.
+#' \donttest{
+#' catl <- statcan_ivt_catalogue(temporal = 2021)
+#' head(catl)
+#' }
 #' @export
 statcan_ivt_catalogue <- function(temporal = NULL, refresh = FALSE, quiet = FALSE) {
+  ivt_offline_grace(ivt_build_catalogue(temporal = temporal, refresh = refresh,
+                                        quiet = quiet))
+}
+
+# Core catalogue build (raises `canivt_offline` when it must scrape and the index
+# is unreachable); the exported statcan_ivt_catalogue() wraps this, and
+# ivt_lookup_catalogue() calls it directly so the offline signal reaches
+# get_statcan_ivt()'s grace boundary.
+ivt_build_catalogue <- function(temporal = NULL, refresh = FALSE, quiet = FALSE) {
   ivt_require_scrape_pkgs()
   cache_file <- file.path(ivt_cache_dir("data"), "statcan_ivt_catalogue.parquet")
 
@@ -68,7 +97,7 @@ statcan_ivt_catalogue <- function(temporal = NULL, refresh = FALSE, quiet = FALS
     catl <- tibble::as_tibble(arrow::read_parquet(cache_file))
     ivt_warn_stale_catalogue(cache_file)
   } else {
-    years <- statcan_ivt_years()
+    years <- ivt_scrape_years()
     parts <- lapply(seq_len(nrow(years)), function(i) {
       if (!quiet) cli::cli_inform("Scraping {years$census[i]} ({years$temporal[i]})")
       ivt_scrape_index(years$temporal[i], years$census_year[i])
@@ -167,6 +196,11 @@ ivt_parse_index_row <- function(r) {
 #' @param ivt_url The published IVT link (absolute or relative to the datasets
 #'   base).
 #' @return The direct-download URL.
+#' @examples
+#' # An Alternative.cfm landing page resolves to its Download.cfm endpoint:
+#' statcan_ivt_resolve_url("Alternative.cfm?PID=55701&EXT=IVT")
+#' # a direct .zip is returned unchanged:
+#' statcan_ivt_resolve_url("https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip")
 #' @export
 statcan_ivt_resolve_url <- function(ivt_url) {
   out <- ivt_abs_url(ivt_url)
@@ -195,10 +229,13 @@ ivt_abs_url <- function(href) {
   out
 }
 
-# Fetch + parse an HTML page (xml2/rvest). Isolated for testability.
+# Fetch + parse an HTML page (xml2/rvest). Isolated for testability. A connection
+# failure is converted to a classed `canivt_offline` error so the scraping entry
+# points can degrade gracefully (see ivt_offline_grace()).
 ivt_read_html <- function(url) {
   ivt_require_scrape_pkgs()
-  xml2::read_html(url)
+  tryCatch(xml2::read_html(url),
+           error = function(e) ivt_offline_abort(url, parent = e))
 }
 
 ivt_require_scrape_pkgs <- function() {

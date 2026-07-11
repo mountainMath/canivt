@@ -17,7 +17,7 @@ is; a column whose slug is not found is skipped."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,7 @@ is; a column whose slug is not found is skipped."></head><body>
     <li><a class="dropdown-item" href="../articles/borealis.html">Custom tabulations from the Borealis Dataverse</a></li>
     <li><a class="dropdown-item" href="../articles/ivt-format.html">The Beyond 20/20 IVT file format</a></li>
   </ul></li>
+<li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mountainMath/canivt/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -97,6 +98,23 @@ labels match the language the Parquet was written in.</p>
     <div class="dont-index"><p><code><a href="collect_ivt.html">collect_ivt()</a></code>, <code><a href="ivt_parquet_language.html">ivt_parquet_language()</a></code></p></div>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"98100044.ivt"</span>, package <span class="op">=</span> <span class="st">"canivt"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">ivt</span> <span class="op">&lt;-</span> <span class="fu"><a href="read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"dplyr"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
+<span class="r-in"><span>  <span class="va">df</span> <span class="op">&lt;-</span> <span class="fu"><a href="ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">ivt</span>, labels <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span>          <span class="co"># slug-named columns</span></span></span>
+<span class="r-in"><span>  <span class="va">labelled</span> <span class="op">&lt;-</span> <span class="fu">label_ivt_columns</span><span class="op">(</span><span class="va">df</span>, members <span class="op">=</span> <span class="fu"><a href="ivt_members.html">ivt_members</a></span><span class="op">(</span><span class="va">ivt</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">labelled</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-wrn co"><span class="r-pr">#&gt;</span> <span class="warning">Warning: </span>Unknown or uninitialised column: `files`.</span>
+<span class="r-wrn co"><span class="r-pr">#&gt;</span> <span class="warning">Warning: </span>Unknown or uninitialised column: `.data`.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "geo"                                                                                    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [2] "Type of collective dwelling"                                                            </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [3] "Collective dwellings occupied by usual residents and population in collective dwellings"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [4] "value"                                                                                  </span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

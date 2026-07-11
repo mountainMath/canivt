@@ -348,6 +348,87 @@ tails".
   `ivt_f2_legacy_footnotes()`, and the **`@712` DQF legend** is decoded
   (`ivt_f2_dqf_legend()`) and exposed as `dqf_legend` on `ivt_metadata()`.
 
+### Geography, flow, footnote & note completeness (2026-07-06 – 07-10) — DONE
+
+The last "small remaining" items that lived in `CLAUDE.md`'s Open-tasks list, now
+closed and moved here for the record.
+
+- **Every geography member across the corpus decodes a non-NA `geo_name`**
+  (2026-07-06). Two loud, metadata-driven fills close the last gaps (see
+  `coverage.md`): `ivt_f2_inline_name_subtract()` recovers inline names the
+  fixed-position regex misses — the code embedded mid-name (dual-name CSDs,
+  ord-08035) or a bare code-only geography (1996 EAs, 95F0200) — by subtracting the
+  code/flag/pct tokens held from the file's own arrays; `ivt_f2_geo_fill_label()`
+  backfills `geo_name` from `geo_label` for synthetic aggregate members
+  (98-10-0662's "Canada outside Quebec and New Brunswick"). Both fill only NAs
+  (validated tables byte-identical) and warn `canivt_fallback`.
+- **Commuting-flow decoder generalizes across ALL vintages (2011/2016/2021)**
+  (2026-07-09, see `coverage.md`). StatCan uses **three encodings** for the same
+  residence→work flow product, all now decoded: (1) **`0x0f` packed flow** (2011 +
+  2016 CSD `98-400-X2016325`): decoded by the 2011 reader unchanged (23,565 O-D
+  pairs, 100% res/work names+uids). (2) **residence × work crosstab** (all 2021:
+  `98-10-0459/0466/0460`, CSD/CD/CMA): a second geography-valued `Place of work`
+  dimension, no `0x0f`; strict-clean, residence is a chunked DGUID geography
+  (uid-only on the default path, names via `read_ivt(geo_attributes = TRUE)`, like
+  `98-10-0023`). (3) **single-dim combined `"origin / dest"` flow-pair labels**
+  (2016 CD/CMA `98-400-X2016391`/`-327`): same dedicated `origincode/destcode` uid
+  array as `0x0f`, just SHORTER codes (4-digit CD, 3-digit CMA); decoded by relaxing
+  `ivt_f2_geo_flow_dir()`/`ivt_f2_flow_sides()` to `[0-9]{3,9}` and trying the flow
+  reader BEFORE the plain inline reader (which latched onto the single-side name
+  array). `327`'s CMA geography also needed **`0x0b` added to the u16 width-tag set**
+  (u8 misread count 5 vs u16 1399). Both now 100% geography coverage (391: 4,199
+  flows; 327: 1,399), internal-consistency validated.
+- **Flow member order — VIEWER-VALIDATED** (2026-07-10). Decoded `(residence → work)
+  → value` triples are content-exact against the Beyond 20/20 viewer on every vintage
+  (`98-400-X2016325`/`391`/`327`, `99-012-X2011032`: 100% joined-value + set-equal
+  across sampled residences, after fixing each non-geography data dim to its Total
+  member as the viewer does). Our member order is residence-major, SGC-code ascending
+  (deterministic/geographic); the viewer re-sorts within a residence for display, so a
+  positional match isn't expected (same as the 2016203 geography re-sort). Scrape-based,
+  internal (`R/ground-truth.R`), not in the automated suite.
+- Fixed a latent `metadata$geographies` crash en route: an undecoded `geo_name` NULL
+  slot made the list ragged (`as_tibble()` failed) — now undecoded columns are omitted
+  so it is always rectangular (`read-f2.R`).
+- **`DQF_NOTE` truncation — DETECTED + FLAGGED, accepted by design** (2026-07-10).
+  `DQF_NOTE` texts are stored in a single-byte-length Pascal record, so notes longer
+  than 252 chars (`0xFC`) are truncated **by StatCan's writer in the source file** —
+  2,448 members on 98-10-0129, 90 on 98-10-0478. **Verified at the byte level**: a
+  truncated record is `[FC][252 text bytes][00]` cut mid-word, and the byte after the
+  `00` terminator opens the *next member's* record — there is **no continuation to
+  recover**, the tail is genuinely absent. Our read is byte-exact, so this is a
+  container limitation, not a decode gap. Now **surfaced, not silent**: wherever
+  `dqf_note` is present a companion `dqf_note_truncated` logical column marks the
+  affected members (`ivt_f2_dqf_note_truncated()` / `ivt_f2_flag_dqf_note_truncation()`,
+  `codebook-f2.R`), and a classed `canivt_dqf_note_truncated` /
+  `canivt_source_truncation` warning fires (`ivt_source_truncation()`, `fallback.R`).
+  Because it is a *faithful* read (not a heuristic path), `options(canivt.strict = TRUE)`
+  leaves it a warning rather than upgrading it to an error. On the big chunked tables
+  `dqf_note` (and the flag) only decode via `read_ivt(geo_attributes = TRUE)`.
+- **Synthetic-aggregate `geo_uid`/`geo_level` NA — accepted by design** (2026-07-06).
+  A geography member constructed at tabulation time (98-10-0662's member 26, "Canada
+  outside Quebec and New Brunswick") carries only a display label; the schema attribute
+  arrays (DGUID, level, type, …) store nothing for it. `ivt_f2_geo_fill_label()`
+  backfills its `geo_name` from `geo_label` (loud `canivt_fallback`), but `geo_uid` and
+  `geo_level` are genuinely absent in the file and correctly stay `NA` — an aggregate
+  has no DGUID. Regression-guarded in `test-decode.R` (0662) and `test-fallback.R`.
+- **Footnote scope (table / dimension / member) — DONE** (2026-07-09). Every
+  footnote carries `scope`, `dimension` and `member_id`, matching StatCan's WDS
+  links exactly (validated on 98-10-0241/0077/0023/0129). Member notes come from a
+  `84 01` member bitmap opening each dimension's footnote region
+  (`ivt_f2_footnote_bitmap()`, pair-swap/MSB-first → member positions; the first
+  `popcount` text entries are member notes, the rest dimension notes); table notes
+  from the master-directory identity blob (`ivt_f2_table_footnotes()`). **The legacy
+  `(N)`-superscript → member linkage on the pre-DGUID profiles is decoded too** — a
+  member cites a note by embedding `(N)` in its label; `ivt_f2_note_refs()` /
+  `ivt_f2_attach_legacy_refs()` (read-f2.R) parse those (numeric parens 1..n_notes)
+  into `scope = "member"` + `member_refs` (one-to-many; quiet, self-validating like
+  `parent_id`). Footnote scope is now complete across the corpus.
+- **Per-dimension `depth` on `ivt_tidy()` — DONE** (2026-07-09). `ivt_tidy(depth =
+  TRUE)` (opt-in, default `FALSE` so Parquet output is unchanged) adds a
+  `<col>_depth` integer column after each data-dimension column, read from the
+  label indentation (the same measure `ivt_members()` carries). Works on the
+  labelled and compact-id (`labels = FALSE`) paths and in both languages.
+
 ### Parser consolidation & sharpening (2026-07-11) — refactor-plan §5/§6
 
 The 2026-07 parser review's backlog (`refactor-plan.md`). Each change validated

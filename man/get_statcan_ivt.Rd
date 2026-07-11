@@ -83,6 +83,17 @@ cached Parquet; the value is fetched (URL) or copied in place (local path,
 never moved), sniffed so a \code{.zip} is unzipped and a raw \code{.ivt} used as-is,
 then decoded.
 }
+\examples{
+# Downloads, decodes and caches. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+\donttest{
+ds <- get_statcan_ivt("98-10-0241-01")
+# `ds` is an Arrow connection; query it lazily and then collect:
+if (!is.null(ds) && requireNamespace("dplyr", quietly = TRUE)) {
+  print(dplyr::collect(head(ds)))
+}
+}
+}
 \seealso{
 \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}, \code{\link[=read_ivt]{read_ivt()}}
 }

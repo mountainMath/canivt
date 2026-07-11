@@ -43,6 +43,12 @@ BOREALIS_DOI_SHOULDER <- "10.5683/"
 #'   `dataset_doi`, `dataset_name`, `download_url`, `size_in_bytes`, `md5`,
 #'   `published_at` and `file_type`.
 #' @seealso [statcan_ivt_catalogue()], [get_statcan_ivt()], [borealis_ivt_download()]
+#' @examples
+#' # Requires a Borealis API key (BOREALIS_DATAVERSE_KEY) and network access:
+#' \dontrun{
+#' catl <- borealis_ivt_catalogue()
+#' head(catl)
+#' }
 #' @export
 borealis_ivt_catalogue <- function(refresh = FALSE, quiet = FALSE) {
   cache_file <- file.path(ivt_cache_dir("data"), "borealis_ivt_catalogue.parquet")
@@ -135,6 +141,12 @@ borealis_tidy_catalogue <- function(raw) {
 #' @param quiet Suppress the download message.
 #' @return Path to the local `.ivt` file.
 #' @seealso [borealis_ivt_catalogue()], [get_statcan_ivt()]
+#' @examples
+#' # Requires a Borealis API key (BOREALIS_DATAVERSE_KEY) and network access:
+#' \dontrun{
+#' hits <- borealis_ivt_catalogue()
+#' path <- borealis_ivt_download(hits[1, ], dest_dir = tempdir())
+#' }
 #' @export
 borealis_ivt_download <- function(x, key = NULL, dest_dir = NULL,
                                   overwrite = FALSE, quiet = FALSE) {
@@ -162,8 +174,8 @@ borealis_ivt_download <- function(x, key = NULL, dest_dir = NULL,
   if (!quiet) cli::cli_inform("Downloading Borealis file {.val {file_id}} ({.url {url}})")
   tmp <- tempfile(fileext = ".bin")
   on.exit(unlink(tmp), add = TRUE)
-  utils::download.file(url, tmp, mode = "wb", quiet = quiet,
-                       headers = c("X-Dataverse-key" = Sys.getenv("BOREALIS_DATAVERSE_KEY")))
+  ivt_download_to(url, tmp, quiet = quiet,
+                  headers = c("X-Dataverse-key" = Sys.getenv("BOREALIS_DATAVERSE_KEY")))
   ivt_store_download(tmp, dest_dir, basename(out_name))
 }
 

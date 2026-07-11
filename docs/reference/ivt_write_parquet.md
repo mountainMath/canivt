@@ -71,3 +71,15 @@ ivt_write_parquet(
 ## Value
 
 `path`, invisibly.
+
+## Examples
+
+``` r
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+if (requireNamespace("arrow", quietly = TRUE)) {
+  out <- ivt_write_parquet(ivt, file.path(tempdir(), "98100044.parquet"))
+  file.exists(out)
+}
+#> [1] TRUE
+```

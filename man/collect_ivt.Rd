@@ -60,3 +60,11 @@ sidecar written alongside the data (or pass \code{members} explicitly, e.g. from
 integer-id table (\code{labels = FALSE}), where the member-id columns are mapped
 to their labels while being converted.
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+df <- collect_ivt(ivt)
+# data-dimension columns become factors whose levels are the full member list
+fac <- names(df)[vapply(df, is.factor, logical(1))]
+head(levels(df[[fac[1]]]))
+}

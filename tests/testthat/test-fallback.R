@@ -140,3 +140,19 @@ test_that("ivt_quietly muffles fallback conditions for detection probes", {
   expect_no_error(v2 <- ivt_quietly({ ivt_fallback("probe"); 42L }))
   expect_null(v2)
 })
+
+test_that("ivt_offline_grace turns a canivt_offline error into a NULL + warning", {
+  # network access raises a classed canivt_offline error; the exported entry
+  # points wrap their body in ivt_offline_grace() so an offline run degrades to
+  # an informative warning + invisible(NULL) instead of aborting an R CMD check.
+  expect_warning(
+    r <- ivt_offline_grace(ivt_offline_abort("https://example.invalid/x")),
+    class = "canivt_offline_warning")
+  expect_null(r)
+})
+
+test_that("ivt_offline_grace lets non-connection errors propagate", {
+  # only the connection failure is caught; a genuine bug/usage error must surface
+  expect_error(ivt_offline_grace(stop("boom")), "boom")
+  expect_equal(ivt_offline_grace(41L + 1L), 42L)
+})

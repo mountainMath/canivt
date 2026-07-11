@@ -11,7 +11,7 @@ analogous to the StatCan CSV download."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -26,6 +26,7 @@ analogous to the StatCan CSV download."></head><body>
     <li><a class="dropdown-item" href="../articles/borealis.html">Custom tabulations from the Borealis Dataverse</a></li>
     <li><a class="dropdown-item" href="../articles/ivt-format.html">The Beyond 20/20 IVT file format</a></li>
   </ul></li>
+<li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mountainMath/canivt/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -108,6 +109,45 @@ Opt-in, so the default output — and hence the Parquet written by
     <p>A tibble.</p>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"98100044.ivt"</span>, package <span class="op">=</span> <span class="st">"canivt"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">ivt</span> <span class="op">&lt;-</span> <span class="fu"><a href="read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu">ivt_tidy</span><span class="op">(</span><span class="va">ivt</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 399 × 7</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    geo_label geo_name geo_uid        geo_level type            collective  value</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>           <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A000011124 Country   Total - Type o… Collectiv…  <span style="text-decoration: underline;">24</span>140</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span> Canada    Canada   2021A000011124 Country   Total - Type o… Populatio… <span style="text-decoration: underline;">657</span>920</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span> Canada    Canada   2021A000011124 Country   Health care an… Collectiv…  <span style="text-decoration: underline;">13</span>020</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span> Canada    Canada   2021A000011124 Country   Health care an… Populatio… <span style="text-decoration: underline;">485</span>320</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span> Canada    Canada   2021A000011124 Country   Hospitals       Collectiv…    300</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span> Canada    Canada   2021A000011124 Country   Hospitals       Populatio…  <span style="text-decoration: underline;">11</span>125</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span> Canada    Canada   2021A000011124 Country   Nursing homes   Collectiv…   <span style="text-decoration: underline;">2</span>435</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A000011124 Country   Nursing homes   Populatio… <span style="text-decoration: underline;">184</span>890</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   Residences for… Collectiv…   <span style="text-decoration: underline;">2</span>505</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Residences for… Populatio… <span style="text-decoration: underline;">159</span>750</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 389 more rows</span></span>
+<span class="r-in"><span><span class="fu">ivt_tidy</span><span class="op">(</span><span class="va">ivt</span>, dim_names <span class="op">=</span> <span class="st">"label"</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 399 × 7</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    geo_label geo_name geo_uid        geo_level `Type of collective dwelling`    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                            </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A000011124 Country   Total - Type of collective dwell…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span> Canada    Canada   2021A000011124 Country   Total - Type of collective dwell…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span> Canada    Canada   2021A000011124 Country   Health care and related faciliti…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span> Canada    Canada   2021A000011124 Country   Health care and related faciliti…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span> Canada    Canada   2021A000011124 Country   Hospitals                        </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span> Canada    Canada   2021A000011124 Country   Hospitals                        </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span> Canada    Canada   2021A000011124 Country   Nursing homes                    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A000011124 Country   Nursing homes                    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   Residences for senior citizens   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Residences for senior citizens   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 389 more rows</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 2 more variables:</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;">#   `Collective dwellings occupied by usual residents and population in collective dwellings` &lt;chr&gt;,</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;">#   value &lt;dbl&gt;</span></span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

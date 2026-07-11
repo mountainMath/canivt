@@ -11,7 +11,7 @@ footnotes."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -26,6 +26,7 @@ footnotes."></head><body>
     <li><a class="dropdown-item" href="../articles/borealis.html">Custom tabulations from the Borealis Dataverse</a></li>
     <li><a class="dropdown-item" href="../articles/ivt-format.html">The Beyond 20/20 IVT file format</a></li>
   </ul></li>
+<li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mountainMath/canivt/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -66,6 +67,123 @@ footnotes.</p>
     <p>A list of metadata (see <code><a href="read_ivt.html">read_ivt()</a></code>).</p>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"98100044.ivt"</span>, package <span class="op">=</span> <span class="st">"canivt"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">meta</span> <span class="op">&lt;-</span> <span class="fu">ivt_metadata</span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">meta</span><span class="op">$</span><span class="va">dimensions</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$name</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Geography"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$name_fr</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$count</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 14</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$type</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 4</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$is_geography</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$members</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> NULL</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$members_fr</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> NULL</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[1]]$ordinal</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> NULL</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$name</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Type of collective dwelling"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$name_fr</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Type de logement collectif"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$count</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 16</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$type</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 4</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$is_geography</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] FALSE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$members</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [1] "Total - Type of collective dwelling"                                                             </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [2] "  Health care and related facilities"                                                            </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [3] "    Hospitals"                                                                                   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [4] "    Nursing homes"                                                                               </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [5] "    Residences for senior citizens"                                                              </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [6] "    Facilities that are a mix of both a nursing home and a residence for senior citizens"        </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [7] "    Residential care facilities such as group homes for persons with disabilities and addictions"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [8] "  Correctional and custodial facilities"                                                         </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [9] "  Shelters"                                                                                      </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [10] "  Service collective dwellings"                                                                  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [11] "    Lodging and rooming houses"                                                                  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [12] "    Hotels, motels and other establishments with temporary accommodation services"               </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [13] "    Other service collective dwellings"                                                          </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [14] "  Religious establishments"                                                                      </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [15] "  Hutterite colonies"                                                                            </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [16] "  Other collective dwellings"                                                                    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$members_fr</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [1] "Total - Type de logement collectif"                                                                                                    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [2] "  Établissements de soins de santé et établissements connexes"                                                                         </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [3] "    Hôpitaux"                                                                                                                          </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [4] "    Établissements de soins infirmiers"                                                                                                </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [5] "    Résidences pour personnes âgées"                                                                                                   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [6] "    Établissements qui sont une combinaison d’un établissement de soins infirmiers et d’une résidence pour personnes âgées"            </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [7] "    Établissements de soins pour bénéficiaires internes comme un foyer collectif pour personnes ayant une incapacité ou une dépendance"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [8] "  Établissements correctionnels et de détention"                                                                                       </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [9] "  Refuges"                                                                                                                             </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [10] "  Logements collectifs offrant des services"                                                                                           </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [11] "    Maisons de chambres et pensions"                                                                                                   </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [12] "    Hôtels, motels et autres établissements offrant des services d'hébergement temporaire"                                             </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [13] "    Autres logements collectifs offrant des services"                                                                                  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [14] "  Établissements religieux"                                                                                                            </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [15] "  Colonies huttérites"                                                                                                                 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [16] "  Autres logements collectifs"                                                                                                         </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[2]]$ordinal</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [1]  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$name</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Collective dwellings occupied by usual residents and population in collective dwellings"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$name_fr</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$count</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$type</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 18</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$is_geography</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] FALSE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$members</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Collective dwellings occupied by usual residents"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [2] "Population in collective dwellings"              </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$members_fr</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "Logements collectifs occupés par des résidents habituels"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [2] "Population dans les logements collectifs"                </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [[3]]$ordinal</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 1 2</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

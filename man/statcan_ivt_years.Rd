@@ -10,10 +10,18 @@ statcan_ivt_years()
 A tibble with one row per version: \code{temporal} (the URL parameter,
 e.g. \code{"2017"} for the 2016 long-form), \code{census} (the human label, e.g.
 \code{"2016 Census - Part B (long-form questionnaire)"}) and \code{census_year} (the
-leading 4-digit year of the label as an integer).
+leading 4-digit year of the label as an integer). \code{NULL} (invisibly, with a
+warning) if the index could not be reached.
 }
 \description{
 Reads the \code{Temporal} selector from the StatCan census datasets index page,
 i.e. the list of census versions whose IVT products can be catalogued with
 \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}.
+}
+\examples{
+# Scrapes the StatCan datasets index. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+\donttest{
+statcan_ivt_years()
+}
 }

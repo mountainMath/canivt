@@ -21,3 +21,14 @@ statcan_ivt_resolve_url(ivt_url)
 ## Value
 
 The direct-download URL.
+
+## Examples
+
+``` r
+# An Alternative.cfm landing page resolves to its Download.cfm endpoint:
+statcan_ivt_resolve_url("Alternative.cfm?PID=55701&EXT=IVT")
+#> [1] "https://www12.statcan.gc.ca/datasets/Download.cfm?PID=55701"
+# a direct .zip is returned unchanged:
+statcan_ivt_resolve_url("https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip")
+#> [1] "https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip"
+```

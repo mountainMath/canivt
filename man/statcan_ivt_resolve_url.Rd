@@ -20,3 +20,9 @@ straight to a Beyond 20/20 \code{.zip}; older products link to an
 \verb{Download.cfm?PID=} endpoint serving the raw \code{.ivt}. This returns the direct
 URL in either case (a \code{.zip} is returned unchanged).
 }
+\examples{
+# An Alternative.cfm landing page resolves to its Download.cfm endpoint:
+statcan_ivt_resolve_url("Alternative.cfm?PID=55701&EXT=IVT")
+# a direct .zip is returned unchanged:
+statcan_ivt_resolve_url("https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip")
+}

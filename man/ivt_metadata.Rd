@@ -17,3 +17,8 @@ Much faster than \code{\link[=read_ivt]{read_ivt()}} when you only need the code
 identity, dimension members, geographic identifiers (names + DGUIDs) and
 footnotes.
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+meta <- ivt_metadata(path)
+meta$dimensions
+}

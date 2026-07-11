@@ -27,3 +27,12 @@ ivt_parquet_language(x)
 ## Value
 
 `"en"` or `"fr"`.
+
+## Examples
+
+``` r
+ivt_parquet_language("98-10-0044_fr.parquet")
+#> [1] "fr"
+ivt_parquet_language("98-10-0044_en.parquet")
+#> [1] "en"
+```

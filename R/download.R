@@ -13,10 +13,28 @@
 #' @param overwrite Re-download even if the `.ivt` already exists. Default
 #'   `FALSE`.
 #' @param quiet Suppress the download progress bar. Default `FALSE`.
-#' @return Path to the downloaded `.ivt` file.
+#' @return Path to the downloaded `.ivt` file, or `NULL` (invisibly, with a
+#'   warning) if the endpoint could not be reached.
+#' @examples
+#' # Downloads from Statistics Canada. Returns NULL with a warning if offline
+#' # (no error), so no try() is needed.
+#' \donttest{
+#' path <- ivt_download("98100241", dest_dir = tempdir())
+#' if (!is.null(path)) ivt <- read_ivt(path)
+#' }
 #' @export
 ivt_download <- function(pid, dest_dir = NULL, lang = c("en", "fr"),
                          overwrite = FALSE, quiet = FALSE) {
+  ivt_offline_grace(
+    ivt_download_impl(pid, dest_dir = dest_dir, lang = match.arg(lang),
+                      overwrite = overwrite, quiet = quiet))
+}
+
+# Core download (raises `canivt_offline` on a connection failure); the exported
+# ivt_download() wraps this in ivt_offline_grace(), internal callers use it
+# directly so the offline signal reaches their own grace boundary.
+ivt_download_impl <- function(pid, dest_dir = NULL, lang = c("en", "fr"),
+                              overwrite = FALSE, quiet = FALSE) {
   lang <- match.arg(lang)
   pid8 <- ivt_pid8(pid)
   if (is.null(dest_dir)) dest_dir <- file.path(ivt_cache_dir("ivt"), pid8)
@@ -30,7 +48,7 @@ ivt_download <- function(pid, dest_dir = NULL, lang = c("en", "fr"),
                  lang, pid8)
   zip <- file.path(dest_dir, paste0(pid8, ".zip"))
   if (!quiet) cli::cli_inform("Downloading {.url {url}}")
-  utils::download.file(url, zip, mode = "wb", quiet = quiet)
+  ivt_download_to(url, zip, quiet = quiet)
   files <- utils::unzip(zip, exdir = dest_dir)
 
   ivt <- grep("\\.ivt$", files, value = TRUE, ignore.case = TRUE)

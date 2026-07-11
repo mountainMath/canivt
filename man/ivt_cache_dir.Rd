@@ -36,3 +36,7 @@ Set them either as options (e.g. in \code{.Rprofile}):
 \code{options(canivt.data_cache = "~/canivt-cache")}, or as environment variables
 (e.g. in \code{.Renviron}): \verb{CANIVT_DATA_CACHE=~/canivt-cache}.
 }
+\examples{
+# With no option set, the cache resolves to a per-session tempdir folder.
+ivt_cache_dir("data", create = FALSE)
+}

@@ -51,3 +51,13 @@ and set it as the environment variable `BOREALIS_DATAVERSE_KEY` (e.g. in
 [`statcan_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_catalogue.md),
 [`get_statcan_ivt()`](https://mountainmath.github.io/canivt/reference/get_statcan_ivt.md),
 [`borealis_ivt_download()`](https://mountainmath.github.io/canivt/reference/borealis_ivt_download.md)
+
+## Examples
+
+``` r
+# Requires a Borealis API key (BOREALIS_DATAVERSE_KEY) and network access:
+if (FALSE) { # \dontrun{
+catl <- borealis_ivt_catalogue()
+head(catl)
+} # }
+```

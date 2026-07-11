@@ -71,3 +71,26 @@ depth, `NA` for top-level members).
 ## See also
 
 [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
+
+## Examples
+
+``` r
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+ivt_members(ivt)
+#> # A tibble: 74 × 10
+#>    column dimension    dimension_fr member_id ordinal label level level_fr depth
+#>    <chr>  <chr>        <chr>            <int>   <int> <chr> <chr> <chr>    <int>
+#>  1 type   Type of col… Type de log…         1       1 "Tot… Tota… Total -…     0
+#>  2 type   Type of col… Type de log…         2       2 "  H… Heal… Établis…     1
+#>  3 type   Type of col… Type de log…         3       3 "   … Hosp… Hôpitaux     2
+#>  4 type   Type of col… Type de log…         4       4 "   … Nurs… Établis…     2
+#>  5 type   Type of col… Type de log…         5       5 "   … Resi… Résiden…     2
+#>  6 type   Type of col… Type de log…         6       6 "   … Faci… Établis…     2
+#>  7 type   Type of col… Type de log…         7       7 "   … Resi… Établis…     2
+#>  8 type   Type of col… Type de log…         8       8 "  C… Corr… Établis…     1
+#>  9 type   Type of col… Type de log…         9       9 "  S… Shel… Refuges      1
+#> 10 type   Type of col… Type de log…        10      10 "  S… Serv… Logemen…     1
+#> # ℹ 64 more rows
+#> # ℹ 1 more variable: parent_id <int>
+```

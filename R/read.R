@@ -100,6 +100,12 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   98-400-X2016120 the flag's last digit is `9` exactly for the 888
 #'   geographies with no stored cells, which the Beyond 20/20 viewer renders
 #'   as suppressed).
+#' @examples
+#' # A small real table (StatCan 98-10-0044) is bundled for examples/tests.
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' ivt
+#' head(ivt$cells)
 #' @export
 read_ivt <- function(path, geo_attributes = FALSE) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
@@ -145,6 +151,10 @@ read_ivt <- function(path, geo_attributes = FALSE) {
 #'
 #' @param path Path to an `.ivt` file.
 #' @return A list of metadata (see [read_ivt()]).
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' meta <- ivt_metadata(path)
+#' meta$dimensions
 #' @export
 ivt_metadata <- function(path) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
@@ -184,6 +194,11 @@ ivt_metadata <- function(path) {
 #'   Opt-in, so the default output — and hence the Parquet written by
 #'   [ivt_write_parquet()] — is unchanged.
 #' @return A tibble.
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' ivt_tidy(ivt)
+#' ivt_tidy(ivt, dim_names = "label")
 #' @export
 ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
                      dim_names = c("slug", "label"), language = "en",

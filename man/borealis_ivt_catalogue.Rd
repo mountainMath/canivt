@@ -36,6 +36,13 @@ Borealis account (\url{https://borealisdata.ca/dataverseuser.xhtml?selectTab=api
 and set it as the environment variable \code{BOREALIS_DATAVERSE_KEY} (e.g. in
 \code{.Renviron}).
 }
+\examples{
+# Requires a Borealis API key (BOREALIS_DATAVERSE_KEY) and network access:
+\dontrun{
+catl <- borealis_ivt_catalogue()
+head(catl)
+}
+}
 \seealso{
 \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}, \code{\link[=get_statcan_ivt]{get_statcan_ivt()}}, \code{\link[=borealis_ivt_download]{borealis_ivt_download()}}
 }

@@ -19,3 +19,7 @@ Reads the language marker (\verb{_en} / \verb{_fr} before \code{.parquet}) that
 \code{\link[=collect_ivt]{collect_ivt()}} and \code{\link[=label_ivt_columns]{label_ivt_columns()}} can pick the matching language
 without being told. Falls back to \code{"en"} when there is no marker.
 }
+\examples{
+ivt_parquet_language("98-10-0044_fr.parquet")
+ivt_parquet_language("98-10-0044_en.parquet")
+}

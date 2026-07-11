@@ -90,3 +90,29 @@ page variants that cannot be decoded – a classed warning
 affected read. Set `options(canivt.strict = TRUE)` to turn these into
 errors: on a file layout this package has not been validated against,
 the fallback paths are the ones most likely to misread silently.
+
+## Examples
+
+``` r
+# A small real table (StatCan 98-10-0044) is bundled for examples/tests.
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+ivt
+#> 
+#> ── IVT table 98100044 ──────────────────────────────────────────────────────────
+#> Type of collective dwelling and collective dwellings occupied by usual
+#> residents and population in collective dwellings: Canada, provinces and
+#> territories
+#> 399 cells | 14 geographies | 3 dimensions | 10 footnotes
+#> geography labelled by name + uid
+head(ivt$cells)
+#> # A tibble: 6 × 4
+#>     geo  type collective  value
+#>   <int> <int>      <int>  <dbl>
+#> 1     1     1          1  24140
+#> 2     1     1          2 657920
+#> 3     1     2          1  13020
+#> 4     1     2          2 485320
+#> 5     1     3          1    300
+#> 6     1     3          2  11125
+```

@@ -37,6 +37,10 @@
 #'   that hierarchy -- the nearest preceding member at a shallower depth, `NA`
 #'   for top-level members).
 #' @seealso [collect_ivt()]
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' ivt_members(ivt)
 #' @export
 ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
                         language = "en") {
@@ -132,6 +136,13 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #'   levels.
 #' @param ... For `ivt` objects, passed to [ivt_tidy()].
 #' @return A tibble with the dimension columns converted to factors.
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' df <- collect_ivt(ivt)
+#' # data-dimension columns become factors whose levels are the full member list
+#' fac <- names(df)[vapply(df, is.factor, logical(1))]
+#' head(levels(df[[fac[1]]]))
 #' @export
 collect_ivt <- function(x, members = NULL, geography = FALSE,
                         dim_names = c("slug", "label"), language = NULL, ...) {
@@ -191,6 +202,9 @@ ivt_members_path <- function(path) {
 #' @param x A `.parquet` path, an Arrow dataset, or a dplyr-on-Arrow query (the
 #'   path is taken from the `path` attribute / source file list).
 #' @return `"en"` or `"fr"`.
+#' @examples
+#' ivt_parquet_language("98-10-0044_fr.parquet")
+#' ivt_parquet_language("98-10-0044_en.parquet")
 #' @export
 ivt_parquet_language <- function(x) {
   path <- ivt_data_path(x)
@@ -274,6 +288,14 @@ ivt_locate_members <- function(x) {
 #' @return `x` with its data-dimension columns renamed (an Arrow query when `x`
 #'   is an Arrow object, else a data frame).
 #' @seealso [collect_ivt()], [ivt_parquet_language()]
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' if (requireNamespace("dplyr", quietly = TRUE)) {
+#'   df <- ivt_tidy(ivt, labels = FALSE)          # slug-named columns
+#'   labelled <- label_ivt_columns(df, members = ivt_members(ivt))
+#'   names(labelled)
+#' }
 #' @export
 label_ivt_columns <- function(x, members = NULL, language = NULL) {
   if (!requireNamespace("dplyr", quietly = TRUE)) {

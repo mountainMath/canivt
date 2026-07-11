@@ -19,16 +19,21 @@ i.e. option \code{canivt.ivt_cache} or \code{\link[=tempdir]{tempdir()}} when un
 \item{...}{Passed to \code{\link[=ivt_download]{ivt_download()}}.}
 }
 \value{
-An \code{ivt} object (see \code{\link[=read_ivt]{read_ivt()}}).
+An \code{ivt} object (see \code{\link[=read_ivt]{read_ivt()}}), or \code{NULL} (invisibly, with a
+warning) if the table could not be downloaded (e.g. offline).
 }
 \description{
 Convenience wrapper that \code{\link[=ivt_download]{ivt_download()}}s a table by product id and then
 \code{\link[=read_ivt]{read_ivt()}}s it.
 }
 \examples{
-\dontrun{
+# Downloads from Statistics Canada. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+\donttest{
 tab <- ivt_read_table("98100241")
-ivt_write_parquet(tab, "98100241.parquet")
-ivt_write_metadata(tab, "98100241_metadata")
+if (!is.null(tab)) {
+  ivt_write_parquet(tab, file.path(tempdir(), "98100241.parquet"))
+  ivt_write_metadata(tab, file.path(tempdir(), "98100241_metadata"))
+}
 }
 }

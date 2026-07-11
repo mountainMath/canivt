@@ -42,3 +42,26 @@ A tibble with columns `census_year`, `temporal`, `catalogue`,
 `Alternative.cfm` intermediate page or a direct b2020 `.zip`);
 `download_url` is the resolved direct-download URL (see
 [`statcan_ivt_resolve_url()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_resolve_url.md)).
+`NULL` (invisibly, with a warning) if the index had to be scraped and
+could not be reached.
+
+## Examples
+
+``` r
+# Scrapes the StatCan datasets index (and caches it). Returns NULL with a
+# warning if offline (no error), so no try() is needed.
+# \donttest{
+catl <- statcan_ivt_catalogue(temporal = 2021)
+head(catl)
+#> # A tibble: 6 × 12
+#>   census_year temporal catalogue   archived release_date date  topic title pid  
+#>         <int> <chr>    <chr>       <lgl>    <date>       <chr> <chr> <chr> <chr>
+#> 1        2021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… NA   
+#> 2        2021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… NA   
+#> 3        2021 2021     98-402-X20… FALSE    2023-03-29   Marc… Popu… Popu… NA   
+#> 4        2021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… NA   
+#> 5        2021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… NA   
+#> 6        2021 2021     98-402-X20… FALSE    2022-02-09   Febr… Popu… Popu… NA   
+#> # ℹ 3 more variables: ivt_url <chr>, download_url <chr>, http_url <chr>
+# }
+```

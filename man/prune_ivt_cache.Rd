@@ -52,6 +52,10 @@ Parquet is removed and no remaining Parquet references its shared
 \verb{<key>_members.parquet} sidecar, the orphaned sidecar is removed too
 (\code{sidecars = TRUE}); emptied per-table \code{.ivt} folders are cleaned up.
 }
+\examples{
+# Preview what a prune would remove without deleting anything:
+prune_ivt_cache(dry_run = TRUE)
+}
 \seealso{
 \code{\link[=list_ivt_cache]{list_ivt_cache()}}
 }

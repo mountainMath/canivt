@@ -50,6 +50,11 @@ members -- including members filtered out of the data -- and it is written
 next to the cached Parquet by \code{\link[=ivt_write_parquet]{ivt_write_parquet()}} / \code{\link[=get_statcan_ivt]{get_statcan_ivt()}}
 (as \verb{<name>_members.parquet}).
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+ivt_members(ivt)
+}
 \seealso{
 \code{\link[=collect_ivt]{collect_ivt()}}
 }

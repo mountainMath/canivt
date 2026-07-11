@@ -31,3 +31,14 @@ ivt_write_metadata(x, dir = NULL)
 ## Value
 
 The output directory, invisibly.
+
+## Examples
+
+``` r
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+out <- ivt_write_metadata(ivt, file.path(tempdir(), "98100044_metadata"))
+list.files(out)
+#> [1] "dimension_members.csv" "dqf_legend.csv"        "footnotes.csv"        
+#> [4] "geographies.csv"       "table_info.csv"       
+```

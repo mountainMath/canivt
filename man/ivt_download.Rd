@@ -28,10 +28,19 @@ i.e. option \code{canivt.ivt_cache} or \code{\link[=tempdir]{tempdir()}} when un
 \item{quiet}{Suppress the download progress bar. Default \code{FALSE}.}
 }
 \value{
-Path to the downloaded \code{.ivt} file.
+Path to the downloaded \code{.ivt} file, or \code{NULL} (invisibly, with a
+warning) if the endpoint could not be reached.
 }
 \description{
 Fetches and unzips the \code{.ivt} for a StatCan data table from the public
 Beyond 20/20 endpoint
 (\verb{https://www150.statcan.gc.ca/n1/<lang>/tbl/b2020/<pid>.zip}).
+}
+\examples{
+# Downloads from Statistics Canada. Returns NULL with a warning if offline
+# (no error), so no try() is needed.
+\donttest{
+path <- ivt_download("98100241", dest_dir = tempdir())
+if (!is.null(path)) ivt <- read_ivt(path)
+}
 }

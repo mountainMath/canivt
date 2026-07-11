@@ -7,3 +7,6 @@
 ^\.DS_Store$
 ^README\.Rmd$
 ^\.claude$
+^docs$
+^_pkgdown\.yml$
+^\.github$

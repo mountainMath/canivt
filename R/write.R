@@ -18,6 +18,13 @@
 #'   carries both languages regardless.
 #' @param ... Passed to [arrow::write_parquet()].
 #' @return `path`, invisibly.
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' if (requireNamespace("arrow", quietly = TRUE)) {
+#'   out <- ivt_write_parquet(ivt, file.path(tempdir(), "98100044.parquet"))
+#'   file.exists(out)
+#' }
 #' @export
 ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
                               dim_names = c("slug", "label"), language = "en",
@@ -48,6 +55,11 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
 #' @param ... Passed to the CSV writer ([readr::write_csv()] if available, else
 #'   [utils::write.csv()]).
 #' @return `path`, invisibly.
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' out <- ivt_write_csv(ivt, file.path(tempdir(), "98100044.csv"))
+#' file.exists(out)
 #' @export
 ivt_write_csv <- function(x, path = NULL, labels = TRUE,
                           dim_names = c("slug", "label"), language = "en", ...) {
@@ -79,6 +91,11 @@ ivt_write_csv <- function(x, path = NULL, labels = TRUE,
 #'   `<product_id>_metadata` in the data cache
 #'   ([ivt_cache_dir("data")][ivt_cache_dir]).
 #' @return The output directory, invisibly.
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path)
+#' out <- ivt_write_metadata(ivt, file.path(tempdir(), "98100044_metadata"))
+#' list.files(out)
 #' @export
 ivt_write_metadata <- function(x, dir = NULL) {
   meta <- if (inherits(x, "ivt")) x$metadata else x

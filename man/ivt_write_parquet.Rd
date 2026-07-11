@@ -45,3 +45,11 @@ carries both languages regardless.}
 \description{
 Write an IVT table to Parquet
 }
+\examples{
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+if (requireNamespace("arrow", quietly = TRUE)) {
+  out <- ivt_write_parquet(ivt, file.path(tempdir(), "98100044.parquet"))
+  file.exists(out)
+}
+}

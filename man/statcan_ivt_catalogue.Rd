@@ -22,7 +22,8 @@ A tibble with columns \code{census_year}, \code{temporal}, \code{catalogue},
 \code{download_url} and \code{http_url}. \code{ivt_url} is the link as published (the
 \code{Alternative.cfm} intermediate page or a direct b2020 \code{.zip});
 \code{download_url} is the resolved direct-download URL (see
-\code{\link[=statcan_ivt_resolve_url]{statcan_ivt_resolve_url()}}).
+\code{\link[=statcan_ivt_resolve_url]{statcan_ivt_resolve_url()}}). \code{NULL} (invisibly, with a warning) if the
+index had to be scraped and could not be reached.
 }
 \description{
 Scrapes the StatCan census datasets index into a tidy catalogue of every IVT
@@ -32,4 +33,12 @@ Parquet file in the data cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}) so
 is scraped only once; pass \code{refresh = TRUE} to rebuild it. When the cached
 catalogue is a month or more old a warning (once per session) suggests
 refreshing it.
+}
+\examples{
+# Scrapes the StatCan datasets index (and caches it). Returns NULL with a
+# warning if offline (no error), so no try() is needed.
+\donttest{
+catl <- statcan_ivt_catalogue(temporal = 2021)
+head(catl)
+}
 }

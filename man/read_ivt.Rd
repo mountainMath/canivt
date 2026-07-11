@@ -81,3 +81,10 @@ that cannot be decoded -- a classed warning (\code{canivt_fallback} /
 this package has not been validated against, the fallback paths are the ones
 most likely to misread silently.
 }
+\examples{
+# A small real table (StatCan 98-10-0044) is bundled for examples/tests.
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+ivt
+head(ivt$cells)
+}

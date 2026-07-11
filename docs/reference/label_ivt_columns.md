@@ -55,3 +55,21 @@ in.
 
 [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md),
 [`ivt_parquet_language()`](https://mountainmath.github.io/canivt/reference/ivt_parquet_language.md)
+
+## Examples
+
+``` r
+path <- system.file("extdata", "98100044.ivt", package = "canivt")
+ivt <- read_ivt(path)
+if (requireNamespace("dplyr", quietly = TRUE)) {
+  df <- ivt_tidy(ivt, labels = FALSE)          # slug-named columns
+  labelled <- label_ivt_columns(df, members = ivt_members(ivt))
+  names(labelled)
+}
+#> Warning: Unknown or uninitialised column: `files`.
+#> Warning: Unknown or uninitialised column: `.data`.
+#> [1] "geo"                                                                                    
+#> [2] "Type of collective dwelling"                                                            
+#> [3] "Collective dwellings occupied by usual residents and population in collective dwellings"
+#> [4] "value"                                                                                  
+```
