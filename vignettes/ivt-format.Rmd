@@ -10,7 +10,7 @@ vignette: >
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE, 
-  comment = "#>",  
+  comment = "#>",
   eval = nzchar(Sys.getenv("COMPILE_VIG")))
 ```
 
@@ -258,8 +258,14 @@ A profile lineage of pre-DGUID files (some 1981/1991 profiles) additionally puts
 geography *last* behind a one-member "Values" placeholder; the positional nesting
 absorbs that without a special case.
 
+Pre-2016 tables predate the modern 8-digit b2020 `.zip` endpoint that
+`ivt_download()` uses, so fetch the raw `.ivt` through its catalogue row
+(`statcan_ivt_download()` resolves the `Download.cfm?PID=` link and returns the
+local path), then read it the same way:
+
 ```{r}
-leg <- read_ivt(ivt_download("1003011"))   # 41,859 geographies, Age(110) × Sex(3)
+row <- subset(statcan_ivt_catalogue(), catalogue == "1003011")
+leg <- read_ivt(statcan_ivt_download(row))   # 41,859 geographies, Age(110) × Sex(3)
 ivt_tidy(leg)
 ```
 
