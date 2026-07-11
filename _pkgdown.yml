@@ -1,0 +1,12 @@
+url: https://mountainmath.github.io/canivt
+
+template:
+  bootstrap: 5
+
+articles:
+- title: Articles
+  navbar: ~
+  contents:
+  - getting-started
+  - borealis
+  - ivt-format
