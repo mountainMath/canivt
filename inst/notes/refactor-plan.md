@@ -90,21 +90,34 @@ tests and detection gate do). Design points:
 
 ## 4. Duplicated logic → shared helpers (by payoff)
 
-- [ ] **Four chunk-group walkers — DEFERRED to a dedicated session.** The
-  "groups of G chunks (`ivt_f2_geo_group_sizes()`), each attribute = G
-  language-A blocks then G language-B blocks, chunk size `min(256,
-  remaining)`, trim pow-2 slot padding" walk is implemented four times with
-  different tolerances: `ivt_f2_geo_dguids_dir()` (identical-copy check),
+- [x] **Four chunk-group walkers — shared GEOMETRY extracted** (2026-07-11).
+  The "groups of G chunks (`ivt_f2_geo_group_sizes()`), each attribute = G
+  language-A blocks then G language-B blocks, chunk size `min(256, remaining)`,
+  trim pow-2 slot padding" walk is implemented four times with different
+  tolerances: `ivt_f2_geo_dguids_dir()` (identical-copy check),
   `ivt_f2_dim_dir_label_chunks()` (skip-nonmatching `take_run`),
   `ivt_f2_geo_attrs_dir()` (NA-hole pattern + dense re-alignment),
-  `ivt_f2_geo_inline_dir()` (partial-first rotation + `skip` prefix). One
-  parameterized group-run consumer carrying all four behaviors (~200 lines).
-  Deferred deliberately (2026-07-10): it is the deepest redesign of the
-  section with the highest drift risk and a maintainability-only payoff —
-  each walker's tolerance set is load-bearing for specific vintages, so the
-  unification needs a fresh session with the corpus run before/after each
-  walker is folded in (start with `dguids_dir` + `label_chunks`, the two
-  simplest; `inline_dir`'s rotation/skip handling last).
+  `ivt_f2_geo_inline_dir()` (partial-first rotation + `skip` prefix). The
+  duplicated part is the group/chunk **geometry** (group sizes → group start
+  member → per-chunk sizes → member positions), copied verbatim as
+  `starts`/`M`/`chunk_sz` in `dguids_dir` + `attrs_dir` and as the
+  `chunk_of()` / `chunk_len()` closures in `inline_dir` / `label_chunks`
+  (algebraically verified identical across all four). Extracted to one
+  `ivt_f2_chunk_layout(n)` (codebook-f2.R, beside `ivt_f2_geo_group_sizes()`)
+  returning per group `list(G, start, size, chunk)` plus `$sizes`/`$n_chunks`;
+  all four walkers now consume it, their load-bearing block-alignment tolerances
+  left **untouched** (each set is load-bearing for specific vintages).
+  Verified byte-identical: the four walkers' outputs (+`ivt_f2_dim_dir_labels()`,
+  which routes through `label_chunks`) are `identical()` on all 40 corpus tables
+  before/after; unit suite FAIL 0 / PASS 994; corpus ledger FAIL 0 / PASS 120.
+  The deeper "one parameterized consumer carrying all four *behaviors*" was
+  evaluated and **not pursued**: the number of runs (2 / 2·nattr / discovered)
+  and the block→member alignment differ so much that a single consumer degenerates
+  to the geometry above plus a per-walker `place_chunk` / `combine_runs` callback,
+  scattering the load-bearing logic into closures with no maintainability gain
+  over the current per-walker form (same reasoning the strict-first item at §4
+  used to keep classification per-walker). The geometry extraction captures the
+  real, drift-prone duplication.
 - [x] **Strict-first entry parsing** (2026-07-10, scoped):
   `ivt_f2_dim_dir_label1()` / `ivt_f2_dim_dir_ordinal1()` — the only readers
   that were *purely* run-scanner — now read values strict-first through the

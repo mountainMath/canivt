@@ -430,8 +430,7 @@ ivt_f2_dir_is_geo <- function(raw, dir, max_member_entries = 6L) {
 # (1, 1, 2 chunks), EN/FR runs of 256 + 256 + 256 + 57, every label exact
 # against the B2020 viewer's row list.
 ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
-  sizes <- ivt_f2_geo_group_sizes(cnt)
-  chunk_len <- function(k) min(256L, cnt - 256L * (k - 1L))
+  lay <- ivt_f2_chunk_layout(cnt)
   vals <- list()
   for (r in (mk + 1L):nrow(dir)) {
     off <- dir[r, "off"]; len <- dir[r, "len"]
@@ -444,7 +443,7 @@ ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
     vals[[length(vals) + 1L]] <- mem$values
   }
   a <- character(0); b <- character(0)
-  ei <- 1L; k <- 0L
+  ei <- 1L
   take_run <- function(need) {
     # consume the next blocks whose record counts match `need` (in order),
     # skipping non-matching framing entries between runs
@@ -456,12 +455,11 @@ ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
     }
     run
   }
-  for (G in sizes) {
-    need <- vapply(k + seq_len(G), chunk_len, 1L)
+  for (grp in lay$groups) {
+    need <- grp$chunk
     ra <- take_run(need); if (is.null(ra)) return(NULL)
     rb <- take_run(need); if (is.null(rb)) return(NULL)
     a <- c(a, ra); b <- c(b, rb)
-    k <- k + G
   }
   if (length(a) != cnt || length(b) != cnt) return(NULL)
   list(a, b)

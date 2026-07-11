@@ -142,9 +142,8 @@ ivt_f2_geo_dguids_dir <- function(raw) {
   }
   cand <- which(vapply(seq_len(nrow(d)),
                        function(r) probe(d[r, "off"], d[r, "len"]), TRUE))
-  sizes <- ivt_f2_geo_group_sizes(n_geo)
-  if (length(cand) != 2L * sum(sizes)) return(NULL)
-  starts <- cumsum(c(1L, utils::head(sizes, -1L) * 256L))
+  lay <- ivt_f2_chunk_layout(n_geo)
+  if (length(cand) != 2L * lay$n_chunks) return(NULL)
   chunk_vals <- function(entry, want) {              # strict parse -> want-long chunk
     e <- ivt_f2_dir_entry_members(raw, d[entry, "off"], d[entry, "len"])
     if (is.null(e)) return(NULL)
@@ -159,15 +158,13 @@ ivt_f2_geo_dguids_dir <- function(raw) {
   }
   out <- rep(NA_character_, n_geo)
   pos <- 1L
-  for (gi in seq_along(sizes)) {
-    G <- sizes[gi]; s <- starts[gi]
-    M <- min(G * 256L, n_geo - s + 1L)
-    chunk_sz <- pmin(256L, M - 256L * (seq_len(G) - 1L))
+  for (grp in lay$groups) {
+    G <- grp$G
     for (c in seq_len(G)) {
-      a <- chunk_vals(cand[pos + c - 1L], chunk_sz[c])
-      b <- chunk_vals(cand[pos + G + c - 1L], chunk_sz[c])
+      a <- chunk_vals(cand[pos + c - 1L], grp$chunk[c])
+      b <- chunk_vals(cand[pos + G + c - 1L], grp$chunk[c])
       if (is.null(a) || is.null(b) || !identical(a, b)) return(NULL)
-      out[s + 256L * (c - 1L) + seq_along(a) - 1L] <- a
+      out[grp$start + 256L * (c - 1L) + seq_along(a) - 1L] <- a
     }
     pos <- pos + 2L * G
   }
@@ -1169,6 +1166,33 @@ ivt_f2_geo_group_sizes <- function(n_geo, chunk = 256L) {
   sizes
 }
 
+# Chunk-group geometry shared by the four codebook chunk walkers
+# (`ivt_f2_geo_dguids_dir()`, `ivt_f2_geo_attrs_dir()`, `ivt_f2_geo_inline_dir()`
+# and `ivt_f2_dim_dir_label_chunks()`). The chunked codebook stores a dimension's
+# members in GROUPS of `G` 256-member chunks (`G` follows `ivt_f2_geo_group_sizes()`),
+# and every attribute / language run within a group is `G` blocks; the four walkers
+# differ only in how they consume and align those blocks (identical-copy check,
+# skip-nonmatching, NA-hole + dense re-alignment, padding-trim + rotation + skip),
+# not in this geometry. Returns per group:
+#   G      chunk count;
+#   start  1-based member id of the group's first member;
+#   size   members in the group (<= G*256);
+#   chunk  integer[G], members in each chunk (256 except a trailing partial).
+# The member index of chunk `c` (1-based within the group) is
+# `start + 256*(c-1) + (0 .. chunk[c]-1)`. Also carries `$sizes` (the group-size
+# vector) and `$n_chunks` (= `sum(sizes)`).
+ivt_f2_chunk_layout <- function(n, chunk = 256L) {
+  sizes <- ivt_f2_geo_group_sizes(n, chunk)
+  starts <- cumsum(c(1L, utils::head(sizes, -1L) * chunk))
+  groups <- lapply(seq_along(sizes), function(gi) {
+    G <- sizes[gi]; s <- starts[gi]
+    M <- min(G * chunk, n - s + 1L)
+    list(G = G, start = s, size = M,
+         chunk = pmin(chunk, M - chunk * (seq_len(G) - 1L)))
+  })
+  list(sizes = sizes, n_chunks = sum(sizes), groups = groups)
+}
+
 # Is a member-array block a consecutive-integer ordinal delimiter (1,2,3,... or
 # 2049,2050,...)?  These sit between groups and must be skipped so they don't shift
 # positional block indexing.
@@ -1206,19 +1230,16 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
     }
   }
   length(vb) <- k
-  sizes <- ivt_f2_geo_group_sizes(n_geo)
+  lay <- ivt_f2_chunk_layout(n_geo)
   nattr <- length(schema) + 1L                       # display Member Name + schema fields
-  if (k != 2L * nattr * sum(sizes)) return(NULL)     # irregular layout -> fall back
-  starts <- cumsum(c(1L, utils::head(sizes, -1L) * 256L))   # member start per group
+  if (k != 2L * nattr * lay$n_chunks) return(NULL)   # irregular layout -> fall back
   cols <- c("geo_label", "geo_label_fr", "geo_name", "geo_name_fr", "dguid",
             "geo_level", "geo_type", "geo_type_abbr", "prov_abbr", "alt_geo_code",
             "pr_code", "dqf_code", "dqf_note", "dqf_note_strict", "tnr_short_form")
   out <- stats::setNames(rep(list(rep(NA_character_, n_geo)), length(cols)), cols)
   pos <- 1L
-  for (gi in seq_along(sizes)) {
-    G <- sizes[gi]; s <- starts[gi]
-    M <- min(G * 256L, n_geo - s + 1L)
-    chunk_sz <- pmin(256L, M - 256L * (seq_len(G) - 1L))
+  for (grp in lay$groups) {
+    G <- grp$G; s <- grp$start; M <- grp$size; chunk_sz <- grp$chunk
     # per-chunk absent-member pattern, from the plain arrays' NA holes; every
     # NA-carrying plain array of the chunk must agree, else the layout is not
     # understood and the caller falls back. Plain arrays are stored padded with
@@ -1907,8 +1928,9 @@ ivt_f2_geo_inline_dir <- function(raw) {
   if (is.null(d)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw)
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
-  sizes <- ivt_f2_geo_group_sizes(n_geo)
-  total <- sum(sizes)
+  lay <- ivt_f2_chunk_layout(n_geo)
+  sizes <- lay$sizes
+  total <- lay$n_chunks
   # chunk value blocks in directory (logical) order; classification by the
   # run-scanner, values strict-first (see ivt_f2_dir_entry_members). Dense values
   # are usable as-is: if a dense block skipped absent members its record count
@@ -1923,11 +1945,7 @@ ivt_f2_geo_inline_dir <- function(raw) {
     }
   }
   length(vb) <- k
-  chunk_of <- function(gi) {                           # expected sizes of group gi's chunks
-    first <- sum(sizes[seq_len(gi - 1L)])              # global chunk index of chunk 1 - 1
-    vapply(seq_len(sizes[gi]), function(j)
-      min(256L, n_geo - (first + j - 1L) * 256L), 1L)
-  }
+  chunk_of <- function(gi) lay$groups[[gi]]$chunk       # expected sizes of group gi's chunks
   # assemble the R runs (trailing non-member candidates make k %/% total over-count
   # on tiny tables, so try R from the division estimate downward until a walk fits).
   # A run's chunks normally follow member order (partial chunk last), but the 2006
