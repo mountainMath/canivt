@@ -18,27 +18,39 @@ validate, or extend the parser. For day-to-day use see `?read_ivt`. The
 authoritative, more detailed spec ships with the package:
 `system.file("notes/ivt-format.md", package = "canivt")`.
 
-## Three layouts, one container
+## One layout, one decoder
 
 Every `.ivt` starts with the signature `04 00 20 00` and is one contiguous
-binary. `canivt` decodes two **container families** plus a legacy variant, all
-validated cell-for-cell against the StatCan downloads:
+binary. There is a single, descriptor-driven, name/type-agnostic decoder: it
+reads the dimension structure from the header, nests **every** dimension into a
+power-of-two positional bitmap (data dimensions innermost, geography outermost),
+and walks the value pages. What used to be documented as "family 1" and
+"family 2" are **not two formats** — they are two cases of this one layout,
+differing only in *which* dimension straddles the fixed **2048-bit (256-byte)
+page boundary**:
 
-* **Family 1** — *per-geography* page directories at a fixed stride. Reference
-  table **98-10-0241** (housing indicators by tenure). 166 geographies.
-* **Family 2** — a *single* contiguous page directory; 4 geographies per page.
-  Reference table **98-10-0023** (age × gender, down to dissemination areas).
-  63,404 geographies, 14.5 M cells.
-* **Legacy (pre-2016)** — the 1991 census layout, e.g. **1003011** (E9101,
-  population by single year of age × sex). Same container as family 2, but with
-  `int16`/`int32` value pages and a pre-DGUID, bilingual, inline codebook.
+* **A data dimension straddles** → geography is pushed fully into the page
+  directory, one page per (geography, outer-data-coordinate). The reference table
+  is **98-10-0241** (housing indicators by tenure; 166 geographies, 7 dimensions).
+  Historically "family 1."
+* **The data dimensions fit in ≤ 2048 bits** → *geography* straddles: several
+  geographies share each page's presence record, and the directory is a flat list
+  of geography-window pages. The reference table is **98-10-0023** (age × gender,
+  down to dissemination areas; 63,404 geographies, 14.5 M cells). Historically
+  "family 2."
 
-`read_ivt()` auto-detects which one via `ivt_family()` and the header, so the
-same call handles all three:
+The **1991 census** files (e.g. **1003011**, E9101 — population by single year of
+age × sex) are the *same* container with pre-DGUID conventions: `int16`/`int32`
+value pages and a bilingual, inline codebook. They decode through the same path.
+
+`read_ivt()` auto-detects the case via `ivt_family()` (which just reports whether
+geography straddles), but the cell decode and metadata read are **shared for
+every file** — `family` only tags provenance. Every `.ivt` in the corpus decodes;
+there are no unsupported files.
 
 ```{r}
 library(canivt)
-tab <- read_ivt(ivt_download("98100023"))      # family 2
+tab <- read_ivt(ivt_download("98100023"))
 tab
 ```
 
@@ -52,8 +64,8 @@ dimension members), with **footnotes** near the tail.
 ```{r layout-plot, eval = TRUE, fig.width = 7, fig.height = 2.6, message = FALSE, fig.alt = "Tile plot of the IVT byte layout: a tiny header and page directory, a dominant value-pages region, then the geography codebook, footnotes and dimension blocks at the tail."}
 library(ggplot2)
 
-# Representative byte regions of the family-2 reference table 98-10-0023
-# (142,016,485 bytes). Every IVT follows this order; the value pages dominate.
+# Representative byte regions of the geography-straddle reference table
+# 98-10-0023 (142,016,485 bytes). Every IVT follows this order; data dominates.
 regions <- data.frame(
   region = c("Header", "Page directory", "Value pages (data)",
              "Geography codebook", "Footnotes", "Dimension blocks (Age/Gender)"),
@@ -87,27 +99,41 @@ naive aligned scans. Byte offsets in the parser are 0-based to match the layout.
 ## Reading the layout from the header
 
 The fixed header points at every major section, so the layout can be read up
-front without scanning for markers. `ivt_f2_header_layout()` (family 2 / legacy)
-returns these as byte offsets:
+front without scanning for markers. `ivt_f2_header_layout()` (uniform across the
+modern and legacy formats) returns these as byte offsets:
 
 | header offset | section |
 |---|---|
 | `u32 @32` | dimension descriptor (per-dimension count, type, name + title) |
 | `u32 @40` / `u32 @48` | French / English title blocks — **set in the legacy format, zero in the modern one** (the version indicator) |
 | `u32 @552` | geography field/attribute count (11 modern / 12 legacy) |
-| `u16 @558` | page-directory start |
+| `u16 @558` | page-directory start — **low 16 bits only** (the true start is `u16 + k·65536` for the smallest `k` whose first entry validates; `k = 0` for the reference tables, `k > 0` for a few large tables) |
 | `u32 @572` | codebook region start |
 
-The page directory is a contiguous run of `[u32 offset][u16 size][u16 size]`
-records (the two sizes agree), in geography member order. Each record points at a
-*page* of value data.
+A further **section-pointer region** (`≈ @544..1080`) is read the same way, each
+pointer resolving to a block directory of the identical 8-byte entry shape: `@544`
+→ the master directory (titles, the dimension descriptor, identity/notes blobs,
+product id), `@712` → the data-quality-flag legend, and `@824 + 14·(k−1)` → the
+per-dimension codebook block directory (member labels, ordinals, footnotes) for
+dimension `k`. So the codebook, notes and legends are all located **from the
+header**, with bounded tail scans surviving only as fallbacks.
+
+The page directory itself is a contiguous run of `[u32 offset][u16 size][u16 size]`
+records (the two sizes agree; the size is the page's *allocated* length), in
+geography member order. Each record points at a *page* of value data.
 
 ## Dimensions
 
 The dimension descriptor declares each dimension uniformly. For 98-10-0023:
-Geography (63,404) × Age (128) × Gender (3). The first dimension always indexes
-the pages; the rest are the "inner" dimensions stored within each page, with the
-**last** dimension (here Gender) as the unit of value storage.
+Geography (63,404) × Age (128) × Gender (3). The decoder nests them
+**positionally** — geography outermost, the data dimensions inner in descriptor
+order with the **last** (here Gender) fastest-varying / the unit of value storage
+— and never asks which dimension is which by name or type byte. Geography is the
+first descriptor dimension in every layout **except the profile lineage** (a few
+1981/1991 profile tables store a one-member "Values" placeholder first and put
+geography *last*); the nesting handles that with no special case, because it is
+purely positional. Exactly one dimension straddles the 2048-bit page boundary
+(§ below), which is what the historical "family" label really named.
 
 ```{r}
 meta <- ivt_metadata(ivt_download("98100023"))
@@ -115,9 +141,12 @@ data.frame(dimension = meta$dimension_names,
            members   = meta$dimension_counts)
 ```
 
-## Family 2: a single page directory (98-10-0023)
+## Case A — geography straddles: a single page directory (98-10-0023)
 
-Each directory record is a page that packs **4 geographies**:
+When the data dimensions fit in one 2048-bit presence record, geography is the
+dimension that straddles the page boundary, so several geographies share each
+page and the directory is one flat list. Here each directory record is a page
+that packs **4 geographies**:
 
 ```
 [4-byte marker][4 × 64-byte presence records][0xFF trailer][head block][dense value run]
@@ -140,10 +169,11 @@ Each directory record is a page that packs **4 geographies**:
 geographic level and type (+ abbreviation), two geocodes, the data-quality flag
 and note, and the non-response rate — all exact for 63,404 geographies.
 
-## Family 1: per-geography directories (98-10-0241)
+## Case B — a data dimension straddles: per-geography directories (98-10-0241)
 
-The original layout instead gives **each geography its own page directory** at a
-fixed stride:
+When the data dimensions alone overflow 2048 bits, a data dimension straddles
+instead and geography is pushed fully into the directory — **each geography gets
+its own page directory** at a fixed stride:
 
 ```
 [0]            header: identity + dimension names
@@ -170,10 +200,12 @@ bitwAnd(bitwShiftR(0xFE, 7:1), 1L)
 #> [1] 1 1 1 1 1 1 1
 ```
 
-A useful generalisation across families: the presence granularity is the
-**innermost** dimension, the "all present" marker is `2^n − 2` over that bit
-width, the per-dimension strides are fixed, and one byte of each adjacent pair is
-swapped.
+This is the same presence machinery as Case A, just with a data dimension in the
+straddle role: the presence granularity is the **innermost** dimension, the "all
+present" marker is `2^n − 2` over that bit width, the per-dimension strides are
+power-of-two padded and fixed, and one byte of each adjacent pair is swapped. The
+single decoder (`ivt_layout()` + `ivt_decode()`) computes the straddle dimension
+and these strides from the descriptor, so both cases run the identical code.
 
 ## The codebook: labels, geographic ids, footnotes
 
@@ -204,18 +236,24 @@ str(meta$footnotes[[1]])
 length(meta$footnotes)
 ```
 
-## Legacy 1991 variant (1003011)
+## The 1991 (pre-DGUID) files (1003011)
 
-The 1991 census files are the same family-2 container with pre-DGUID conventions,
-all handled by `read_ivt()`:
+The 1991 census files are the *same* container in the geography-straddle case,
+with pre-DGUID conventions — fully decoded through the same `read_ivt()` path
+(cell-exact against the scraped Beyond 20/20 ground truth):
 
-* value pages are `int16`/`int32` (markers `0x82`/`0x84`); cell decode is exact
-  for the scraped ground-truth geographies;
+* value pages are `int16`/`int32` (markers `0x82`/`0x84`) rather than float64,
+  and presence uses the same **byte-pair-swapped** positional bitmap;
 * geography is a single inline block per chunk of `"<name> (<GEOUID>) <flag>"` —
   a **bilingual** name (`Newfoundland | Terre-Neuve`), a bare **GEOUID** (a
   shortened DGUID without the year/area-type prefix), and a data-quality flag;
-* the table identity is stored *out of line* (the `@40`/`@48` header pointers),
-  and footnotes are the `(N) text` form described above.
+* the table identity is stored *out of line* (the `@40`/`@48` header pointers,
+  which are zero on the modern DGUID files — that difference is the format-version
+  signal), and footnotes are the `(N) text` form described above.
+
+A profile lineage of pre-DGUID files (some 1981/1991 profiles) additionally puts
+geography *last* behind a one-member "Values" placeholder; the positional nesting
+absorbs that without a special case.
 
 ```{r}
 leg <- read_ivt(ivt_download("1003011"))   # 41,859 geographies, Age(110) × Sex(3)
@@ -226,17 +264,23 @@ ivt_tidy(leg)
 
 | Region | Function(s) | Source file(s) |
 |--------|-------------|----------------|
-| Header identity, dimension descriptor, layout | `ivt_metadata()`, `ivt_f2_header_layout()` | `R/codebook*.R` |
-| Page directory / geography index | (internal) `read_ivt()` | `R/container*.R` |
-| Page presence + value codec | (internal) `read_ivt()` | `R/decode*.R` |
-| Codebook labels, DGUIDs/GEOUIDs, geography attributes, footnotes | `ivt_metadata()`, `ivt_f2_geo_attributes()` | `R/codebook*.R`, `R/read-f2.R` |
+| Header identity, dimension descriptor, layout | `ivt_metadata()`, `ivt_f2_header_layout()`, `ivt_f2_descriptor()` | `R/codebook-f2.R`, `R/dimdir.R` |
+| Page directory / geography index | (internal) `ivt_layout()` | `R/decode.R`, `R/container*.R` |
+| Presence bitmap + value codec (both straddle cases) | (internal) `ivt_decode()` | `R/decode.R`, `R/decode-f2.R` |
+| Codebook labels, DGUIDs/GEOUIDs, geography attributes, footnotes | `ivt_metadata()`, `ivt_f2_geo_attributes()` | `R/codebook-f2.R`, `R/dimdir.R`, `R/read-f2.R` |
 | Tidy / write outputs | `ivt_tidy()`, `ivt_write_*()` | `R/read.R`, `R/write.R` |
 
 ## Validation
 
-`canivt` is validated against the StatCan CSV/metadata downloads: family 1
-(98-10-0241) all 166 geographies and 7,489,464 cells exact; family 2 (98-10-0023)
-all 63,404 geographies and 14.5 M cells exact, plus every geography attribute and
-the Age/Gender labels; and the 1991 table (1003011) cell-exact for all scraped
-ground-truth geographies. See the `tests/` directory and the notes file for the
-exact figures.
+`canivt` is validated against the StatCan CSV/metadata downloads: the
+data-dimension-straddle reference (98-10-0241) all 166 geographies and 7,489,464
+cells exact; the geography-straddle reference (98-10-0023) all 63,404 geographies
+and 14.5 M cells exact, plus every geography attribute and the Age/Gender labels;
+and the 1991 table (1003011) cell-exact for all scraped ground-truth geographies.
+The unified decoder is additionally **byte-identical** to the two former decoders
+on six reference tables, and viewer/CSV-validated across the wider corpus —
+1996–2021 census tables, 1981/1991 profiles, 2001/2006 F-series, large 2016
+`98-400-X` crosstabs, commuting-flow tables and custom extracts. An opt-in
+regression ledger runs the whole local corpus through `read_ivt()` and asserts
+the exact cell count per table. See the `tests/` directory and the notes file
+(`inst/notes/coverage.md`, `decode-history.md`) for the exact figures.
