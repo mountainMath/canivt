@@ -8,7 +8,10 @@ vignette: >
 ---
 
 ```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_chunk$set(
+  collapse = TRUE, 
+  comment = "#>",  
+  eval = nzchar(Sys.getenv("COMPILE_VIG")))
 ```
 
 This vignette walks through a complete, realistic use case: **look up a table in
