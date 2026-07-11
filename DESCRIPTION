@@ -1,6 +1,6 @@
 Package: canivt
 Title: Download and Parse StatCan Beyond 20/20 IVT Tables
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R:
     person("Jens", "von Bergmann", , "jens@mountainmath.ca", role = c("aut", "cre"))
 Description: Downloads and parses Statistics Canada Beyond 20/20 .ivt data
