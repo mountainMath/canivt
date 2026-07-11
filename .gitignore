@@ -25,4 +25,4 @@ Meta/
 
 # Knitted vignette output (source is vignettes/*.Rmd)
 /vignettes/*.html
-/vignettes/ivt-format.R
+/vignettes/*.R
