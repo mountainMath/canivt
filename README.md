@@ -25,6 +25,20 @@ remotes::install_github("mountainMath/canivt")
 
 ## Usage
 
+The recommended way to access IVT tables is to parse them to Parquet, with the
+download (if needed) and parsing handled under the hood. IVT tables can be
+addressed by their StatCan catalogue number, a Borealis id, or a local file id.
+
+```r
+library(canivt)
+
+# read data for StatCan catalogue number 98-10-0241
+ds <- get_statcan_ivt("98-10-0241")
+```
+
+For finer control there is a range of functions that handle the different
+aspects of the download and parsing process.
+
 `read_ivt()` is the core: point it at an `.ivt` file (local or freshly
 downloaded) and it returns a decoded table with both the cells and the codebook.
 
@@ -79,26 +93,15 @@ id), returning an [`arrow`](https://arrow.apache.org/docs/r/) dataset connection
 ds <- get_statcan_ivt("98-10-0241")          # cached; second call is instant
 ```
 
-## What works
+## Coverage
 
-**Every `.ivt` in the tested corpus decodes** — there are no unsupported files. A
-single descriptor-driven decoder handles them all, and `read_ivt()` auto-detects
-the layout:
-
-- **2016–2021 census tables** (DGUID codebook), the reference table
-  [98-10-0241](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=9810024101)
-  validated exact against the StatCan CSV (all 166 geographies, 7,489,464 cells),
-  and the large geography-straddle tables down to dissemination areas
-  ([98-10-0023](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=9810002301):
-  63,404 geographies, 14.5 M cells exact).
-- **Pre-DGUID layouts** — 1981/1991 census profiles and the 1991 single-year-of-
-  age tables (inline bilingual codebook, `int16`/`int32` value pages).
-- 2001/2006 F-series, large 2016 `98-400-X` crosstabs, residence→work commuting-
-  flow tables, and custom Borealis/order extracts.
-- From the codebook: dimension member labels (with hierarchy indentation),
-  bilingual geography names and identifiers (**DGUIDs** or pre-2016 GEOUIDs),
-  geography attributes (level/type, geocodes, data-quality flags, non-response
-  rates), and footnotes with table/dimension/member scope.
+The package is designed with the goal of handling all IVT files. It has been
+tested and validated against a sizeable corpus of standard- and custom-release
+IVT files. But given the undocumented nature of the format and its versions it
+may well not be comprehensive, and there may be IVT format vintages that it
+currently does not cover. If you run across one of these please
+[open an issue](https://github.com/mountainMath/canivt/issues) with a link to
+the offending IVT and a brief description of the failure.
 
 ## How it works
 

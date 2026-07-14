@@ -14,17 +14,17 @@ knitr::opts_chunk$set(
   eval = nzchar(Sys.getenv("COMPILE_VIG")))
 ```
 
-This vignette walks through a complete, realistic use case: **look up a table in
-the Statistics Canada catalogue, download and decode it, and draw a graph** — a
-handful of lines end to end.
+This vignette walks through a typical use case: **look up a table in
+the Statistics Canada catalogue, download and decode it, and work with the data**.
 
-We deliberately pick an **old** table: the **1981 Census Profile for Canada,
-Provinces, Territories, Census Divisions and Census Subdivisions**
-(`97-570-X1981004`). Modern census tables come with a tidy CSV and a Web Data
-Service API, but the pre-2001 vintages are published **only** as *Beyond 20/20*
-`.ivt` files — there is no CSV, no API, no easy-to-parse alternative. `canivt`
-decodes them straight from the bytes, so a 1981 profile becomes an ordinary data
-frame.
+This example uses an **old** table that is not available in any alternative
+format: the **1981 Census Profile for Canada, Provinces, Territories, Census
+Divisions and Census Subdivisions** (`97-570-X1981004`). Modern census tables
+come with a tidy CSV and a Web Data Service API, and more recent vintages are
+also available in SDMX format, but the pre-2001 vintages are published **only**
+as *Beyond 20/20* `.ivt` files — there is no CSV, no API, no easy-to-parse
+alternative. `canivt` decodes them straight from the bytes, so a 1981 profile
+becomes an ordinary data frame.
 
 ```{r setup, message = FALSE}
 library(canivt)
@@ -43,14 +43,19 @@ options(
 )
 ```
 
-Without a cache everything still works; it just re-downloads each session.
+Without a cache everything still works; it just re-downloads each session. The
+IVT cache is not needed if the Parquet files are the primary target — omitting
+it reduces the storage footprint without impeding work with the cached Parquet
+files.
 
 ## 1. Look up the table in the catalogue
 
 `statcan_ivt_catalogue()` scrapes the StatCan census datasets index into one
 tibble (one row per published table version), cached as Parquet after the first
 call. Each row carries the `catalogue` number, `census_year`, `title`, `topic`
-and the download URLs.
+and the download URLs. The package ships with a cached version for convenience,
+but this can be replaced with an up-to-date scrape by passing the
+`refresh = TRUE` option.
 
 ```{r catalogue}
 catl <- statcan_ivt_catalogue()
@@ -110,8 +115,9 @@ res <- ds |>
   collect()
 ```
 
-That query returns 30 rows — the real decoded 1981 counts. 
-## 4. Draw the graph
+That query returns 30 rows — the real decoded 1981 counts.
+
+## 4. Work with the data
 
 A little tidying — short province labels, and mother-tongue shares within each
 province — then a stacked bar chart. In 1981 Quebec is overwhelmingly
@@ -120,30 +126,30 @@ French-mother-tongue while New Brunswick is the one clearly bilingual province:
 ```{r plot, fig.width = 7, fig.height = 4.2, fig.alt = "Stacked bar chart of 1981 mother-tongue composition by province: English, French and Other shares, ordered by French share. Quebec is overwhelmingly French, New Brunswick roughly one-third French, the rest predominantly English."}
 library(ggplot2)
 
-res$province <- sub(" - .*$", "", res$geo_name)                 # English short name
-res$mt       <- factor(sub("Mother tongue - ", "", res$profile),
-                       levels = c("French", "Other", "English"))
+plot_data <- res |>
+  mutate(province = sub(" - .*$", "", geo_name), # shorter province name
+         mt = factor(sub("Mother tongue - ", "", profile),
+                     levels = c("French", "Other", "English"))) |>
+  mutate(share = value / sum(value), .by = province)
 
-# share of each mother tongue within the province
-res$share <- ave(res$value, res$province, FUN = function(v) v / sum(v))
+# order provinces by their French share
+french_order <- plot_data |>
+  filter(mt == "French") |>
+  arrange(share) |>
+  pull(province)
 
-# order provinces by French share
-fr <- res$share[res$mt == "French"]
-res$province <- factor(res$province,
-                       levels = res$province[res$mt == "French"][order(fr)])
-
-ggplot(res, aes(share, province, fill = mt)) +
+plot_data |>
+  mutate(province = factor(province, levels = french_order)) |>
+  ggplot(aes(share, province, fill = mt)) +
   geom_col(width = 0.75) +
-  scale_x_continuous("share of population",
-                     labels = function(x) paste0(x * 100, "%"),
+  scale_x_continuous(labels = function(x) paste0(x * 100, "%"),
                      expand = expansion(mult = c(0, 0.03))) +
   scale_fill_manual(NULL,
     values = c(French = "#2c7fb8", Other = "#c7c7c7", English = "#d95f0e"),
     breaks = c("English", "French", "Other")) +
-  labs(y = NULL, title = "Mother tongue by province, 1981 Census",
-       subtitle = "Decoded from the Beyond 20/20 .ivt file (97-570-X1981004)") +
-  theme_minimal(base_size = 11) +
-  theme(panel.grid.major.y = element_blank(), legend.position = "top")
+  labs(y = NULL, x = "Share of population",
+       title = "Mother tongue by province, 1981 Census",
+       caption = "Data: Decoded from the Beyond 20/20 .ivt file (97-570-X1981004)")
 ```
 
 ## Recap

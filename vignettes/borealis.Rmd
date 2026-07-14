@@ -17,10 +17,12 @@ knitr::opts_chunk$set(
 The official StatCan census index (see `vignette("getting-started")`) is not the
 only place Beyond 20/20 tables live. The
 [**Borealis Dataverse**](https://borealisdata.ca) hosts a large collection of
-**custom StatCan tabulations** — cross-tabulations produced on order that are not
-part of the standard product line. Many mirror a StatCan catalogue number, but
-~3,000 are custom tables found nowhere else. `canivt` can browse that catalogue
-and download from it exactly like the StatCan one.
+**custom StatCan tabulations** — cross-tabulations produced on order and
+deposited by researchers, sitting outside the standard product line.
+Unfortunately many are simply re-posts of standard-release StatCan data, which
+clogs up the Borealis repository and makes discovering the truly new tables
+cumbersome, but ~3,000 are custom tables found nowhere else. `canivt` can browse
+that catalogue and download from it exactly like the StatCan one.
 
 This vignette browses the Borealis catalogue, downloads one custom tabulation,
 and draws a graph from it.
@@ -40,9 +42,7 @@ and put it in `.Renviron` (or set it for the session):
 Sys.setenv(BOREALIS_DATAVERSE_KEY = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
 ```
 
-The key is needed to *build* the catalogue and to *download* a file. Once the
-catalogue is cached (as Parquet, in the data cache) **reading** it back needs
-neither the key nor the `dataverse` package.
+The key is needed to *build* the catalogue and to *download* a file.
 
 ## 1. Browse the Borealis catalogue
 
@@ -152,23 +152,20 @@ owner-occupied, while central Vancouver and Victoria are the most renter-heavy:
 
 ```{r plot, fig.width = 7, fig.height = 4.2, fig.alt = "Ordered horizontal bar chart of owner-occupancy share of the household population in ten BC cities in 2006, with a 50% reference line. Surrey, Abbotsford and Richmond are around three-quarters owner-occupied; Vancouver is just above half and Victoria is below, the only city where renters outnumber owners."}
 library(ggplot2)
+library(dplyr)
 
-city  <- sub(", CY$", "", res$geo_name)
-owner <- res$value[res$tenure == "Owner"]
-rent  <- res$value[res$tenure == "Renter"]
-share <- data.frame(city = unique(city), owner_share = owner / (owner + rent))
-share$city <- reorder(share$city, share$owner_share)
-
-ggplot(share, aes(owner_share, city)) +
+res |>
+  mutate(city=sub(", CY$", "", geo_name)) |>
+  mutate(share=value/sum(value),.by=city) |>
+  filter(tenure=="Owner") |>
+  ggplot(aes(share, reorder(city,share))) +
   geom_col(fill = "#2c7fb8", width = 0.72) +
   geom_vline(xintercept = 0.5, linetype = 2, colour = "grey40") +
-  scale_x_continuous("owner-occupied share of household population",
-                     labels = function(x) paste0(x * 100, "%"),
+  scale_x_continuous(labels = function(x) paste0(x * 100, "%"),
                      limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
-  labs(y = NULL, title = "Home ownership by city, B.C. 2006",
-       subtitle = "From a custom StatCan tabulation on the Borealis Dataverse (cro0172986)") +
-  theme_minimal(base_size = 11) +
-  theme(panel.grid.major.y = element_blank())
+  labs(y = NULL, x = "Share of owner households",
+       title = "Home ownership by city, B.C. 2006",
+       caption = "Data: Custom StatCan tabulation on the Borealis Dataverse (cro0172986)")
 ```
 
 ## Recap
