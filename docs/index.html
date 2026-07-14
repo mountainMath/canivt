@@ -77,8 +77,15 @@
 <div class="section level2">
 <h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
 </h2>
-<p><code><a href="reference/read_ivt.html">read_ivt()</a></code> is the core: point it at an <code>.ivt</code> file (local or freshly downloaded) and it returns a decoded table with both the cells and the codebook.</p>
+<p>The recommended way to access IVT tables is to parse them to Parquet, with the download (if needed) and parsing handled under the hood. IVT tables can be addressed by their StatCan catalogue number, a Borealis id, or a local file id.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/mountainMath/canivt" class="external-link">canivt</a></span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># read data for StatCan catalogue number 98-10-0241</span></span>
+<span><span class="va">ds</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/get_statcan_ivt.html">get_statcan_ivt</a></span><span class="op">(</span><span class="st">"98-10-0241"</span><span class="op">)</span></span></code></pre></div>
+<p>For finer control there is a range of functions that handle the different aspects of the download and parsing process.</p>
+<p><code><a href="reference/read_ivt.html">read_ivt()</a></code> is the core: point it at an <code>.ivt</code> file (local or freshly downloaded) and it returns a decoded table with both the cells and the codebook.</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/mountainMath/canivt" class="external-link">canivt</a></span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Read a local .ivt file</span></span>
@@ -109,28 +116,20 @@
 <h3 id="finding-a-table-catalogue-lookup">Finding a table (catalogue lookup)<a class="anchor" aria-label="anchor" href="#finding-a-table-catalogue-lookup"></a>
 </h3>
 <p>If you don’t already know the product id, scrape the StatCan census datasets index into a searchable catalogue (cached as Parquet after the first call):</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">catl</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/statcan_ivt_catalogue.html">statcan_ivt_catalogue</a></span><span class="op">(</span><span class="op">)</span>              <span class="co"># every census version, one row each</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="va">catl</span>, <span class="fu"><a href="https://rdrr.io/r/base/grep.html" class="external-link">grepl</a></span><span class="op">(</span><span class="st">"tenure"</span>, <span class="va">title</span>, ignore.case <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co"># then read the table you picked</span></span>
 <span><span class="va">tab</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="reference/ivt_download.html">ivt_download</a></span><span class="op">(</span><span class="st">"98100241"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <p>For repeated/programmatic access, <code><a href="reference/get_statcan_ivt.html">get_statcan_ivt()</a></code> downloads, decodes and <strong>caches</strong> in one call (accepting a catalogue number, a Borealis id, or a local id), returning an <a href="https://arrow.apache.org/docs/r/" class="external-link"><code>arrow</code></a> dataset connection:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">ds</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/get_statcan_ivt.html">get_statcan_ivt</a></span><span class="op">(</span><span class="st">"98-10-0241"</span><span class="op">)</span>          <span class="co"># cached; second call is instant</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
-<h2 id="what-works">What works<a class="anchor" aria-label="anchor" href="#what-works"></a>
+<h2 id="coverage">Coverage<a class="anchor" aria-label="anchor" href="#coverage"></a>
 </h2>
-<p><strong>Every <code>.ivt</code> in the tested corpus decodes</strong> — there are no unsupported files. A single descriptor-driven decoder handles them all, and <code><a href="reference/read_ivt.html">read_ivt()</a></code> auto-detects the layout:</p>
-<ul>
-<li>
-<strong>2016–2021 census tables</strong> (DGUID codebook), the reference table <a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=9810024101" class="external-link">98-10-0241</a> validated exact against the StatCan CSV (all 166 geographies, 7,489,464 cells), and the large geography-straddle tables down to dissemination areas (<a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=9810002301" class="external-link">98-10-0023</a>: 63,404 geographies, 14.5 M cells exact).</li>
-<li>
-<strong>Pre-DGUID layouts</strong> — 1981/1991 census profiles and the 1991 single-year-of- age tables (inline bilingual codebook, <code>int16</code>/<code>int32</code> value pages).</li>
-<li>2001/2006 F-series, large 2016 <code>98-400-X</code> crosstabs, residence→work commuting- flow tables, and custom Borealis/order extracts.</li>
-<li>From the codebook: dimension member labels (with hierarchy indentation), bilingual geography names and identifiers (<strong>DGUIDs</strong> or pre-2016 GEOUIDs), geography attributes (level/type, geocodes, data-quality flags, non-response rates), and footnotes with table/dimension/member scope.</li>
-</ul>
+<p>The package is designed with the goal of handling all IVT files. It has been tested and validated against a sizeable corpus of standard- and custom-release IVT files. But given the undocumented nature of the format and its versions it may well not be comprehensive, and there may be IVT format vintages that it currently does not cover. If you run across one of these please <a href="https://github.com/mountainMath/canivt/issues" class="external-link">open an issue</a> with a link to the offending IVT and a brief description of the failure.</p>
 </div>
 <div class="section level2">
 <h2 id="how-it-works">How it works<a class="anchor" aria-label="anchor" href="#how-it-works"></a>
