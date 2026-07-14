@@ -205,10 +205,14 @@ borealis_require <- function(needs_key = FALSE) {
   invisible()
 }
 
-# rbind two data frames keeping only their shared columns (search batches can
-# carry ragged nested columns across pages).
+# rbind two data frames keeping only their shared ATOMIC columns. Search batches
+# can carry ragged nested columns across pages, and nested data-frame columns
+# (e.g. the search API's `checksum` frame) break base rbind outright (duplicate
+# 'row.names'); none of them feed the tidy catalogue, so drop them.
 rbind_common <- function(a, b) {
   if (is.null(b) || !nrow(b)) return(a)
   common <- intersect(names(a), names(b))
+  common <- common[vapply(a[common], is.atomic, logical(1)) &
+                     vapply(b[common], is.atomic, logical(1))]
   rbind(a[common], b[common])
 }
