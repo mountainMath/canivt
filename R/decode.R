@@ -288,8 +288,16 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   # geography-first layout whose directory covers only outer member 1 of 32 --
   # its data is actually nested geography-LAST, and decoding it would silently
   # return 1/32 of the table with geography mislabelled.
-  ne <- length(lay$ent_counts)
-  ostride <- lay$estride[ne]; ocount <- lay$ent_counts[ne]
+  # Span the OUTERMOST entry dimension that actually has >1 member. A
+  # single-member outer dimension -- a one-geography custom crosstab such as
+  # CRO0166131_CT.1.1, whose only geography is "Vancouver CMA" -- spans nothing:
+  # its stride would push the search window past the real directory extent, so
+  # fall back inward to the outermost dimension that has a range to span. When
+  # every entry dimension is a single member there is nothing to span.
+  gt1 <- which(lay$ent_counts > 1L)
+  if (!length(gt1)) return(TRUE)
+  j <- max(gt1)
+  ostride <- lay$estride[j]; ocount <- lay$ent_counts[j]
   hi_k <- -1L
   for (k in (ocount * ostride - 1L):max(0L, ocount * ostride - 65536L)) {
     en <- ivt_dir_entry(raw, idx0 + 8L * k, n)

@@ -863,6 +863,38 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   so label blocks containing `Total - <name>` never match). Corpus-diffed:
   the ONLY output change on all 28 supported tables is ct8 dim 3 gaining
   `members_fr`/`name_fr` (its EN labels are identical to the old fallback's).
+- [x] **2016 custom-extract lineage `CRO0163850` / `CRO0166131` — DECODED,
+  SUPPORTED, census-validated** (2026-07-17). A new descriptor/codebook VARIANT:
+  large (up to 9-dimension) crosstabs, one detailed table per geographic area, so
+  the geography count is usually 1 (`CRO0166131_CT.1.1` = just "Vancouver CMA";
+  `CRO0163850_CT.6` = "Canada") or a small set (CT.7 = the 13 provinces/
+  territories; CT.2 = 293 CDs). Four format facts, each handled metadata-driven:
+  (a) dimension names are UNRELATED `<display><description>` pairs (e.g.
+  `CondoStat/Type` + `Condominium status and structural type`) plus a
+  lowercase-led `chars`, which the standard doubled-name splitter drops — the
+  descriptor now falls back to a **structural accept-all walk**
+  (`ivt_f2_descriptor`, gated on the header slot table's authoritative dimension
+  count, adopted only when it recovers EXACTLY that count; loud
+  `canivt_descriptor_lenient`); (b) the geography descriptor record is a
+  `00 00 01 01` count-ZERO placeholder — the real count comes from the codebook
+  attribute arrays (`ivt_f2_dim_count_reconcile` now replaces a zero, not just an
+  over-count); (c) the per-dimension name marker uses sub-code `81 02 01 00` (not
+  `02`), `<name1>[01 .. 32]<name2>` — `ivt_f2_dir_name_marker01` locates it as a
+  fallback in `ivt_f2_dir_marker_entry` when no `02` marker exists, keyed on the
+  `0x32` copy-tag signature so it cannot match a schema block; (d) geography is
+  laid out like a data dimension (name marker + one English combined
+  `"<name> <code> (  <gnr>%)"` array, no `GEO_NAME_EN` schema, **English only**) —
+  `ivt_f2_geo_custom` reads it positionally and splits name/code (loud
+  `canivt_geo_custom`). Also `ivt_page_preflight`'s span check now uses the
+  outermost entry dimension with count > 1 (a single-geography outer dimension
+  spans nothing). VALIDATED against public census: `CT.6` grand total 13,798,300
+  private households and avg/median household income $93,162/$70,615 (census
+  $92,990/$70,336, the gap = the universe's farm/reserve/band/income≤0
+  exclusions); `CT.7`'s 13 provinces sum to 13,798,305 (= CT.6 ± rounding);
+  `CRO0166131_CT.1.1` grand total 960,895 vs the published Vancouver CMA figure
+  960,890. Ledger: `CRO0163850_CT6` (545,481 cells) + `CRO0163850_CT7`
+  (3,586,460), both `strict_clean = FALSE` (the two loud fallbacks). Corpus
+  regression unchanged at FAIL 0 (120 prior tables + these 2).
 - [x] **1986 census profile `97-570-X1986002` — DECODED, SUPPORTED** (2026-07-07).
   A previously-untested VINTAGE (no 1986 table was in the corpus). It is the
   ordinary profile lineage, identical in shape to the 1981 profiles: `Values(1) ×

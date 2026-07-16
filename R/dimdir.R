@@ -270,6 +270,41 @@ ivt_f2_label_lang_fallback <- function(nm, a, b) {
 # prefix-matched, or a verbatim >=8-char hit for the SHORT/LONG cro name pair
 # ("Characteristics" / "Selected Characteristics"). 0 when no named marker exists
 # -- the caller then treats the directory as not resolving this dimension.
+# The 2016 custom-extract lineage (CRO0163850 / CRO0166131) frames its
+# per-dimension name marker with sub-code `81 02 01 00` (not `02`), storing the
+# name TWICE as `<display name>[01 .. 32]<full description>` -- a short display
+# label, then a `0x32`-tagged separator, then the long description. Locate that
+# entry in a slot directory and return list(row, name = the display label), or
+# NULL. The `0x32`-before-the-second-copy signature is required so this cannot
+# match a one-field schema block (`81 02 01 00` "Code" ...): a genuine name
+# marker always carries the doubled name. Used only as a fallback where the
+# standard `81 02 02 00` marker is absent, so the validated `02` corpus is
+# untouched.
+ivt_f2_dir_name_marker01 <- function(raw, dir) {
+  n <- length(raw)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 20L || len > 4000L || off < 0L || off + len > n) next
+    b <- as.integer(raw[(off + 1L):(off + 4L)])
+    if (!(b[1L] == 0x81L && b[2L] == 0x02L && b[3L] == 0x01L && b[4L] == 0x00L)) next
+    seg <- as.integer(raw[(off + 1L):(off + len)])
+    pr <- seg >= 32L & seg <= 126L
+    rl <- rle(pr); ends <- cumsum(rl$lengths); starts <- ends - rl$lengths + 1L
+    runs <- which(rl$values & rl$lengths >= 3L)
+    if (length(runs) < 2L) next                        # need the name + its copy
+    e1 <- ends[runs[1L]]                               # last byte of the display name
+    s2 <- starts[runs[2L]]                             # first byte of the copy
+    if (s2 > e1 + 6L) next                             # the copy follows closely
+    # the separator between the two names starts 0x01 and ends in the 0x32 copy
+    # tag; 0x32 is itself printable ('2'), so it merges onto the copy's run --
+    # the separator therefore runs from just past name1 up to and INCLUDING s2.
+    sep <- seg[(e1 + 1L):s2]
+    if (sep[1L] != 0x01L || sep[length(sep)] != 0x32L) next
+    return(list(row = r, name = trimws(intToUtf8(seg[starts[runs[1L]]:e1]))))
+  }
+  NULL
+}
+
 ivt_f2_dir_marker_entry <- function(raw, nm, dir) {
   named <- integer(0); named_at <- character(0)
   for (r in seq_len(nrow(dir))) {
@@ -285,12 +320,32 @@ ivt_f2_dir_marker_entry <- function(raw, nm, dir) {
     named <- c(named, r); named_at <- c(named_at, got[1L])
   }
   if (length(named) == 1L) return(named[1L])          # the corpus case: unique
-  if (!length(named)) return(0L)
+  if (!length(named)) {                               # no 81 02 02 00 marker:
+    m01 <- ivt_f2_dir_name_marker01(raw, dir)         # try the 01-subcode variant
+    return(if (is.null(m01)) 0L else m01$row)
+  }
   for (i in seq_along(named))                         # disambiguate by name
     if (ivt_f2_name_match(named_at[i], nm) ||
         (!is.na(nm) && nchar(nm) >= 8L && grepl(nm, named_at[i], fixed = TRUE)))
       return(named[i])
   0L
+}
+
+# The display name from dimension k's slot-directory name marker (standard
+# `81 02 02 00`, else the `81 02 01 00` variant), read positionally -- no
+# descriptor required, so it is safe to call from within the descriptor parse
+# (pass `slots`). Returns the name or NA.
+ivt_f2_dim_marker_name <- function(raw, k, slots) {
+  dir <- ivt_f2_dim_dir(raw, k, slots)
+  if (is.null(dir)) return(NA_character_)
+  mk <- ivt_f2_dir_marker_entry(raw, NA_character_, dir)
+  if (mk <= 0L || mk > nrow(dir)) return(NA_character_)
+  off <- dir[mk, "off"]; len <- dir[mk, "len"]
+  m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(length(raw), off + len)], 0L)
+  got <- m$name[!is.na(m$name) & nchar(m$name) >= 3L]
+  if (length(got)) return(got[1L])
+  m01 <- ivt_f2_dir_name_marker01(raw, dir[mk, , drop = FALSE])
+  if (!is.null(m01)) m01$name else NA_character_
 }
 
 # The stored member-slot count and real (non-empty) member count of one
@@ -343,7 +398,13 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
     if (is.null(dir)) next
     mc <- ivt_f2_dir_member_count(raw, dims[[k]]$name, dir)
     if (is.na(mc$slots) || mc$slots < 1L) next
-    if (dims[[k]]$count <= mc$slots) next        # codebook cannot contradict it
+    # keep a positive descriptor count the codebook cannot contradict (<= slots);
+    # replace it when it OVER-counts (the profile "Values" placeholder read
+    # 0x20 = 32 vs 1 real slot) OR is ZERO (the geography placeholder
+    # `00 00 01 01` of the 2016 custom-extract lineage, whose real count -- 1 for
+    # a single-geography crosstab like CRO0166131_CT.1.1, 16 for CT.7's provinces
+    # -- lives only in its codebook attribute arrays).
+    if (dims[[k]]$count >= 1L && dims[[k]]$count <= mc$slots) next
     if (!is.na(mc$count) && mc$count >= 1L) dims[[k]]$count <- mc$count
   }
   dims

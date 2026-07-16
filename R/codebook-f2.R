@@ -721,8 +721,58 @@ ivt_f2_geo_light <- function(raw, n_geo) {
                else ivt_f2_geo_uids(raw)
     return(list(geo_name = simple$name, geo_uid = geo_uid))
   }
+  # 2c. the 2016 custom-extract lineage (CRO0163850 / CRO0166131): geography is
+  #     structured like a data dimension (an `81 02 01 00` name marker then one
+  #     combined-string member array, no GEO_NAME_EN schema, English only), so
+  #     the schema/inline paths above all miss it.
+  cust <- ivt_f2_geo_custom(raw, n_geo)
+  if (!is.null(cust)) return(cust)
   # 3. chunked DGUID tables (0023/0129/0013/...): uid only, positional first
   list(geo_name = NULL, geo_uid = ivt_f2_geo_uids(raw))
+}
+
+# Geography for the 2016 custom-extract lineage (CRO0163850 / CRO0166131). Its
+# geography dimension is laid out exactly like a DATA dimension -- a slot
+# directory with the `81 02 01 00` name marker followed by a single English
+# member-label array (no French copy, no GEO_NAME_EN schema) -- so every reader
+# above (inline combined block, GEO_NAME_EN schema, DGUID scan) returns NULL. The
+# member strings are combined "<name> <code> (  <gnr>%)" (e.g. "Canada 20000
+# (  5.1%)", "Vancouver CMA 933 00001 (  5.7%)", "Newfoundland and Labrador (10)
+# 00000 (  6.8%)"). Read that array positionally through the same slot-directory
+# machinery the data dimensions use, then split each string into its name and its
+# trailing geography code (the uid). Gated on the trailing "(  N%)" GNR signature
+# so it engages only for this lineage; LOUD, as a content parse supplies the split.
+ivt_f2_geo_custom <- function(raw, n_geo) {
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || !length(d$dims)) return(NULL)
+  gi <- ivt_f2_geo_dim_index(raw, d)
+  slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
+  if (is.null(slots)) return(NULL)
+  dir <- ivt_f2_dim_dir(raw, gi, slots)
+  if (is.null(dir)) return(NULL)
+  mk <- ivt_f2_dir_marker_entry(raw, d$dims[[gi]]$name, dir)
+  if (mk <= 0L || mk >= nrow(dir)) return(NULL)
+  cand <- ivt_f2_dir_member_arrays(
+    raw, dir, n_geo, rows = (mk + 1L):nrow(dir), max_keep = 1L,
+    accept = function(t) {
+      if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) return(NULL)
+      t
+    })
+  if (!length(cand)) return(NULL)
+  labels <- cand[[1L]]
+  gnr <- "\\(\\s*[0-9][0-9.]*\\s*%\\)\\s*$"           # trailing GNR, the signature
+  if (mean(grepl(gnr, labels)) < 0.5) return(NULL)    # not this lineage
+  body <- trimws(sub(gnr, "", labels))                # "<name> <code>"
+  code <- sub("^.*?([0-9][0-9 ]*[0-9]|[0-9])\\s*$", "\\1", body)
+  code <- ifelse(code == body, NA_character_, gsub(" ", "", code))
+  name <- trimws(sub("\\s+[0-9][0-9 ]*$", "", body))  # drop the trailing code
+  ivt_fallback(paste(
+    "Geography decoded from the 2016 custom-extract combined name array",
+    "(\"<name> <code> (gnr%)\"); name and code split by content."),
+    "canivt_geo_custom")
+  list(geo_label = labels, geo_name = name,
+       geo_uid = ifelse(is.na(code) | !nzchar(code), NA_character_, code))
 }
 
 # Backfill `geo_name` from the display `geo_label` for members that carry a label
@@ -2421,16 +2471,22 @@ ivt_f2_descriptor_impl <- function(raw) {
   # the 0x01. The name may start with an uppercase letter OR a digit ("1995
   # Household Income (3)" in the 1996 table 95F0250XDB96001 -- the
   # uppercase-only anchor silently dropped that dimension).
-  walk_records <- function(v, Lend, cap) {
+  walk_records <- function(v, Lend, cap, lenient = FALSE) {
     dims <- list()
     k <- 4L
     while (k <= Lend - 1L && length(dims) < cap) {
-      if (v[k] == 0x01L &&
-          ((v[k + 1L] >= 65L && v[k + 1L] <= 90L) ||
-           (v[k + 1L] >= 48L && v[k + 1L] <= 57L))) {
+      c1 <- v[k + 1L]
+      # the standard walk anchors an UPPERCASE- or DIGIT-led name after the 0x01;
+      # the accept-all pass also admits a lowercase-led name (the 2016 custom
+      # extract's "charschars" dimension) -- the exact-count self-check below
+      # keeps that from over-matching.
+      namestart <- (c1 >= 65L && c1 <= 90L) || (c1 >= 48L && c1 <= 57L) ||
+                   (lenient && c1 >= 97L && c1 <= 122L)
+      if (v[k] == 0x01L && namestart) {
         e <- k + 1L
         while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
         run <- v[(k + 1L):(e - 1L)]
+       if (!lenient || length(run) >= 4L) {          # a 1-char "P" is not a name
         # count/type come from the framing bytes before the 0x01 (computed here so
         # the count can hint the name recovery -- some 2001 descriptors bleed
         # French prose into the name copies, see below).
@@ -2468,18 +2524,29 @@ ivt_f2_descriptor_impl <- function(raw) {
         }
         nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L,
                                      count = count)
+        if (is.na(nm) && lenient) {
+          # the accept-all pass keeps every framed record even when the two name
+          # copies do not relate (a <display><description> pair, e.g.
+          # "CondoStat/Type" + "Condominium status and structural type"): the
+          # clean name comes from the dimension's slot-directory name marker,
+          # positionally; a leading crumb of the run is the last resort.
+          nm <- ivt_f2_dim_marker_name(raw, length(dims) + 1L, slots_auth)
+          if (is.na(nm)) nm <- trimws(substr(intToUtf8(run), 1L, 24L))
+        }
         if (!is.na(nm)) {
           dims[[length(dims) + 1L]] <- list(name = nm,
                                             count = count, type = type,
                                             double01 = double01)
           k <- e; next
         }
+       }
       }
       k <- k + 1L
     }
     dims
   }
 
+  slots_auth <- NULL                               # set before the accept-all pass
   win <- min(D + 4000L, n)
   v <- as.integer(raw[(D + 1L):win])               # v[k] is byte D+k-1
   # the dimension records sit between the fixed header and the "FACET04" title;
@@ -2508,6 +2575,36 @@ ivt_f2_descriptor_impl <- function(raw) {
       v2 <- as.integer(raw[(sub + 1L):D])          # bytes sub .. D-1
       dims2 <- walk_records(v2, length(v2), 32L)
       if (length(dims2) >= 2L) dims <- dims2
+    }
+  }
+
+  # AUTHORITATIVE dimension count: the header n_dim field, corroborated by the
+  # leading run of populated header slot-directory pointers (a 9-dimension custom
+  # extract leaves dims 10-12 as null padding slots). When the strict name walk
+  # recovers fewer records than that, the descriptor is the 2016 custom-extract
+  # lineage (CRO0163850 / CRO0166131), which frames some dimension names as
+  # unrelated <display><description> pairs the standard splitter drops (plus a
+  # lowercase-led "chars" the anchor skips). Retry with the structural accept-all
+  # walk and adopt it only if it recovers EXACTLY the authoritative count --
+  # self-validating, and loud (a heuristic supplied the records).
+  slots_auth <- ivt_f2_dim_slots(raw, m = 32L)
+  ndim_auth <- ndim
+  if (!is.null(slots_auth)) {
+    ok <- vapply(slots_auth, function(s) !is.na(s$ptr) && s$ptr > 0L &&
+                   !is.na(s$n_entries) && s$n_entries > 0L, logical(1))
+    lead <- if (!ok[1L]) 0L else {
+      z <- which(!ok); if (length(z)) z[1L] - 1L else length(ok) }
+    if (lead >= 2L) ndim_auth <- lead
+  }
+  if (length(dims) < ndim_auth && ndim_auth >= 2L && ndim_auth <= 32L) {
+    lung <- walk_records(v, Lend, min(32L, ndim_auth + 4L), lenient = TRUE)
+    if (length(lung) == ndim_auth) {
+      ivt_fallback(sprintf(paste(
+        "Descriptor: only %d of %d dimensions matched the standard doubled-name",
+        "framing; recovered all %d via the structural accept-all walk (2016",
+        "custom-extract lineage)."), length(dims), ndim_auth, ndim_auth),
+        "canivt_descriptor_lenient")
+      dims <- lung
     }
   }
 
