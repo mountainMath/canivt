@@ -3,9 +3,10 @@ pkgdown: 2.2.0
 pkgdown_sha: ~
 articles:
   borealis: borealis.html
+  custom-files: custom-files.html
   getting-started: getting-started.html
   ivt-format: ivt-format.html
-last_built: 2026-07-14T13:02Z
+last_built: 2026-07-16T07:32Z
 urls:
   reference: https://mountainmath.github.io/canivt/reference
   article: https://mountainmath.github.io/canivt/articles
