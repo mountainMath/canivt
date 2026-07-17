@@ -43,7 +43,10 @@ Validated **cell-exact (byte-identical to the two former decoders)** on the six
 reference tables (0241/0077/0662 data-dim straddle; 0023/0129/1991 geography
 straddle), and viewer/CSV-validated across the wider corpus — 1996–2021 census
 tables, 1981/1991 profiles, 2001/2006 F-series, large 2016 `98-400-X` crosstabs,
-and custom cro/ord extracts. Per-table validation records and the story of how
+custom cro/ord extracts, and the **Canadian Business Patterns** Business-Register
+lineage (establishment counts by DA × 6-digit NAICS × employment size; geography
+position varies year to year, bare-numeric-code geography, `80 ff` descriptor
+signature). Per-table validation records and the story of how
 each was cracked live in [`decode-history.md`](inst/notes/decode-history.md); the
 measured coverage lives in [`coverage.md`](inst/notes/coverage.md).
 

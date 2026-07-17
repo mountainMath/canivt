@@ -727,8 +727,74 @@ ivt_f2_geo_light <- function(raw, n_geo) {
   #     the schema/inline paths above all miss it.
   cust <- ivt_f2_geo_custom(raw, n_geo)
   if (!is.null(cust)) return(cust)
+  # 2d. the Canadian Business Patterns lineage: geography is a chunked codebook of
+  #     bare numeric GEOUIDs (8-digit Dissemination-Area codes), no DGUID shape
+  #     and no GEO_NAME schema, so every reader above misses it.
+  bare <- ivt_f2_geo_bare_codes(raw, n_geo)
+  if (!is.null(bare)) return(bare)
   # 3. chunked DGUID tables (0023/0129/0013/...): uid only, positional first
   list(geo_name = NULL, geo_uid = ivt_f2_geo_uids(raw))
+}
+
+# Extract the contiguous run of `[len][ascii-digits]` Pascal records that a
+# Business Patterns geography chunk stores in its tail (after a packed 22-bit
+# attribute field). `len` in 5..11 covers the 8-digit DA GEOUIDs with headroom.
+# Scans byte-by-byte through the binary prefix, then reads the code array until
+# the first non-record byte. Returns the codes in storage order, or character(0).
+ivt_f2_scan_digit_records <- function(raw, off, len) {
+  end <- off + len; i <- off
+  acc <- vector("list", 2048L); k <- 0L; run <- FALSE
+  while (i + 1L < end) {
+    L <- as.integer(raw[i + 1L])
+    if (L >= 5L && L <= 11L && i + 1L + L <= end &&
+        all(raw[(i + 2L):(i + 1L + L)] >= as.raw(0x30) &
+            raw[(i + 2L):(i + 1L + L)] <= as.raw(0x39))) {
+      k <- k + 1L; acc[[k]] <- rawToChar(raw[(i + 2L):(i + 1L + L)])
+      i <- i + 1L + L; run <- TRUE
+    } else {
+      if (run) break                    # end of the tail code array
+      i <- i + 1L
+    }
+  }
+  if (k == 0L) character(0) else unlist(acc[seq_len(k)], use.names = FALSE)
+}
+
+# Geography for the Canadian Business Patterns lineage (Business Register
+# establishment counts by Dissemination Area, e.g. Dec07DA.ivt). Its geography
+# codebook stores bare numeric GEOUIDs -- 8-digit DA codes like "59150001" -- as
+# dense `[len][ascii-digits]` Pascal records in the tail of each `81 02 00 04`
+# directory chunk (each chunk is a packed 22-bit attribute field then the code
+# array), single language, with NO DGUID shape and NO GEO_NAME schema. The inline
+# / schema / DGUID readers therefore all return NULL. Read the codes positionally
+# from the geography dimension's slot directory (chunks are in member-id order,
+# codes globally sorted), gated on recovering exactly `n_geo` unique all-numeric
+# codes so no other table engages it. A DA carries no textual name, only the
+# code, so `geo_name` is the code itself. LOUD (a content parse of the code
+# records supplies the uids).
+ivt_f2_geo_bare_codes <- function(raw, n_geo) {
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  d <- ivt_f2_descriptor(raw)
+  if (is.null(d) || !length(d$dims)) return(NULL)
+  gi <- ivt_f2_geo_dim_index(raw, d)
+  slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
+  if (is.null(slots)) return(NULL)
+  dir <- ivt_f2_dim_dir(raw, gi, slots)
+  if (is.null(dir)) return(NULL)
+  n <- length(raw)
+  parts <- vector("list", nrow(dir))
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + len > n) next
+    parts[[r]] <- ivt_f2_scan_digit_records(raw, off, len)
+  }
+  codes <- unlist(parts, use.names = FALSE)
+  if (length(codes) != n_geo || anyDuplicated(codes)) return(NULL)
+  ivt_fallback(paste(
+    "Geography decoded as bare numeric GEOUIDs from the codebook's",
+    "[len][digits] code records (Business Patterns Dissemination-Area",
+    "lineage); a DA has no name, so `geo_name` is the code."),
+    "canivt_geo_bare_codes")
+  list(geo_name = codes, geo_uid = codes)
 }
 
 # Geography for the 2016 custom-extract lineage (CRO0163850 / CRO0166131). Its
@@ -2300,15 +2366,19 @@ ivt_f2_geographies <- function(raw) {
 # The dimension-descriptor block opens with an invariant 9-byte signature on
 # EVERY known layout (family-1, family-2, legacy and profile): `81 01 20 00 f0`
 # then `.. .. 80 03` (`81 01` block marker, u16 len 0x20, then `f0<XX>00 80 03`;
-# the fifth/sixth bytes vary `20`/`28`). This lets the descriptor be located
-# structurally rather than trusting a single header pointer -- some custom-order
-# exports (ord-08035, the cro crosstabs) point the `@32` field at the identity /
-# title block instead, while still listing the descriptor in the master directory.
+# the fifth/sixth bytes vary `20`/`28`). The Canadian Business Patterns lineage
+# closes the signature with `80 ff` instead of `80 03` (`f0 00 00 80 ff` /
+# `f0 00 80 80 ff`), so b9 is accepted as either. This lets the descriptor be
+# located structurally rather than trusting a single header pointer -- some
+# custom-order exports (ord-08035, the cro crosstabs) point the `@32` field at
+# the identity / title block instead, while still listing the descriptor in the
+# master directory; Business Patterns points `@32` at a zero-filled slot and the
+# descriptor is recovered only by this signature scan.
 ivt_f2_is_descriptor <- function(raw, off) {
   if (is.null(off) || is.na(off) || off < 1L || off + 18L > length(raw)) return(FALSE)
   b <- as.integer(raw[(off + 1L):(off + 9L)])
   b[1] == 0x81L && b[2] == 0x01L && b[3] == 0x20L && b[4] == 0x00L &&
-    b[5] == 0xf0L && b[8] == 0x80L && b[9] == 0x03L
+    b[5] == 0xf0L && b[8] == 0x80L && (b[9] == 0x03L || b[9] == 0xffL)
 }
 
 #' Locate the dimension-descriptor block.
@@ -2510,7 +2580,25 @@ ivt_f2_descriptor_impl <- function(raw) {
       # keeps that from over-matching.
       namestart <- (c1 >= 65L && c1 <= 90L) || (c1 >= 48L && c1 <= 57L) ||
                    (lenient && c1 >= 97L && c1 <= 122L)
-      if (v[k] == 0x01L && namestart) {
+      # u16 member-count type tags (see the count block below). Also the set that
+      # can open a no-`01` geography record (anchor B).
+      geotypes <- c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L, 0x0fL, 0x0bL)
+      # anchor A: the standard `[count][type] 01 <name>` framing (v[k] is the 0x01).
+      # anchor B (lenient only): a large geography stored as `[count_lo][count_hi]
+      # [geotype] <name>` with NO 0x01 separator -- the Canadian Business Patterns
+      # descriptor (`2c c7 10 DADissemination Area...`, type 0x10, count 0xc72c =
+      # 50988), whose geography record the standard 0x01 anchor cannot see. It
+      # fires wherever that record sits -- first (Dec07: geography-first), last
+      # (Dec08/2012+: geography-last) or middle (Dec10/11) as the tabulation order
+      # varies year to year -- NOT gated to position. The tight framing (a u16
+      # geography count with count_hi > 0, so >= 256) plus the exact-`ndim_auth`
+      # adoption guard reject any spurious match, so it never fires on a table the
+      # standard walk already reads.
+      anchorA <- v[k] == 0x01L && namestart
+      anchorB <- lenient && !anchorA && namestart && k >= 4L &&
+                 v[k] %in% geotypes && v[k - 1L] > 0L &&
+                 (v[k - 2L] + v[k - 1L] * 256L) <= 200000L
+      if (anchorA || anchorB) {
         e <- k + 1L
         while (e <= length(v) && v[e] >= 32L && v[e] <= 126L) e <- e + 1L
         run <- v[(k + 1L):(e - 1L)]
@@ -2518,8 +2606,10 @@ ivt_f2_descriptor_impl <- function(raw) {
         # count/type come from the framing bytes before the 0x01 (computed here so
         # the count can hint the name recovery -- some 2001 descriptors bleed
         # French prose into the name copies, see below).
-        double01 <- v[k - 1L] == 0x01L
-        if (double01) {                            # period/facet double-01 framing
+        double01 <- anchorA && v[k - 1L] == 0x01L
+        if (anchorB) {                             # no-01 geography: type at v[k]
+          type <- v[k]; count <- v[k - 2L] + v[k - 1L] * 256L
+        } else if (double01) {                     # period/facet double-01 framing
           type <- v[k - 3L]; count <- v[k - 2L]
         } else {
           type <- v[k - 1L]
@@ -2546,8 +2636,7 @@ ivt_f2_descriptor_impl <- function(raw) {
           # as u8 misread 98F0172X's dimensions as Profile(2)/Geography(15); 0x09
           # as u8 silently mis-decoded 98-10-0174's cells. (u16 is safe for a
           # small member of any of these types: count_hi is then 00.)
-          count <- if (type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L, 0x0fL, 0x0bL))
-                     v[k - 3L] + v[k - 2L] * 256L
+          count <- if (type %in% geotypes) v[k - 3L] + v[k - 2L] * 256L
                    else v[k - 2L]
         }
         nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L,

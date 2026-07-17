@@ -410,34 +410,58 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   dims
 }
 
-# Which descriptor dimension is geography? Dimension 1 in every layout except
-# the profile-table lineage (97-570-X1981004 / 98F0172X / 95F0170X), which
-# stores a 1-member "Values" placeholder first and geography LAST. The
-# identification stays metadata-driven: a real geography can never have a
-# single member alongside other dimensions, so dimension 1 is accepted outright
-# unless its count is 1 -- then each dimension's slot directory is probed for a
-# geography codebook signature (`ivt_f2_dir_is_geo()`): the geography attribute
-# schema (a dictionary block naming GEO_NAME, modern DGUID tables) or inline
-# combined-format member blocks ("<name> (<code>) <flag>", the pre-DGUID
-# codebook). Falls back to dimension 1 (the positional rule) when nothing
-# resolves. No decoder logic branches on this beyond which dimension gets the
-# geography role (slug/labels/codebook); the cell decode itself is
-# dimension-agnostic.
+# Which descriptor dimension is geography? Dimension 1 on almost every layout,
+# but NOT the profile-table lineage (97-570-X1981004 / 98F0172X / 95F0170X: a
+# 1-member "Values" placeholder first, geography LAST) nor the Business Patterns
+# geography-last vintages (Dec08+: a data dimension first, geography LAST). The
+# identification stays metadata-driven, never positional: dimension 1 is accepted
+# outright only when its slot directory carries a geography codebook signature
+# (`ivt_f2_dir_is_geo()`: a GEO_NAME attribute schema, or inline "<name> (<code>)
+# <flag>" member blocks -- or, for the Business Patterns lineage, a codebook of
+# bare numeric GEOUIDs, `ivt_f2_dir_has_bare_codes()`). Otherwise every dimension
+# is probed for that signature, falling back to dimension 1. No decoder logic
+# branches on this beyond which dimension gets the geography role (slug / labels
+# / codebook); the cell decode itself is dimension-agnostic.
 ivt_f2_geo_dim_index <- function(raw, d = NULL)
   ivt_memo(raw, "geo_dim_index", function() ivt_f2_geo_dim_index_impl(raw, d))
 
 ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   if (is.null(d)) d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(1L)
-  cnt1 <- suppressWarnings(as.integer(d$dims[[1L]]$count))
-  if (is.na(cnt1) || cnt1 > 1L || length(d$dims) == 1L) return(1L)
+  if (length(d$dims) == 1L) return(1L)
   slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
   if (is.null(slots)) return(1L)
-  for (k in seq_along(d$dims)) {
+  is_geo_dim <- function(k) {
     dir <- ivt_f2_dim_dir(raw, k, slots)
-    if (!is.null(dir) && ivt_f2_dir_is_geo(raw, dir)) return(k)
+    !is.null(dir) && (ivt_f2_dir_is_geo(raw, dir) ||
+                        ivt_f2_dir_has_bare_codes(raw, dir))
   }
+  # fast path: a >1-member dimension 1 that looks like geography (every ordinary
+  # table). Only when dimension 1 is NOT geographic -- the profile "Values"
+  # placeholder or a Business Patterns data-dim-first order -- do we probe.
+  cnt1 <- suppressWarnings(as.integer(d$dims[[1L]]$count))
+  if (!is.na(cnt1) && cnt1 > 1L && is_geo_dim(1L)) return(1L)
+  for (k in seq_along(d$dims)) if (is_geo_dim(k)) return(k)
   1L
+}
+
+# Does this dimension's slot directory hold a bare-numeric-code geography
+# codebook? The Business Patterns lineage stores its Dissemination-Area GEOUIDs
+# as dense `[len][ascii-digits]` records (`ivt_f2_scan_digit_records()`) with no
+# GEO_NAME schema and no inline pattern, so `ivt_f2_dir_is_geo()` misses them.
+# TRUE once the directory's blocks yield `min_codes` such codes (a data
+# dimension's member codes carry "<code> - <label>" text, never bare digits, so
+# the threshold separates them cleanly). Cheap: stops at the first block that
+# pushes the running count over the threshold, and scans at most `max_blocks`.
+ivt_f2_dir_has_bare_codes <- function(raw, dir, min_codes = 100L, max_blocks = 8L) {
+  n <- length(raw); tot <- 0L
+  for (r in seq_len(min(nrow(dir), max_blocks))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + len > n) next
+    tot <- tot + length(ivt_f2_scan_digit_records(raw, off, len))
+    if (tot >= min_codes) return(TRUE)
+  }
+  FALSE
 }
 
 # Does this dimension slot directory hold a GEOGRAPHY codebook? TRUE when it
@@ -505,14 +529,22 @@ ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
   }
   a <- character(0); b <- character(0)
   ei <- 1L
+  nonempty <- function(x) sum(!is.na(x) & nzchar(trimws(x)))
   take_run <- function(need) {
     # consume the next blocks whose record counts match `need` (in order),
-    # skipping non-matching framing entries between runs
+    # skipping non-matching framing entries between runs. A partial final chunk
+    # may be stored either at its true length OR padded to a full 256-slot block
+    # with trailing empty records (Canadian Business Patterns: NAICS(929)'s last
+    # chunk is 161 real members in a 256-slot block); accept such a block when
+    # its NON-empty count equals the wanted size and slice it to that size.
+    fits <- function(v, want)
+      length(v) == want ||
+      (want < 256L && length(v) == 256L && nonempty(v) == want)
     run <- character(0)
     for (want in need) {
-      while (ei <= length(vals) && length(vals[[ei]]) != want) ei <<- ei + 1L
+      while (ei <= length(vals) && !fits(vals[[ei]], want)) ei <<- ei + 1L
       if (ei > length(vals)) return(NULL)
-      run <- c(run, vals[[ei]]); ei <<- ei + 1L
+      run <- c(run, vals[[ei]][seq_len(want)]); ei <<- ei + 1L
     }
     run
   }

@@ -915,6 +915,50 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   value sets, since labels/orders are harmonized/re-pivoted). Ledger:
   `CMHC2016_movers_T1` (1,067,791 cells) + `CMHC2016_movers_T2` (11,078,692),
   both `strict_clean = FALSE`.
+- [x] **Canadian Business Patterns `Dec07DA`…`December 2015` — DECODED, SUPPORTED,
+  internal-consistency validated** (2026-07-18). A new StatCan PRODUCT LINE (the
+  Business Register, not census): establishment counts by `Dissemination Area ×
+  National industries (6-digit NAICS) × Employment size ranges`, 9 files 2007–2015.
+  Same Beyond 20/20 container (byte-identical 32-byte header prefix), but three new
+  variant facts, all handled metadata-driven: (a) the descriptor **signature ends
+  `80 ff`** (`f0 00 00 80 ff` / `f0 00 80 80 ff`) not `80 03`, and `@32` points at a
+  zero-filled slot, so the descriptor is found only by the signature scan
+  (`ivt_f2_is_descriptor` now accepts `b9 ∈ {03, ff}`); (b) the geography record is
+  framed `[count_lo][count_hi][geotype] <name>` with **NO `01` separator** (embedded
+  in a binary blob) and sits at a **VARYING descriptor position** — geography-first
+  (2007, `geo_dim = 1`), -last (2008/2012–2015, `geo_dim = 3`) or -middle (2010/2011,
+  `geo_dim = 2`) as the tabulation order changes year to year — recovered by descriptor
+  anchor B (a geotype-led no-`01` record, any position, u16 count with `count_hi > 0`;
+  loud `canivt_descriptor_lenient`) and geography identified by codebook signature not
+  position (`ivt_f2_geo_dim_index` probes every dimension, and `ivt_f2_dir_has_bare_codes`
+  recognises the bare-numeric-code geography); (c) the geography codebook stores bare
+  8-digit DA GEOUIDs (e.g. `59150001`) as dense `[len][ascii-digits]` records in the
+  tail of each `81 02 00 04` chunk, single language, no DGUID shape / no `GEO_NAME`
+  schema — read positionally by `ivt_f2_geo_bare_codes` (loud `canivt_geo_bare_codes`;
+  a DA has no name, so `geo_name` is the code). Also fixed a general chunk-assembler bug
+  (`ivt_f2_dim_dir_label_chunks`): a `>256`-member dimension's partial FINAL label chunk
+  may be padded to a full 256-slot block, which the exact-length matcher skipped —
+  recovering NAICS(929)'s 4th chunk (161 members) and any similarly-padded codebook.
+  Cell counts validated by three independent signals agreeing (descriptor count =
+  bare-code count = distinct cell geographies): 2007 4,074,605 cells / 50,988 DAs,
+  2008 3,957,641 / 51,144, 2010 3,970,492 / 45,383; internal consistency holds
+  (`Total (A) = Indeterminate (B) + Subtotal (A−B)` per cell). Ledger: `CBP2007DA`
+  (geo-first), `CBP2008DA` (geo-last), `CBP2010DA` (geo-middle), all
+  `strict_clean = FALSE`. **`Dec09DA` is a CORRUPTED SOURCE file** — the geography
+  name overwrote the `EMP. SIZE RANGE` descriptor record at the byte level (garbled
+  `DA2Dissemination AreaDA2DA`+`IZE RANGE`, `ndim` reads 2), unrecoverable; a documented
+  source defect like the DQF-note truncation, not a decoder gap.
+- [x] **Untested-but-supported `~/data/xtabs` groups now ledger-covered** (2026-07-18).
+  A sweep of the `~/data/xtabs` tree found these already decode via existing lineages
+  (no code change) and added a regression row for each: `EO2654_2011_Van` — the
+  EO2654 Standard-Community-Profile timelines (1971–2011, Toronto/Vancouver; **1971 is
+  the oldest vintage yet decoded**), ordinary profile lineage, 1,227,181 cells;
+  `EO3278_T1_CDCSD` — the CMHC "unoccupied dwellings" EO3278 tables, ordinary family-2
+  (`Geography × Structural type × Document type`), 80,016 cells; `CMHC2016_movers_T3`
+  ("NOCs", the 3rd movers table, same footnote-bleed 10-dim lineage as T1/T2 via the
+  slot-table rebuild), 22,704,083 cells; `CRO0166131_CT1_1` (Vancouver CMA, the 2016
+  custom-extract per-area sibling of `CRO0163850`), 9,269,180 cells. All
+  `strict_clean = FALSE`.
 - [x] **1986 census profile `97-570-X1986002` — DECODED, SUPPORTED** (2026-07-07).
   A previously-untested VINTAGE (no 1986 table was in the corpus). It is the
   ordinary profile lineage, identical in shape to the 1981 profiles: `Values(1) ×
