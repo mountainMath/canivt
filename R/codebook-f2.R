@@ -2453,6 +2453,34 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer
 #' @return list(n_dim, dims = list(name, count, type), title) or NULL.
 #' @keywords internal
 #' @noRd
+# Build the dimension list directly from the header slot table (dimdir.R) when
+# the descriptor region walk fails to recover it. The larger 2016 custom-extract
+# crosstabs (the CMHC movers "Commuters"/"NOCs" tables) bleed a long footnote
+# paragraph INTO the descriptor block, leaving the doubled-name walk almost
+# nothing to anchor on -- but the header slot directories still list every
+# dimension in order (slot k = descriptor dimension k), each resolving a name
+# marker (`ivt_f2_dim_marker_name`) and a member array whose real length is the
+# member count (`ivt_f2_dir_member_count`). Returns a `ndim`-long dims list, or
+# NULL if any slot fails to yield a name + positive member count (so the caller
+# keeps the walk's result rather than a partial rebuild). Type is a placeholder:
+# the decoder is type-agnostic (it nests by count), and the geography stays
+# dimension 1. Passes `slots` through so it never re-enters the descriptor parse.
+ivt_f2_dims_from_slots <- function(raw, slots, ndim) {
+  if (is.null(slots) || ndim < 2L || ndim > length(slots)) return(NULL)
+  out <- vector("list", ndim)
+  for (k in seq_len(ndim)) {
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (is.null(dir)) return(NULL)
+    nm <- ivt_f2_dim_marker_name(raw, k, slots)
+    if (is.na(nm) || !nzchar(nm)) return(NULL)
+    mc <- ivt_f2_dir_member_count(raw, nm, dir)
+    cnt <- suppressWarnings(as.integer(mc$count))
+    if (is.na(cnt) || cnt < 1L) return(NULL)
+    out[[k]] <- list(name = nm, count = cnt, type = 0L, double01 = FALSE)
+  }
+  out
+}
+
 ivt_f2_descriptor <- function(raw)
   ivt_memo(raw, "descriptor", function() ivt_f2_descriptor_impl(raw))
 
@@ -2590,8 +2618,11 @@ ivt_f2_descriptor_impl <- function(raw) {
   slots_auth <- ivt_f2_dim_slots(raw, m = 32L)
   ndim_auth <- ndim
   if (!is.null(slots_auth)) {
+    # a populated slot has a plausible pointer and entry count; garbage slots
+    # past the real dimensions carry huge random n_entries, so bound it.
     ok <- vapply(slots_auth, function(s) !is.na(s$ptr) && s$ptr > 0L &&
-                   !is.na(s$n_entries) && s$n_entries > 0L, logical(1))
+                   !is.na(s$n_entries) && s$n_entries > 0L && s$n_entries < 1e6L,
+                 logical(1))
     lead <- if (!ok[1L]) 0L else {
       z <- which(!ok); if (length(z)) z[1L] - 1L else length(ok) }
     if (lead >= 2L) ndim_auth <- lead
@@ -2605,6 +2636,24 @@ ivt_f2_descriptor_impl <- function(raw) {
         "custom-extract lineage)."), length(dims), ndim_auth, ndim_auth),
         "canivt_descriptor_lenient")
       dims <- lung
+    }
+  }
+  # Last resort: rebuild the whole descriptor from the header slot table. The
+  # larger custom-extract crosstabs (the CMHC movers "Commuters"/"NOCs" tables)
+  # bleed a long footnote paragraph INTO the descriptor region, so even the
+  # accept-all walk finds almost no records -- but the slot directories still
+  # cleanly list every dimension (slot k = descriptor dimension k). Adopted only
+  # when it resolves EXACTLY the authoritative count (each slot must yield a name
+  # + positive member count), so it cannot fire on a table the walk already read.
+  if (length(dims) < ndim_auth && ndim_auth >= 2L && ndim_auth <= 32L) {
+    built <- ivt_f2_dims_from_slots(raw, slots_auth, ndim_auth)
+    if (!is.null(built)) {
+      ivt_fallback(sprintf(paste(
+        "Descriptor: the region walk recovered only %d of %d dimensions (a",
+        "footnote bleeds into the descriptor block); rebuilt all %d from the",
+        "header slot table."), length(dims), ndim_auth, ndim_auth),
+        "canivt_descriptor_from_slots")
+      dims <- built
     }
   }
 

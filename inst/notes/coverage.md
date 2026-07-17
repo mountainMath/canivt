@@ -895,6 +895,26 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   960,890. Ledger: `CRO0163850_CT6` (545,481 cells) + `CRO0163850_CT7`
   (3,586,460), both `strict_clean = FALSE` (the two loud fallbacks). Corpus
   regression unchanged at FAIL 0 (120 prior tables + these 2).
+- [x] **CMHC movers family `CMHC 2016 Table 1/2/3` — DECODED, SUPPORTED,
+  reference-CSV-validated** (2026-07-18). Same 2016 custom-extract lineage, but
+  the two LARGER tables (Table 2 "Commuters", Table 3 "NOCs"; 10 dimensions each)
+  bleed a long **footnote paragraph INTO the descriptor block**, so even the
+  accept-all walk finds ~1 dimension and the header `n_dim` field reads garbage
+  (543). The header slot table still lists every dimension cleanly (slot k =
+  descriptor dimension k), so `ivt_f2_dims_from_slots()` rebuilds the whole
+  descriptor from it — name marker + slot-directory member count per dimension,
+  geography stays dimension 1 — adopted only when it resolves EXACTLY the
+  authoritative dimension count (loud `canivt_descriptor_from_slots`). The
+  garbage trailing slots (huge random `n_entries`) are excluded from the
+  authoritative count by an `n_entries < 1e6` bound. Validated cell-exact against
+  the parsed reference CSVs (`movers_xtab/table{1,2,3}.csv`, harmonized labels):
+  Table 1 (StructuralType, geo_custom path, 8 geographies incl. the "minus"
+  aggregates) — grand totals + all 7 marginals + a 2-way (Core×STIR) + a 3-way
+  (315 cells) exact; Table 2 (9 geographies) and Table 3 (6 geographies) — grand
+  totals AND all 9 per-dimension marginals for Canada exact (compared as sorted
+  value sets, since labels/orders are harmonized/re-pivoted). Ledger:
+  `CMHC2016_movers_T1` (1,067,791 cells) + `CMHC2016_movers_T2` (11,078,692),
+  both `strict_clean = FALSE`.
 - [x] **1986 census profile `97-570-X1986002` — DECODED, SUPPORTED** (2026-07-07).
   A previously-untested VINTAGE (no 1986 table was in the corpus). It is the
   ordinary profile lineage, identical in shape to the 1981 profiles: `Values(1) ×
