@@ -806,8 +806,60 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   #    GEOUIDs (8-digit DA codes), no DGUID shape and no GEO_NAME schema.
   bare <- ivt_f2_geo_bare_codes(raw, n_geo)
   if (!is.null(bare)) return(bare)
-  # 5. chunked DGUID tables (0023/0129/0013/...): uid only, positional first.
-  list(geo_name = NULL, geo_uid = ivt_f2_geo_uids(raw))
+  # 5. chunked DGUID tables (0023/0129/0013/...): the uid-only read is the primary
+  #    for these (their names come from the read_ivt(geo_attributes = TRUE) path).
+  #    A COMPLETE uid array is the expected outcome here, so it wins.
+  uid <- ivt_f2_geo_uids(raw)
+  if (length(uid) == n_geo) return(list(geo_name = NULL, geo_uid = uid))
+  # 6. Stage 3 safety net (refactor-plan.md §7.4): nothing above claimed the
+  #    layout AND the uid scan came up short -- rather than emit nameless
+  #    geography, surface the codebook's own member strings VERBATIM (loud).
+  combined <- ivt_f2_geo_combined(ivt_f2_geo_entries(raw), n_geo)
+  if (!is.null(combined)) return(combined)
+  list(geo_name = NULL, geo_uid = uid)
+}
+
+# Stage 3 of the geography read (refactor-plan.md §7.4): the last-resort safety
+# net, reached only when no specializer recognized the layout and the uid scan did
+# not deliver a complete array. Rather than return nameless geography, it recovers
+# the codebook's own member strings VERBATIM: from the geography slot directory's
+# value entries it picks the single member-length run (an un-chunked block, or a
+# power-of-two-padded block that trims to `n_geo`) that is most name-like and
+# exposes it unchanged as `geo_label`/`geo_name`, plus an all-code run as `geo_uid`
+# if one is present. It deliberately does NOT try to assemble a multi-chunk
+# attribute codebook (that is a specializer's job -- a mis-stitched chunk order
+# would mislabel members); a table whose members do not fit one block returns NULL
+# and the uid-only read stands. LOUD (`canivt_geo_unparsed`, a strict-mode error):
+# the values are surfaced without any parsed name/code structure, so a consumer
+# knows to inspect them. Returns a light-style column list, or NULL.
+ivt_f2_geo_combined <- function(ents, n_geo) {
+  if (is.null(ents) || is.na(n_geo) || n_geo < 1L) return(NULL)
+  cand <- list()
+  for (r in seq_len(ents$n)) {
+    v <- trimws(ents$values(r))
+    if (length(v) > n_geo &&
+        all(is.na(v[(n_geo + 1L):length(v)]) | v[(n_geo + 1L):length(v)] == ""))
+      v <- v[seq_len(n_geo)]                     # trim the power-of-two slot padding
+    if (length(v) != n_geo || ivt_f2_is_ordinal(v)) next
+    if (all(is.na(v) | v == "")) next
+    cand[[length(cand) + 1L]] <- v
+  }
+  if (!length(cand)) return(NULL)
+  namey <- function(v) { nn <- v[!is.na(v) & nzchar(v)]
+                         if (!length(nn)) 0 else mean(grepl("[A-Za-z]", nn)) }
+  codey <- function(v) { nn <- v[!is.na(v) & nzchar(v)]
+                         if (!length(nn)) 0
+                         else mean(grepl("^[0-9A-Za-z-]+$", nn) & grepl("[0-9]", nn) &
+                                     !grepl("[[:space:]]", nn)) }
+  ns <- vapply(cand, namey, 0); cs <- vapply(cand, codey, 0)
+  label <- cand[[which.max(ns)]]
+  uid <- if (max(cs) >= 0.9) cand[[which.max(cs)]] else rep(NA_character_, n_geo)
+  ivt_fallback(paste(
+    "Geography layout unrecognized by every specializer; recovered {n_geo} member",
+    "label(s) VERBATIM from the most complete member-length codebook run (no",
+    "name/code structure was parsed). Inspect the geography metadata."),
+    class = "canivt_geo_unparsed")
+  list(geo_label = label, geo_name = label, geo_uid = uid)
 }
 
 ivt_f2_geo_light <- function(raw, n_geo) {

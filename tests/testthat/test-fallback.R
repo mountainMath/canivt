@@ -92,6 +92,34 @@ test_that("a nameless geography is a classed fallback (silent-truncation tripwir
   expect_error(ivt_f2_check_geo_names(gap), class = "canivt_geo_name_gap_error")
 })
 
+test_that("the Stage 3 safety net surfaces verbatim labels on an unknown roster", {
+  # a doctored `ents` (the Stage 1 accessor object) whose slot directory carries an
+  # unknown roster: a member-length NAME run, a matching CODE run, an ordinal run
+  # (must be skipped), and a too-short block (must be ignored). No specializer would
+  # recognize this, so the dispatcher's last resort recovers it verbatim.
+  names_run <- c("Canada", "Ontario", "Quebec", "Nunavut")
+  codes_run <- c("01", "35", "24", "62")
+  blocks <- list(names_run, codes_run, as.character(1:4), c("x", "y"))
+  ents <- list(
+    n = length(blocks),
+    values = function(r) blocks[[r]],
+    strict = function(r) list(values = blocks[[r]], dense = FALSE)
+  )
+  g <- expect_warning(ivt_f2_geo_combined(ents, 4L), class = "canivt_geo_unparsed")
+  expect_warning(ivt_f2_geo_combined(ents, 4L), class = "canivt_fallback")
+  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  expect_identical(g$geo_name, names_run)   # verbatim, most name-like run
+  expect_identical(g$geo_label, names_run)
+  expect_identical(g$geo_uid, codes_run)    # the all-code run becomes the uid
+  # nothing member-length -> NULL (the uid-only read stands), and no false warning
+  short <- list(n = 1L, values = function(r) c("a", "b"),
+                strict = function(r) NULL)
+  expect_no_warning(expect_null(ivt_f2_geo_combined(short, 4L)))
+  # strict mode upgrades the recovery to a hard error
+  withr::local_options(canivt.strict = TRUE)
+  expect_error(ivt_f2_geo_combined(ents, 4L), class = "canivt_geo_unparsed_error")
+})
+
 test_that("DQF_NOTE truncation is detected at the container's record ceiling", {
   # a note stored at the 252-char (0xFC) single-byte record ceiling is presumed
   # truncated; shorter notes are complete; NA propagates as NA (no note at all)

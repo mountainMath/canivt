@@ -441,11 +441,31 @@ corpus ledger (`CANIVT_CORPUS_TESTS=1`) FAIL 0.
    NOTE (for step 4): the two custom exports **EO2654_2011_Van** /
    **EO3278_T1_CDCSD** decode ZERO geography (light returns `geo_name = NULL`,
    `geo_uid = character(0)`) — no specializer claims them and
-   `ivt_f2_check_geo_names()` skips a wholly-NULL `geo_name`. This is the exact
-   gap Stage 3 (`ivt_f2_geo_combined()`) closes.
-4. **Stage 3** `ivt_f2_geo_combined()` + `canivt_geo_unparsed`; a synthetic
+   `ivt_f2_check_geo_names()` skips a wholly-NULL `geo_name`. (Stage 3 does NOT
+   rescue these -- see step 4: EO3278 is chunked, EO2654's directory does not
+   resolve; both need dedicated readers, not the verbatim net.)
+4. [x] **Stage 3** `ivt_f2_geo_combined()` + `canivt_geo_unparsed`; a synthetic
    unit test (a doctored directory with an unknown run roster) proves it warns
-   and returns verbatim labels.
+   and returns verbatim labels. DONE 2026-07-17. Wired as the dispatcher's
+   last resort, reached only when no specializer claimed the layout AND the uid
+   scan came up short (a complete uid array still wins at step 5, so the big
+   uid-only tables are untouched). It recovers the codebook's own member strings
+   VERBATIM: from the geo slot directory's value entries it picks the single
+   member-length run (un-chunked, or a pow-2-padded block that trims to `n_geo`)
+   that is most name-like as `geo_label`/`geo_name`, plus an all-code run as
+   `geo_uid`. LOUD (`canivt_geo_unparsed`, strict-mode error). Synthetic unit
+   test in test-fallback.R (verbatim name run, code→uid, NULL on no member-length
+   block, strict error). Engages on ZERO corpus tables (returns NULL for all):
+   light byte-identical, corpus FAIL 0 / 51, geo-snapshot FAIL 0 / 51, unit
+   FAIL 0. SCOPE: it deliberately does NOT assemble a multi-chunk attribute
+   codebook (a mis-stitched chunk order would mislabel members -- that is a
+   specializer's job). So it does **not** rescue the two nameless custom exports
+   noted at step 3: **EO3278_T1_CDCSD** is an attribute-major chunked codebook
+   (groups 1,1,2,4,8… like `attrs_dir`) with no GEO_NAME schema -- it needs a
+   schema-less `attrs_dir` variant, a new specializer; **EO2654_2011_Van** does
+   not even resolve a geo block directory (its geography dimension is misread as
+   "2011 Census", `ivt_f2_geo_entries()` NULL) -- a descriptor / geo-identify
+   gap. Both remain genuine gaps for a future pass (own decode-history entry).
 5. **Demote the byte-scans** (`ivt_f2_geo_dguids`, stride-walk) to explicit
    last-resort inside their specializers, each already `ivt_fallback()`-loud;
    confirm 98100013 full-attr snapshot still byte-identical.
