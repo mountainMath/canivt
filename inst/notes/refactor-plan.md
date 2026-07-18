@@ -565,6 +565,26 @@ materialize the sparse `_Description` column per-member from the `84 01` bitmap 
   deliberately replaced. **Conclusion: the geography specializers are irreducible**
   (consistent with the §4 finding); the one migratable table is already schema-driven.
   No code change — the honest outcome is the assessment.
+- [x] **§8.5 — Surface the full geography field dictionary (2026-07-18).** The
+  schema-driven geography path (`ivt_f2_geo_combined`) now emits EVERY column the
+  file's own `81 02` dictionary declares, under its canonical role by the file's OWN
+  field name — the unified role classifier `ivt_f2_geo_field_role()` (replacing the
+  int 1/2/3 `ivt_f2_geo_field_roles`) maps `English Desc`→`geo_name`, `Desc
+  Français`→`geo_name_fr`, `UID/IDU`→`geo_uid`, `Geo Code`→`geo_code`,
+  `Level/Niveau`→`geo_level`, `DQ`→`dqf_code`, `GNR`→`tnr_short_form` (same principle
+  as the modern DGUID `GEO_NAME`/`DGUID` schema). The positional run→field map is
+  SELF-VALIDATED (name run reads as text, uid run as a bare code) so a codebook whose
+  run order ≠ dictionary order (CRO0163850_CT7: 6 runs/6 fields but shuffled) falls
+  through to the heuristic instead of emitting mis-aligned columns. Also fixed the
+  parser dropping 2-char field names (`DQ`/`QD`). Intended metadata change, blast
+  radius EXACTLY EO3278 (the one clean 6f=6r custom table — now carries `geo_code`
+  PR10/CD1001, `geo_level` CANADA/PR/CD, `dqf_code` in `metadata$geographies`); EO2654
+  stays name/uid (5f/4r → heuristic). Snapshot fixture regenerated (EO3278 row only);
+  geo-snapshot FAIL 0/51, corpus FAIL 0, unit FAIL 0. NOTE: the modern DGUID schema
+  reader (`ivt_f2_geo_schema`/`stem_col`) is deliberately NOT folded in — it is
+  already rich + validated on the big tables and both paths now follow the same
+  "file's own field name → role" principle; a literal single reader would risk
+  regressions for no gain (two genuinely distinct schema blocks + vocabularies).
 - [ ] **§8.4** (revisit) Make "which dimension is geography" a READ of the FIELD
   DICTIONARY (declares `UID/IDU` + `Level/Niveau`?) rather than the
   `ivt_f2_dir_is_geo()` byte-signature probe — this uses only the schema, NOT the 1:1
