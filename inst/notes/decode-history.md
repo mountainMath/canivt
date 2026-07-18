@@ -215,9 +215,24 @@ Kept for the record; the current architecture they produced is described in
   on an unrecognized layout (it does NOT assemble a multi-chunk codebook — a
   mis-stitched chunk order would mislabel members). The byte scans (`ivt_f2_geo_dguids`,
   the stride walk) were already explicit loud last-resorts inside their specializers;
-  98-10-0013's stride-walk full read is snapshot-guarded byte-identical. Two custom
-  exports (EO3278_T1_CDCSD, EO2654_2011_Van) remain geo-name gaps (cells fine) needing
-  dedicated readers — see coverage.md.
+  98-10-0013's stride-walk full read is snapshot-guarded byte-identical.
+- **Stage 3 assemble-then-decipher (2026-07-17).** Upgraded the safety net from a
+  single-block verbatim reader to a schema-free full reader per the owner directive
+  (locate like any dimension → recover each item positionally → decipher components →
+  last resort, whole member as a string), closing the last two geo-name gaps.
+  `ivt_f2_geo_assemble_runs()` reconstructs the codebook's parallel arrays into full
+  member-length runs with the same group/chunk geometry `attrs_dir` uses but inferring
+  the run count from the block count (no schema needed); the decipher picks the display
+  name (most human-readable non-uid run, or the first non-uid run, EN/FR pair when two
+  are wordy) and the uid (fully-unique, space-free, digit-bearing code, type-tagged
+  preferred), joining every run per member into one string only when nothing reads as a
+  name. Closed **EO3278_T1_CDCSD** (attribute-major chunked, no GEO_NAME schema: 5,146
+  names EN+FR + `PR10`/`CD1001` uids) and **EO2654_2011_Van** (geography is descriptor
+  dim 2 named "Geography" → `ivt_f2_geo_dim_index()` header-name fallback
+  `canivt_geo_by_name`; its slot dir over-declares 109 vs 92 real entries →
+  `ivt_f2_geo_block_dir()` short-directory acceptance `canivt_geo_dir_short`, validated
+  by `ivt_f2_check_geo_count()`: 3,433 names + `CU…` uids). Loud throughout; cell counts
+  unchanged (geo identity feeds only the slug/metadata, never the cell decode).
 - **Unified cell decode — DONE.** One `ivt_layout()` + `ivt_decode()` (`decode.R`)
   decodes every table, reproducing the two former decoders **byte-identical** on all
   six reference tables (0241/0077/0662 data-dim straddle, 0023/0129/1991 geography

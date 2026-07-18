@@ -442,6 +442,28 @@ ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   cnt1 <- suppressWarnings(as.integer(d$dims[[1L]]$count))
   if (!is.na(cnt1) && cnt1 > 1L && is_geo_dim(1L)) return(1L)
   for (k in seq_along(d$dims)) if (is_geo_dim(k)) return(k)
+  # header-name fallback: no dimension carries a decodable geography SIGNATURE
+  # (a schema-less chunked geography codebook -- e.g. EO3278/EO2654, whose members
+  # are attribute-major name/code runs with no GEO_NAME schema and no inline
+  # pattern). The descriptor still NAMES the dimension, so when exactly one is
+  # called "Geography" / "Geographie" / "Géographie" (the header's own label, like
+  # any other dimension name), trust it. Gated to exactly one match so an ordinary
+  # table -- where this never fires, dimension 1 having matched above -- is
+  # untouched.
+  dim_name <- function(x) { nm <- x$name; if (is.null(nm) || is.na(nm)) "" else nm }
+  geo_named <- which(vapply(d$dims, function(x)
+    grepl("^\\s*(geograph|géograph)", dim_name(x), ignore.case = TRUE), logical(1)))
+  # only OVERRIDE the dimension-1 default (and warn) when the header names a
+  # NON-first dimension "Geography" -- when dimension 1 itself is so named, the
+  # default already returns it, so this stays silent and changes nothing.
+  if (length(geo_named) == 1L && geo_named != 1L) {
+    nm <- dim_name(d$dims[[geo_named]])
+    ivt_fallback(paste0(
+      "No dimension carries a decodable geography codebook signature; the ",
+      "geography dimension was identified by its header name (\"", nm, "\")."),
+      class = "canivt_geo_by_name")
+    return(geo_named)
+  }
   1L
 }
 

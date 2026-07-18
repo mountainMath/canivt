@@ -1266,15 +1266,39 @@ read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` — light f
 every corpus table, full for 20, incl. the stride-walk-only 98-10-0013; opt-in
 `test-geo-snapshot.R`). Geography output byte-identical across the corpus.
 
-Two known **geo-name** gaps remain (both custom exports, cells decode fine; only the
-geography member names/uids are absent — the tables are otherwise supported):
-- [ ] **EO3278_T1_CDCSD** — an attribute-major chunked geography codebook (groups
-  1,1,2,4,8… like the schema'd `attrs_dir`) but with NO GEO_NAME schema, so
-  `attrs_dir` (schema-gated) skips it and its members decode nameless. Needs a
-  schema-less `attrs_dir` variant (a new specializer); Stage 3 deliberately does not
-  assemble a multi-chunk codebook (a mis-stitched chunk order would mislabel members).
-- [ ] **EO2654_2011_Van** — the geography dimension is misread (named "2011 Census";
-  `ivt_f2_geo_entries()` resolves no block directory). A descriptor / geo-identify gap.
+The two custom exports that were briefly nameless (EO3278_T1_CDCSD, EO2654_2011_Van)
+now decode geography in full (2026-07-17) — see the Stage 3 upgrade below.
+
+## [x] Stage 3 assemble-then-decipher — the schema-less geography net (2026-07-17)
+
+Following the owner directive — locate the geography metadata like any other
+dimension, recover each item positionally, THEN decipher the components, and only
+as a last resort surface the whole member as a string — Stage 3
+(`ivt_f2_geo_combined()`) was upgraded from a single-block verbatim reader to a full
+schema-free reader, closing the last two geo-name gaps:
+- **`ivt_f2_geo_assemble_runs()`** reconstructs the codebook's parallel member arrays
+  into full member-length runs using the SAME power-of-two group/chunk geometry the
+  schema'd `ivt_f2_geo_attrs_dir()` uses, but inferring the run count from the block
+  count (`k / total_chunks`) instead of a schema — so it needs no GEO_NAME dictionary.
+- The **decipher** step picks, from the assembled runs: the display name (the most
+  human-readable non-uid run — spaces / lower-case — or the first non-uid run when
+  every member is a bare code; an EN/FR pair when two runs are clearly wordy) and the
+  uid (a fully-unique, space-free, digit-bearing code run, preferring a type-tagged
+  one like `CD1001` over a bare number). If no run reads as a name, every run is
+  joined per member into one verbatim string (the directive's true last resort).
+- **[x] EO3278_T1_CDCSD** — attribute-major chunked codebook (groups 1,1,2,4,8…), no
+  GEO_NAME schema: 5,146/5,146 names (EN + FR) + type-tagged uids (`PR10`, `CD1001`,
+  `CSD1001105`).
+- **[x] EO2654_2011_Van** — geography is descriptor dimension 2, named "Geography"
+  in the header but with no decodable signature, so `ivt_f2_geo_dim_index()` gained a
+  header-NAME fallback (`canivt_geo_by_name`); its slot directory over-declares its
+  entry count (109 vs 92 real), so `ivt_f2_geo_block_dir()` gained a geography-scoped
+  short-directory acceptance (`canivt_geo_dir_short`, validated downstream by
+  `ivt_f2_check_geo_count()`): 3,433/3,433 names + `CU…` uids.
+
+All loud (`canivt_geo_unparsed` etc., strict-mode errors) — the split is heuristic,
+not a validated positional parse. Both tables' cell counts are unchanged (geography
+identity feeds only the slug / metadata, never the positional cell decode).
 
 ## Summary
 

@@ -387,8 +387,37 @@ ivt_f2_dir_has_geo <- function(raw, d) {
 # block). Returns the (off, len) matrix, or NULL. This logical order is what
 # lets us read the reverse-stored root chunk positionally (`ivt_f2_geo_root_dir`).
 ivt_f2_geo_block_dir <- function(raw) {
-  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))  # the geography dimension
+  gi <- ivt_f2_geo_dim_index(raw)
+  d <- ivt_f2_dim_dir(raw, gi)                         # the geography dimension
   if (!is.null(d)) return(d)
+  # the geography dimension's slot directory may OVER-declare its entry count --
+  # some custom exports (EO2654: 109 declared vs 92 real, well-formed entries)
+  # stop the run short of `n_entries - 4`, so the strict `ivt_f2_dim_dir()` gate
+  # rejects the complete-but-short read. Retry a relaxed read bounded by the
+  # declared count and accept a shorter natural-end directory HERE, in the
+  # geography path, where the specializers + `ivt_f2_check_geo_count()` validate
+  # the recovered member count downstream (a genuinely truncated read fails them
+  # loudly, so this cannot silently drop geographies). LOUD.
+  dsc <- ivt_f2_descriptor(raw)
+  if (!is.null(dsc) && length(dsc$dims)) {
+    slots <- ivt_f2_dim_slots(raw, m = length(dsc$dims))
+    sl <- if (!is.null(slots) && gi <= length(slots)) slots[[gi]] else NULL
+    if (!is.null(sl) && !is.na(sl$ptr) && sl$ptr >= 1L &&
+        !is.na(sl$n_entries) && sl$n_entries >= 1L && sl$n_entries <= 1e6L) {
+      want <- as.integer(sl$n_entries)
+      dr <- ivt_f2_read_dir_at(raw, sl$ptr, max_entries = want, relaxed = TRUE)
+      if (is.null(dr) || nrow(dr) < 1L)
+        dr <- ivt_f2_read_dir_at(raw, rd_u32(raw, sl$ptr), max_entries = want, relaxed = TRUE)
+      if (!is.null(dr) && nrow(dr) >= 1L) {
+        ivt_fallback(paste(
+          "The geography slot directory declared {want} entries but only",
+          "{nrow(dr)} are well-formed; accepting the shorter directory (the",
+          "recovered geography count is validated downstream)."),
+          class = "canivt_geo_dir_short")
+        return(dr)
+      }
+    }
+  }
   for (slot in IVT_F2_DIR_SLOTS) {
     ptr <- rd_u32(raw, slot)
     if (is.na(ptr) || ptr < 1L) next
@@ -802,47 +831,134 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   list(geo_name = NULL, geo_uid = uid)
 }
 
-# Stage 3 of the geography read (refactor-plan.md §7.4): the last-resort safety
-# net, reached only when no specializer recognized the layout and the uid scan did
-# not deliver a complete array. Rather than return nameless geography, it recovers
-# the codebook's own member strings VERBATIM: from the geography slot directory's
-# value entries it picks the single member-length run (an un-chunked block, or a
-# power-of-two-padded block that trims to `n_geo`) that is most name-like and
-# exposes it unchanged as `geo_label`/`geo_name`, plus an all-code run as `geo_uid`
-# if one is present. It deliberately does NOT try to assemble a multi-chunk
-# attribute codebook (that is a specializer's job -- a mis-stitched chunk order
-# would mislabel members); a table whose members do not fit one block returns NULL
-# and the uid-only read stands. LOUD (`canivt_geo_unparsed`, a strict-mode error):
-# the values are surfaced without any parsed name/code structure, so a consumer
-# knows to inspect them. Returns a light-style column list, or NULL.
+# Assemble the geography codebook's member arrays into full member-length runs,
+# positionally -- the SAME power-of-two-nested group/chunk geometry the schema'd
+# `ivt_f2_geo_attrs_dir()` uses, but WITHOUT needing a schema to say how many
+# attributes there are. The codebook stores `n_runs` parallel arrays (the display
+# name, then each attribute, each stored EN then FR) interleaved within groups of
+# `G` 256-member chunks (`ivt_f2_chunk_layout()`). We infer `n_runs` from the block
+# count (`k / total_chunks`) and stitch each run across the groups. Returns a list
+# of `n_geo`-long character vectors (one per run, in storage order), or NULL when
+# the blocks do not divide evenly into whole runs (not a clean chunk roster).
+# Blocks come from Stage 1 (`ents$values`, strict-first); a single-chunk table
+# (`n_geo <= 256`, `total_chunks == 1`) degenerates to one run per block.
+ivt_f2_geo_assemble_runs <- function(ents, n_geo) {
+  blocks <- list()
+  for (r in seq_len(ents$n)) {
+    v <- ents$values(r); if (is.null(v)) next
+    v <- trimws(v)
+    if (length(v) < 3L || length(v) > 256L || ivt_f2_is_ordinal(v)) next
+    if (all(is.na(v) | v == "")) next
+    blocks[[length(blocks) + 1L]] <- v
+  }
+  k <- length(blocks); if (!k) return(NULL)
+  lay <- ivt_f2_chunk_layout(n_geo); total <- lay$n_chunks
+  if (k %% total != 0L) return(NULL)             # stray blocks -> not a clean roster
+  n_runs <- k %/% total
+  gstart <- cumsum(c(1L, utils::head(n_runs * lay$sizes, -1L)))  # block span/group = n_runs*G
+  lapply(seq_len(n_runs) - 1L, function(run_j) {
+    out <- rep(NA_character_, n_geo)
+    for (gi in seq_along(lay$groups)) {
+      grp <- lay$groups[[gi]]; G <- grp$G; bi <- gstart[gi] + run_j * G
+      for (c in seq_len(G)) {
+        t <- blocks[[bi + c - 1L]]; w <- grp$chunk[c]
+        if (length(t) > w &&
+            all(is.na(t[(w + 1L):length(t)]) | t[(w + 1L):length(t)] == ""))
+          t <- t[seq_len(w)]                     # trim power-of-two slot padding
+        idx <- grp$start + 256L * (c - 1L) + seq_along(t) - 1L
+        ok <- idx <= grp$start + grp$size - 1L
+        out[idx[ok]] <- t[ok]
+      }
+    }
+    out
+  })
+}
+
+# Stage 3 of the geography read (refactor-plan.md §7.4): the last-resort catch-all,
+# reached only when no specializer recognized the layout and the uid scan did not
+# deliver a complete array. It follows the owner's directive -- locate the geography
+# metadata like any other dimension (Stage 1 `ents`), recover each item positionally
+# (`ivt_f2_geo_assemble_runs()`, the schema-free chunk assembler), THEN try to
+# DECIPHER the individual components, and only as a LAST RESORT surface the whole
+# member as one string:
+#   - `geo_name`/`geo_name_fr`: the most word-like run(s) -- letters, and multi-word
+#     or near-unique (excludes short type/level runs like "PR"/"CD"); the EN vs FR
+#     copy is picked by `ivt_f2_frscore()`;
+#   - `geo_uid`: a near-unique code-like run (no spaces, alphanumeric), preferring
+#     one carrying a type prefix (e.g. "PR10"/"CD1001") over a bare numeric code;
+#   - if NO run reads as a name, `geo_label = geo_name =` every run joined per member
+#     into one verbatim string (the directive's "entire member information as a
+#     string"), `geo_uid = NA`.
+# LOUD (`canivt_geo_unparsed`, a strict-mode error): the split is heuristic, not a
+# validated positional parse, so a consumer knows to inspect it. Returns a
+# light-style column list, or NULL when the blocks are not a clean chunk roster.
 ivt_f2_geo_combined <- function(ents, n_geo) {
   if (is.null(ents) || is.na(n_geo) || n_geo < 1L) return(NULL)
-  cand <- list()
-  for (r in seq_len(ents$n)) {
-    v <- trimws(ents$values(r))
-    if (length(v) > n_geo &&
-        all(is.na(v[(n_geo + 1L):length(v)]) | v[(n_geo + 1L):length(v)] == ""))
-      v <- v[seq_len(n_geo)]                     # trim the power-of-two slot padding
-    if (length(v) != n_geo || ivt_f2_is_ordinal(v)) next
-    if (all(is.na(v) | v == "")) next
-    cand[[length(cand) + 1L]] <- v
+  runs <- ivt_f2_geo_assemble_runs(ents, n_geo)
+  if (is.null(runs) || !length(runs)) return(NULL)
+  nn_of  <- function(v) v[!is.na(v) & nzchar(v)]
+  spaces   <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else mean(grepl("[[:space:]]", nn)) }
+  letters  <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else mean(grepl("[A-Za-z]", nn)) }
+  distinct <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else length(unique(nn)) / n_geo }
+  codelike <- function(v) { nn <- nn_of(v)                     # a bare identifier token
+                            if (!length(nn)) 0
+                            else mean(grepl("^[0-9A-Za-z-]+$", nn) & !grepl("[[:space:]]", nn)) }
+  digits   <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else mean(grepl("[0-9]", nn)) }
+  namelike <- function(v) { nn <- nn_of(v)                     # human display content
+                            if (!length(nn)) 0
+                            else mean(grepl("[[:space:]]|[[:lower:]]", nn)) }
+  S <- vapply(runs, spaces, 0);   L <- vapply(runs, letters, 0)
+  D <- vapply(runs, distinct, 0); C <- vapply(runs, codelike, 0)
+  G <- vapply(runs, digits, 0);   N <- vapply(runs, namelike, 0)
+  # UID run(s): fully-unique, uniform single-token codes with NO spaces and carrying
+  # DIGITS (so a single-word NAME like "Canada" -- alphanumeric and unique but with
+  # no digit -- and a mixed name/code display run like "Vancouver CMA (933)" beside
+  # a bare DA code are not mistaken for the uid). Prefer a type-tagged code (letters,
+  # e.g. "CD1001") over a bare numeric one.
+  is_uid <- D > 0.9 & S < 0.01 & C > 0.9 & G > 0.9
+  uid <- rep(NA_character_, n_geo)
+  uid_runs <- integer(0)
+  if (any(is_uid)) {
+    cand <- which(is_uid)
+    ui <- cand[which.max(L[cand])]
+    uid <- runs[[ui]]; uid_runs <- ui
   }
-  if (!length(cand)) return(NULL)
-  namey <- function(v) { nn <- v[!is.na(v) & nzchar(v)]
-                         if (!length(nn)) 0 else mean(grepl("[A-Za-z]", nn)) }
-  codey <- function(v) { nn <- v[!is.na(v) & nzchar(v)]
-                         if (!length(nn)) 0
-                         else mean(grepl("^[0-9A-Za-z-]+$", nn) & grepl("[0-9]", nn) &
-                                     !grepl("[[:space:]]", nn)) }
-  ns <- vapply(cand, namey, 0); cs <- vapply(cand, codey, 0)
-  label <- cand[[which.max(ns)]]
-  uid <- if (max(cs) >= 0.9) cand[[which.max(cs)]] else rep(NA_character_, n_geo)
+  # NAME run(s): the display column(s) -- the most human-readable NON-uid run
+  # (spaces / lower-case), or, when nothing reads as a name (all members are bare
+  # codes), simply the first non-uid run. Two clearly-wordy runs are an EN/FR pair.
+  geo_name <- geo_name_fr <- label <- NULL
+  rest <- setdiff(seq_along(runs), uid_runs)
+  if (length(rest)) {
+    wordy <- rest[N[rest] > 0.5]
+    if (length(wordy) >= 2L) {                                 # EN/FR display pair
+      wordy <- wordy[order(N[wordy], decreasing = TRUE)][1:2]
+      en <- wordy[1L]; fr <- wordy[2L]
+      if (ivt_f2_frscore(nn_of(runs[[en]])) > ivt_f2_frscore(nn_of(runs[[fr]]))) {
+        tmp <- en; en <- fr; fr <- tmp                         # en is the less-French copy
+      }
+      geo_name <- runs[[en]]; geo_name_fr <- runs[[fr]]; label <- runs[[en]]
+    } else {
+      ni <- if (length(wordy)) wordy[which.max(N[wordy])] else rest[which.max(N[rest])]
+      if (N[ni] == 0) ni <- rest[1L]                           # no display content: first run
+      geo_name <- runs[[ni]]; label <- runs[[ni]]
+    }
+  }
+  deciphered <- !is.null(geo_name)                             # a run read as the name
+  if (!deciphered) {                                           # LAST RESORT: verbatim string
+    label <- do.call(paste, c(lapply(runs, function(r) ifelse(is.na(r), "", r)), sep = " | "))
+    label <- trimws(gsub("(\\s\\|)+\\s*$", "", label))          # drop trailing empty fields
+    geo_name <- label
+  }
   ivt_fallback(paste(
-    "Geography layout unrecognized by every specializer; recovered {n_geo} member",
-    "label(s) VERBATIM from the most complete member-length codebook run (no",
-    "name/code structure was parsed). Inspect the geography metadata."),
+    "Geography layout unrecognized by every specializer; recovered {n_geo}",
+    "member(s) by assembling the codebook's own arrays positionally, then",
+    if (deciphered) "deciphering the name/uid columns heuristically."
+    else "joining every array per member into one verbatim string.",
+    "Inspect the geography metadata."),
     class = "canivt_geo_unparsed")
-  list(geo_label = label, geo_name = label, geo_uid = uid)
+  out <- list(geo_label = label, geo_name = geo_name, geo_uid = uid)
+  if (!is.null(geo_name_fr)) out$geo_name_fr <- geo_name_fr
+  out
 }
 
 ivt_f2_geo_light <- function(raw, n_geo) {

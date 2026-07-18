@@ -120,6 +120,41 @@ test_that("the Stage 3 safety net surfaces verbatim labels on an unknown roster"
   expect_error(ivt_f2_geo_combined(ents, 4L), class = "canivt_geo_unparsed_error")
 })
 
+test_that("Stage 3 deciphers name/uid and picks the display over the code run", {
+  # a mixed display run (named + bare-code members, like EO2654's EAs) beside a
+  # uniform type-tagged uid: the display must win as the name, the code as the uid.
+  disp <- c("Vancouver (933)", "59150004", "59150005", "Surrey (915)")
+  cu   <- c("CU0001", "CU0002", "CU0003", "CU0004")
+  ents <- list(n = 2L, values = function(r) list(disp, cu)[[r]],
+               strict = function(r) list(values = list(disp, cu)[[r]], dense = FALSE))
+  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  expect_identical(g$geo_name, disp)        # the mixed display run, not the CU codes
+  expect_identical(g$geo_uid, cu)           # the uniform digit-bearing code = uid
+})
+
+test_that("Stage 3 recognizes an EN/FR display pair", {
+  en <- c("Canada", "New Brunswick", "Quebec", "Ontario")
+  fr <- c("Canada", "Nouveau-Brunswick", "Quebec", "Ontario")
+  code <- c("01", "13", "24", "35")
+  ents <- list(n = 3L, values = function(r) list(en, fr, code)[[r]],
+               strict = function(r) list(values = list(en, fr, code)[[r]], dense = FALSE))
+  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  expect_identical(g$geo_name, en)          # English copy by frscore
+  expect_identical(g$geo_name_fr, fr)
+  expect_identical(g$geo_uid, code)
+})
+
+test_that("Stage 3 surfaces the run verbatim when no display column exists", {
+  # a single opaque code run and nothing else: there is no separate display column
+  # to name, so the recovered member string is surfaced as both label and name.
+  only <- c("A01", "B02", "C03", "D04")
+  ents <- list(n = 1L, values = function(r) only,
+               strict = function(r) list(values = only, dense = FALSE))
+  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  expect_identical(g$geo_label, only)
+  expect_identical(g$geo_name, only)
+})
+
 test_that("DQF_NOTE truncation is detected at the container's record ceiling", {
   # a note stored at the 252-char (0xFC) single-byte record ceiling is presumed
   # truncated; shorter notes are complete; NA propagates as NA (no note at all)

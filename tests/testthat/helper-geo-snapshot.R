@@ -68,7 +68,11 @@ GEO_SNAP_FULL <- c(
   "99-012-X2011032", "98-400-X2016325", "98-400-X2016391", "98-400-X2016327",
   # custom / bare tables: the full path now decodes these (§7.3 shared dispatch;
   # previously it returned an all-NA tibble). Guard the fix.
-  "CRO0163850_CT6", "CRO0166131_CT1_1", "CMHC2016_movers_T1", "CBP2007DA"
+  "CRO0163850_CT6", "CRO0166131_CT1_1", "CMHC2016_movers_T1", "CBP2007DA",
+  # the two custom exports whose geography is now recovered by the Stage 3
+  # assemble-then-decipher net (EO3278 chunked no-schema; EO2654 geo dim named
+  # in the header + a short-directory read).
+  "EO3278_T1_CDCSD", "EO2654_2011_Van"
 )
 
 # Collapse one table's capture to the committed-fixture row: a deterministic hash
