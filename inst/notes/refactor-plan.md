@@ -546,11 +546,26 @@ materialize the sparse `_Description` column per-member from the `84 01` bitmap 
   through the unified member reader. GATED: data-dim label parity **173/173
   byte-identical** across the corpus; geo-snapshot FAIL 0, corpus ledger FAIL 0, unit
   FAIL 0.
-- [ ] **§8.3** Migrate the geography readers onto `ivt_f2_dim_members` where the
-  layout is schema+parallel-arrays (modern DGUID, custom EO). The schema-less storage
-  (inline combined-string, flow POR/POW, bare codes, EO2654 unstored-column) stays a
-  declared per-dimension "combined column, decipher it" fallback — the current
-  Stage-3, relocated from geography-level to dimension-level.
-- [ ] **§8.4** Make "which dimension is geography" a READ of the member tibbles (has
-  `UID/IDU` + `Level` columns → geography; may return several → flow) rather than the
-  `ivt_f2_dir_is_geo()` byte-signature probe. Naturally handles multi-geography flow.
+  - Also materializes the SPARSE `_Description`/`_ItemNotes` member-notes column
+    (`notes_en`/`notes_fr`) from the `84 01` member bitmap + texts (opt-in
+    `include_notes`, off for the label hot path). Verified **173/173 dims** byte-
+    identical to `ivt_f2_dir_footnotes()`'s member-scoped output (50 dims carry notes).
+- [x] **§8.3 — ASSESSED, migration blocked (2026-07-18).** Empirically probed a
+  unified dim-members-style geography read (field schema + `assemble_runs` + role map)
+  against `ivt_f2_geo_light()` across the corpus. It reproduces the current output for
+  **exactly ONE table (EO3278_T1_CDCSD, 6 fields = 6 runs)** — which the Stage-3 schema
+  branch already handles. Every other schema-carrying geography breaks the 1:1
+  field↔run assumption: EO2654 5f/4r (`Geo Code` unstored), CRO0163850_CT7 5f/6r (extra
+  `GNR` run), CMHC2016_T1 6f/5r (`_Sort`/`DQ` sparse), 98-400-X2016203 6f/9r (extra
+  `GNR2AL`/`TGN2AL` runs), single-geography CRO/cro/ord tables 1-run/no-runs; the
+  modern DGUID tables (0023/0077/0129/0044/0459…) are 25–27 fields vs 24–26 runs. This
+  is the SAME `n_fields ≠ n_runs` reality that forced role-inference for data dims, but
+  compounded by layout-specific run geometry (grouped/chunked/sparse/percentage runs).
+  Forcing a 1:1 map would regress or fall back to the content heuristic the schema work
+  deliberately replaced. **Conclusion: the geography specializers are irreducible**
+  (consistent with the §4 finding); the one migratable table is already schema-driven.
+  No code change — the honest outcome is the assessment.
+- [ ] **§8.4** (revisit) Make "which dimension is geography" a READ of the FIELD
+  DICTIONARY (declares `UID/IDU` + `Level/Niveau`?) rather than the
+  `ivt_f2_dir_is_geo()` byte-signature probe — this uses only the schema, NOT the 1:1
+  run map, so it is not blocked by §8.3. Naturally handles multi-geography flow.

@@ -64,19 +64,20 @@ ivt_f2_dim_field_schema <- function(raw, dir) {
 #
 # Returns NULL when the dimension's directory / marker does not resolve (the caller
 # keeps the existing per-reader fallback).
-ivt_f2_dim_members <- function(raw, k, slots = NULL, d = NULL) {
+ivt_f2_dim_members <- function(raw, k, slots = NULL, d = NULL, include_notes = TRUE) {
   if (is.null(d)) d <- ivt_f2_descriptor(raw)
   if (is.null(d) || k < 1L || k > length(d$dims)) return(NULL)
   if (is.null(slots)) slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
   dir <- ivt_f2_dim_dir(raw, k, slots)
   if (is.null(dir)) return(NULL)
-  ivt_f2_dim_members_from_dir(raw, d$dims[[k]], dir)
+  ivt_f2_dim_members_from_dir(raw, d$dims[[k]], dir, include_notes = include_notes)
 }
 
 # The reader core, addressed by an already-resolved (dimension descriptor, block
 # directory) pair -- so the label adapter (`ivt_f2_dim_dir_label1()`) and the
-# k-addressed entry point above share ONE path.
-ivt_f2_dim_members_from_dir <- function(raw, dim, dir) {
+# k-addressed entry point above share ONE path. `include_notes = FALSE` skips the
+# sparse member-notes walk for the label hot path (which discards it).
+ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   if (is.null(dir)) return(NULL)
   cnt <- as.integer(dim$count)
   if (is.na(cnt) || cnt < 1L) return(NULL)
@@ -129,9 +130,58 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir) {
     label_en  = label_en)
   if (!is.null(label_fr)) out$label_fr <- label_fr
   if (!is.null(uid))      out$uid <- uid
+  # the sparse, bitmap-gated `_Description`/`_ItemNotes` member-notes column
+  if (include_notes) {
+    notes <- ivt_f2_dim_member_notes(raw, dir, cnt)
+    if (!is.null(notes)) {
+      out$notes_en <- notes$en
+      if (!all(is.na(notes$fr))) out$notes_fr <- notes$fr
+    }
+  }
   attr(out, "fields") <- fields
   attr(out, "name_fr") <- if (!is.null(label_fr)) ivt_f2_total_name(label_fr) else NA_character_
   out
+}
+
+# The sparse, bitmap-gated member-notes column (`_Description` / `_ItemNotes`) for one
+# dimension, scattered into per-member EN/FR vectors. The dimension's footnote region
+# opens with a `84 01` member bitmap (`ivt_f2_footnote_bitmap()`; an EN copy then an
+# identical FR copy) listing which members carry a note, in member order; the first
+# `popcount(bitmap)` footnote texts per language are those member notes, assigned to
+# the bitmapped members in order (the remaining texts are DIMENSION notes, which
+# annotate the whole dimension and are NOT a member column). This mirrors the
+# member-note linkage of `ivt_f2_dir_footnotes()` exactly, materialized as a column
+# rather than a footnote record. Returns list(en, fr), each a length-`cnt` character
+# vector (NA where the member carries no note), or NULL when the dimension has no
+# member bitmap / no member note. The byte prefilter keeps it cheap on big directories.
+ivt_f2_dim_member_notes <- function(raw, dir, cnt) {
+  members <- integer(0); seen_bitmap <- FALSE
+  seq_lang <- c(en = 0L, fr = 0L)
+  en <- rep(NA_character_, cnt); fr <- rep(NA_character_, cnt)
+  any_note <- FALSE
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    win <- raw[(off + 1L):min(length(raw), off + len)]
+    if (length(win) >= 6L && win[1] == as.raw(0x84L) && win[2] == as.raw(0x01L)) {
+      if (!seen_bitmap) { members <- ivt_f2_footnote_bitmap(win); seen_bitmap <- TRUE }
+      next
+    }
+    if (len < 24L) next
+    if (!length(grepRaw("Footnote", win, fixed = TRUE)) &&
+        !length(grepRaw("Renvoi", win, fixed = TRUE)) &&
+        !length(grepRaw("FOOTNOTE", win, fixed = TRUE)) &&
+        !length(grepRaw("RENVOI", win, fixed = TRUE))) next
+    for (f in ivt_footnote_texts(raw, off, off + len)) {
+      seq_lang[f$language] <- seq_lang[f$language] + 1L
+      i <- seq_lang[[f$language]]
+      if (i <= length(members) && members[i] >= 1L && members[i] <= cnt) {
+        if (f$language == "en") en[members[i]] <- f$text else fr[members[i]] <- f$text
+        any_note <- TRUE
+      }
+    }
+  }
+  if (!seen_bitmap || !length(members) || !any_note) return(NULL)
+  list(en = en, fr = fr)
 }
 
 # The clean member-value runs of one dimension (length exactly `cnt`), in storage

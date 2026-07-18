@@ -158,7 +158,7 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   # label runs EN/FR by the dictionary schema order -- the same logic this function
   # used to carry inline, now shared with the geography read. Repackage its tibble as
   # the historical `list(en, fr, name_fr)` the label consumers expect.
-  m <- ivt_f2_dim_members_from_dir(raw, dim, dir)
+  m <- ivt_f2_dim_members_from_dir(raw, dim, dir, include_notes = FALSE)
   if (is.null(m) || is.null(m[["label_en"]])) return(NULL)
   list(en = m[["label_en"]],
        fr = m[["label_fr"]],                         # NULL when the column is absent
