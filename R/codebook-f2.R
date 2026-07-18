@@ -362,18 +362,26 @@ ivt_f2_read_dir_at <- function(raw, ptr, max_entries = 100000L, relaxed = FALSE)
   cbind(off = offs, len = lens)
 }
 
-# Does a decoded directory `d` list the geography dictionary block (`GEO_NAME_EN`)?
-ivt_f2_dir_has_geo <- function(raw, d) {
-  if (is.null(d)) return(FALSE)
+# First block-directory entry whose latin-1 window contains the fixed string
+# `tok`, as `c(off, len)`, or NULL. Single implementation of the "scan a block
+# directory for a field-name token" idiom shared by the geography dictionary /
+# encoding readers below -- the field-name vocabulary they key on
+# (`GEO_NAME_EN`, `POR/POW`, ...) is metadata, so locating it stays in one place.
+ivt_f2_dir_grep <- function(raw, dir, tok) {
+  if (is.null(dir)) return(NULL)
   n <- length(raw)
-  for (r in seq_len(nrow(d))) {
-    off <- d[r, "off"]; ln <- d[r, "len"]
-    if (off + ln > n) next
-    if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
-      return(TRUE)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; ln <- dir[r, "len"]
+    if (is.na(off) || off + ln > n) next
+    if (grepl(tok, raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
+      return(c(off = unname(off), len = unname(ln)))
   }
-  FALSE
+  NULL
 }
+
+# Does a decoded directory `d` list the geography dictionary block (`GEO_NAME_EN`)?
+ivt_f2_dir_has_geo <- function(raw, d)
+  !is.null(ivt_f2_dir_grep(raw, d, "GEO_NAME_EN"))
 
 # The geography codebook block directory: the block directory of DIMENSION 1 in
 # the header per-dimension slot table (dimdir.R), which lists the geography
@@ -493,18 +501,8 @@ ivt_f2_geo_entries <- function(raw) {
 # by following the file's own metadata directories and confirming the block by its
 # field name. Returns c(off, len) of the dictionary block, or NULL if no directory
 # lists it (then `ivt_f2_geo_schema()` falls back to the codebook-anchored search).
-ivt_f2_geo_dict_block <- function(raw) {
-  d <- ivt_f2_geo_block_dir(raw)
-  if (is.null(d)) return(NULL)
-  n <- length(raw)
-  for (r in seq_len(nrow(d))) {
-    off <- d[r, "off"]; ln <- d[r, "len"]
-    if (off + ln > n) next
-    if (grepl("GEO_NAME_EN", raw_to_latin1(raw[(off + 1L):(off + ln)]), fixed = TRUE))
-      return(c(off = unname(off), len = unname(ln)))
-  }
-  NULL
-}
+ivt_f2_geo_dict_block <- function(raw)
+  ivt_f2_dir_grep(raw, ivt_f2_geo_block_dir(raw), "GEO_NAME_EN")
 
 # Parse the member-array records inside one directory entry's byte window (the entry
 # is [off, off+len)); returns the largest Pascal-record sub-block found there, or
@@ -793,15 +791,8 @@ ivt_f2_geo_encoding <- function(raw)
 ivt_f2_geo_encoding_impl <- function(raw) {
   ents <- ivt_f2_geo_entries(raw)
   if (is.null(ents) || is.null(ents$dir)) return("none")
-  dir <- ents$dir; n <- length(raw)
-  has <- function(tok) {
-    for (r in seq_len(nrow(dir))) {
-      off <- dir[r, "off"]; len <- dir[r, "len"]
-      if (off + len > n) next
-      if (grepl(tok, raw_to_latin1(raw[(off + 1L):(off + len)]), fixed = TRUE)) return(TRUE)
-    }
-    FALSE
-  }
+  dir <- ents$dir
+  has <- function(tok) !is.null(ivt_f2_dir_grep(raw, dir, tok))
   if (has("GEO_NAME_EN")) return("dguid")
   if (has("POR/POW") || has("LDR/LDT")) return("flow")
   if (is.null(ivt_f2_geo_field_schema(raw, ents))) return("bare")
