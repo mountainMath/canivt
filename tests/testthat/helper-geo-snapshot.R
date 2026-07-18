@@ -65,15 +65,26 @@ GEO_SNAP_FULL <- c(
   "98100013", "98100023", "98100478", "98100662", "1003011",
   "98100241", "98100077", "98100129", "98100174",
   "98-10-0459-01", "98-10-0460-01", "98-10-0466-01",
-  "99-012-X2011032", "98-400-X2016325", "98-400-X2016391", "98-400-X2016327"
+  "99-012-X2011032", "98-400-X2016325", "98-400-X2016391", "98-400-X2016327",
+  # custom / bare tables: the full path now decodes these (§7.3 shared dispatch;
+  # previously it returned an all-NA tibble). Guard the fix.
+  "CRO0163850_CT6", "CRO0166131_CT1_1", "CMHC2016_movers_T1", "CBP2007DA"
 )
 
 # Collapse one table's capture to the committed-fixture row: a deterministic hash
-# of each read's returned value + the pipe-joined warning classes. NA hash means
-# "path not captured" (full path of a non-GEO_SNAP_FULL table).
+# of each read's returned value + the DISTINCT warning classes (first-appearance
+# order). NA hash means "path not captured" (full path of a non-GEO_SNAP_FULL
+# table).
+#
+# Warnings are deduplicated deliberately: a memoized compute (§3) REPLAYS its
+# recorded warnings on every cache hit, so the raw multiset counts how many times
+# a path touched the memo -- an implementation artifact that shifts with benign
+# structural refactors. The invariant the harness pins is WHICH fallback classes
+# fired (a new one appearing / an old one vanishing), not the replay count, so it
+# stores the distinct classes only.
 geo_snap_digest <- function(one) {
   hash_or_na <- function(cap) if (is.null(cap)) NA_character_ else rlang::hash(cap$value)
-  warns_str  <- function(cap) if (is.null(cap)) NA_character_ else paste(cap$warnings, collapse = "|")
+  warns_str  <- function(cap) if (is.null(cap)) NA_character_ else paste(unique(cap$warnings), collapse = "|")
   list(
     n_geo          = one$n_geo,
     light_hash     = hash_or_na(one$light),

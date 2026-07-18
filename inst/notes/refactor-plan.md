@@ -417,9 +417,32 @@ corpus ledger (`CANIVT_CORPUS_TESTS=1`) FAIL 0.
    re-parses the descriptor) — a benign reduction in duplicate noise, output
    unchanged, no fallback vanished; fixture updated to match. Unit suite FAIL 0,
    corpus ledger FAIL 0 / 51 tables.
-3. **Single dispatcher** `ivt_f2_geo_read(raw, full)`; point `ivt_f2_geo_light`
-   and `ivt_f2_geographies` at it (thin wrappers, contracts unchanged — light
-   drops all-NA cols to a list, full keeps the tibble; see §5.1, NOT merged).
+3. [x] **Single dispatcher** `ivt_f2_geo_read(raw, full)`; point
+   `ivt_f2_geo_light` and `ivt_f2_geographies` at it (thin wrappers, contracts
+   unchanged — light drops all-NA cols to a list, full keeps the tibble; see
+   §5.1, NOT merged). DONE 2026-07-17. One ordered specializer chain both entry
+   points share; `full` selects ONLY the schema step (cheap light readers vs the
+   comprehensive `ivt_f2_geo_attributes()` scan), gated on `ivt_f2_geo_schema()`
+   so a schema-less table falls through. Flow/inline/custom/bare are SHARED,
+   which **fixed a latent bug**: the full path (`read_ivt(geo_attributes =
+   TRUE)`) previously fell to `ivt_f2_geo_attributes()` for custom/bare tables
+   and returned an all-NA tibble (e.g. CRO0163850_CT6 `geo_name = NA`, CBP2007DA
+   50,988 rows all-NA); it now decodes them correctly (CRO → "Canada"/20000,
+   CBP → the DA codes). `ivt_f2_geo_read()` returns the specializer's NATIVE
+   object; the wrappers finalize (light `as.list`+drop-all-NA;
+   `ivt_f2_geo_list_to_tibble()` lifts a list return to the full tibble). Light
+   output byte-identical corpus-wide; 4 custom/bare full captures added to the
+   snapshot's `GEO_SNAP_FULL` guarding the fix. Also **hardened the harness**:
+   the warning-set assertion now compares DISTINCT classes, not the raw multiset
+   — the memo (§3) replays warnings on every hit, so the count is an artifact
+   that shifts with benign refactors (this had produced ±1 duplicate
+   `canivt_descriptor_*` churn in §7.2/§7.3); distinct-class still catches any
+   new/vanished fallback. Unit FAIL 0, corpus FAIL 0 / 51, geo-snapshot FAIL 0.
+   NOTE (for step 4): the two custom exports **EO2654_2011_Van** /
+   **EO3278_T1_CDCSD** decode ZERO geography (light returns `geo_name = NULL`,
+   `geo_uid = character(0)`) — no specializer claims them and
+   `ivt_f2_check_geo_names()` skips a wholly-NULL `geo_name`. This is the exact
+   gap Stage 3 (`ivt_f2_geo_combined()`) closes.
 4. **Stage 3** `ivt_f2_geo_combined()` + `canivt_geo_unparsed`; a synthetic
    unit test (a doctored directory with an unknown run roster) proves it warns
    and returns verbatim labels.

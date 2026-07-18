@@ -736,60 +736,88 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
 # runs the ~30 s complete attribute scan and keeps every column (incl. all-NA
 # ones) as a tibble. They are two deliberately-different contracts, not a merge
 # candidate -- see refactor-plan.md §5.1.
-ivt_f2_geo_light <- function(raw, n_geo) {
-  # 1. the marker-anchored combined-block parser is tried before the content-based
-  #    single-block detector: it returns NULL for the schema'd DGUID tables (no
-  #    combined block), so they fall through to the schema/content path below, but
-  #    it wins for the schema-absent tables (1991/2006/2011/2016) -- including the
-  #    single-block 2016 case whose uid the content detector cannot recover (no
-  #    DGUID array; the uid is the bare code inside the combined block).
-  inl <- ivt_f2_geo_inline(raw)
-  if (!is.null(inl) && (is.na(n_geo) || nrow(inl) == n_geo)) {
-    out <- as.list(inl[setdiff(names(inl), "member_id")])
-    names(out)[names(out) == "geouid"] <- "geo_uid"
-    return(out)     # incl. dqf_code: on the 2016 tables its last digit marks
-                    # wholly-suppressed geographies
-  }
-  # 2. single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
-  #    positional attribute read is cheap here (one group of one chunk) and fully
-  #    metadata-addressed; trim = FALSE keeps the hierarchy indentation the
-  #    single-block reader preserves. The whole attribute table is returned --
-  #    level, type, quality flag, non-response rate and the bilingual names all
-  #    come from the same positional read. GEO_NAME can carry legitimate NA
-  #    holes (98-10-0662's derived aggregate member has no attributes at all);
-  #    the display Member Name (`geo_label`), which every member carries, must be
-  #    complete for the read to be accepted. Larger tables
-  #    skip this (the full read costs ~20 s on a 63k-geography codebook; the DGUID
-  #    scan below is 3x faster).
-  if (!is.na(n_geo) && n_geo <= 256L) {
-    at <- ivt_f2_geo_attrs_dir(raw, trim = FALSE)
-    if (!is.null(at) && nrow(at) == n_geo &&
-        (!anyNA(at$geo_label) || !anyNA(at$geo_name))) {
-      out <- as.list(at[setdiff(names(at), "member_id")])
-      names(out)[names(out) == "dguid"] <- "geo_uid"
-      return(out)
+# The single geography DISPATCHER (refactor-plan.md §7.3): one ordered specializer
+# chain that both entry points share, run once. `full` selects only the SCHEMA
+# step -- the cheap light readers (single-chunk `attrs_dir`, the schema-named
+# single block, the uid-only DGUID scan) vs the comprehensive full attribute scan
+# (`ivt_f2_geo_attributes()`, the read_ivt(geo_attributes = TRUE) path). Every
+# other specializer -- origin-destination flow, the pre-DGUID inline codebook, the
+# 2016 custom-extract lineage, the Business Patterns bare-code codebook -- is
+# SHARED, so the full path now decodes custom / bare tables too (it previously fell
+# to `ivt_f2_geo_attributes()`, which returns an all-NA tibble for a schema-less
+# table -- a latent bug, since that path is not corpus-covered).
+#
+# Returns the winning specializer's NATIVE object (a tibble for inline/flow/attr
+# readers, a list for the custom/bare/uid readers), with the uid column already
+# renamed to `geo_uid`; the two wrappers apply their distinct contracts (§5.1:
+# light = list with all-NA columns dropped; full = tibble keeping every column).
+ivt_f2_geo_read <- function(raw, full = FALSE) {
+  n_geo <- ivt_f2_geo_count(raw)
+  # 1. inline family (flow -> pre-DGUID inline codebook -> marker-region scan). It
+  #    returns NULL for the schema'd DGUID tables, so they fall through to the
+  #    schema step; it wins for the schema-absent 1991/2006/2011/2016 vintages
+  #    (incl. the single-block 2016 case whose uid is the bare code in the combined
+  #    block). Light gates on the declared count; full accepts it unconditionally.
+  g <- ivt_f2_geo_inline(raw)
+  if (!is.null(g) && (full || is.na(n_geo) || nrow(g) == n_geo)) {
+    names(g)[names(g) == "geouid"] <- "geo_uid"
+    return(g)       # incl. dqf_code: on the 2016 tables its last digit marks
+  }                 # wholly-suppressed geographies
+  # 2. schema'd attribute codebook.
+  if (full) {
+    # the comprehensive attribute scan, but only when a geography schema exists --
+    # otherwise a schema-less custom/bare table would be claimed here with an
+    # all-NA table instead of reaching its specializer below.
+    if (!is.null(ivt_f2_geo_schema(raw))) {
+      g <- ivt_f2_geo_attributes(raw)
+      names(g)[names(g) == "dguid"] <- "geo_uid"
+      return(g)
+    }
+  } else {
+    # single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
+    # positional attribute read is cheap here (one group of one chunk) and fully
+    # metadata-addressed; trim = FALSE keeps the hierarchy indentation. GEO_NAME can
+    # carry legitimate NA holes (98-10-0662's derived aggregate member has no
+    # attributes); the display Member Name (`geo_label`), which every member
+    # carries, must be complete for the read to be accepted. Bigger tables skip this
+    # (~20 s on a 63k-geography codebook; the uid scan below is ~3x faster).
+    if (!is.na(n_geo) && n_geo <= 256L) {
+      at <- ivt_f2_geo_attrs_dir(raw, trim = FALSE)
+      if (!is.null(at) && nrow(at) == n_geo &&
+          (!anyNA(at$geo_label) || !anyNA(at$geo_name))) {
+        names(at)[names(at) == "dguid"] <- "geo_uid"
+        return(at)
+      }
+    }
+    # schema-named single block (2021 DGUID) or the content-based array detector
+    simple <- ivt_f2_geo_simple(raw, n_geo)
+    if (!is.null(simple)) {
+      geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
+                 else ivt_f2_geo_uids(raw)
+      return(list(geo_name = simple$name, geo_uid = geo_uid))
     }
   }
-  # 2b. schema-named single block (2021 DGUID) or the content-based array detector
-  simple <- ivt_f2_geo_simple(raw, n_geo)
-  if (!is.null(simple)) {
-    geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
-               else ivt_f2_geo_uids(raw)
-    return(list(geo_name = simple$name, geo_uid = geo_uid))
-  }
-  # 2c. the 2016 custom-extract lineage (CRO0163850 / CRO0166131): geography is
-  #     structured like a data dimension (an `81 02 01 00` name marker then one
-  #     combined-string member array, no GEO_NAME_EN schema, English only), so
-  #     the schema/inline paths above all miss it.
+  # 3. the 2016 custom-extract lineage (CRO0163850 / CRO0166131): geography is
+  #    structured like a data dimension (an `81 02 01 00` name marker then one
+  #    combined-string member array, no GEO_NAME_EN schema, English only).
   cust <- ivt_f2_geo_custom(raw, n_geo)
   if (!is.null(cust)) return(cust)
-  # 2d. the Canadian Business Patterns lineage: geography is a chunked codebook of
-  #     bare numeric GEOUIDs (8-digit Dissemination-Area codes), no DGUID shape
-  #     and no GEO_NAME schema, so every reader above misses it.
+  # 4. the Canadian Business Patterns lineage: a chunked codebook of bare numeric
+  #    GEOUIDs (8-digit DA codes), no DGUID shape and no GEO_NAME schema.
   bare <- ivt_f2_geo_bare_codes(raw, n_geo)
   if (!is.null(bare)) return(bare)
-  # 3. chunked DGUID tables (0023/0129/0013/...): uid only, positional first
+  # 5. chunked DGUID tables (0023/0129/0013/...): uid only, positional first.
   list(geo_name = NULL, geo_uid = ivt_f2_geo_uids(raw))
+}
+
+ivt_f2_geo_light <- function(raw, n_geo) {
+  g <- ivt_f2_geo_read(raw, full = FALSE)
+  # the light contract: a list of per-member columns (all-NA columns dropped
+  # downstream when packed into metadata$geographies). Drop the tibble scaffolding
+  # (member_id) where a specializer returned a tibble; the uid column is already
+  # `geo_uid`. The list-returning specializers pass through unchanged.
+  if (is.data.frame(g)) g <- as.list(g[setdiff(names(g), "member_id")])
+  g
 }
 
 # Extract the contiguous run of `[len][ascii-digits]` Pascal records that a
@@ -2372,14 +2400,22 @@ ivt_f2_check_geo_names <- function(geo_name) {
 #'
 #' @keywords internal
 #' @noRd
+# Lift a light-style geography column list (what the custom / bare / uid-only
+# readers return -- the full path now reaches them via `ivt_f2_geo_read()`) to the
+# full tibble contract: a 1-based `member_id` then the columns the reader actually
+# produced. NULL columns (the uid-only reader's absent `geo_name`) are dropped, as
+# they carry no member data.
+ivt_f2_geo_list_to_tibble <- function(g) {
+  g <- g[!vapply(g, is.null, logical(1))]
+  n <- if (length(g)) max(lengths(g)) else 0L
+  tibble::as_tibble(c(list(member_id = seq_len(n)), g))
+}
+
 ivt_f2_geographies <- function(raw) {
-  g <- ivt_f2_geo_inline(raw)
-  if (!is.null(g)) {
-    names(g)[names(g) == "geouid"] <- "geo_uid"
-  } else {
-    g <- ivt_f2_geo_attributes(raw)
-    names(g)[names(g) == "dguid"] <- "geo_uid"
-  }
+  g <- ivt_f2_geo_read(raw, full = TRUE)
+  # the schema / inline / flow readers return a tibble already; the custom / bare /
+  # uid readers return a list of columns -- lift it to a member-ordered tibble.
+  if (!is.data.frame(g)) g <- ivt_f2_geo_list_to_tibble(g)
   g <- ivt_f2_flag_dqf_note_truncation(g)
   g[, ivt_geo_col_order(names(g))]
 }
