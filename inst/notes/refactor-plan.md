@@ -517,14 +517,24 @@ geo-specific columns. Confirmed on 12 tables across every lineage (modern DGUID,
 custom EO/cro, 2016, 1991, flow, Business Patterns).
 
 **The load-bearing subtlety (measured, NOT assumed):** the field dictionary is a
-SCHEMA of columns that MAY exist, not a manifest of stored runs. "Code" is the member
-ordinal (different framing, not a value run); `_Description`/`_ItemNotes` bleed into
-the footnote region and are not clean runs; the Pascal scanner also reads footnote/
-definition blocks as ~cnt-length runs. So `n_fields ≠ n_runs` is the NORM for data
-dims, not just the EO2654 edge case. The unification therefore is NOT "map runs 1:1 to
-fields" — it is "classify each clean run's ROLE (ordinal / EN label / FR label / uid),
-the dictionary supplying the vocabulary + EN-before-FR schema order, never a positional
-guess."
+faithful MANIFEST of the dimension's logical columns, but columns have TWO storage
+disciplines, so `n_dense_runs < n_fields`:
+- **Dense** (Code / English Desc / Desc Français): one slot per member, power-of-two
+  padded, NA for absent — always present when declared. "Code" is the ordinal, a
+  distinct framing, not a label run.
+- **Sparse, bitmap-gated** (`_Description` / `_ItemNotes`, the member notes): a
+  `84 01` member bitmap picks which members carry a value; only those texts are stored
+  (popcount = record count). When no member carries one, the bitmap AND text vanish, so
+  the column physically disappears though the dictionary still names it. **Measured 1:1
+  across the corpus: `_Description`/`_ItemNotes` in the dictionary ⟺ exactly the EN+FR
+  `84 01` bitmaps; no such field ⟺ no bitmap.** These member notes are what
+  `ivt_f2_dir_footnotes()` already decodes. (Dimension-level footnotes appear WITHOUT a
+  bitmap and are NOT dictionary columns — they annotate the whole dimension.)
+
+So the unification is NOT "map runs 1:1 to fields" — it is "classify each DENSE run's
+ROLE (ordinal / EN label / FR label / uid), the dictionary supplying the vocabulary +
+EN-before-FR schema order, never a positional guess." A fuller reader could also
+materialize the sparse `_Description` column per-member from the `84 01` bitmap + texts.
 
 - [x] **§8.1** Generalize `ivt_f2_geo_field_schema()` → `ivt_f2_dim_field_schema(raw,
   dir)` (dim-members.R); the geography reader now delegates to it (`ents$dir`). One

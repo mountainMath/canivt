@@ -8,12 +8,23 @@
 # metadata path.
 #
 # The load-bearing subtlety (measured across the corpus): the field dictionary is a
-# SCHEMA of columns that MAY exist, not a manifest of stored runs. "Code" is the
-# member ordinal (a different framing, not a value run); "_Description"/"_ItemNotes"
-# usually bleed into the footnote region and are not clean runs. So the run -> column
-# mapping is NOT 1:1 with the dictionary; each clean run's ROLE is inferred (ordinal
-# vs label vs uid), the dictionary supplying the vocabulary and the EN-before-FR
-# schema order (`ivt_f2_dim_dict_en_first()`), never a positional guess.
+# faithful MANIFEST of the dimension's logical columns, but columns have TWO storage
+# disciplines, so the number of dense value runs is fewer than the field count:
+#   - DENSE columns (Code / English Desc / Desc Francais): one slot per member,
+#     power-of-two padded, NA for absent -- always present when declared. "Code" is
+#     the member ordinal (a distinct framing, not one of the two label runs).
+#   - SPARSE, bitmap-gated columns (_Description / _ItemNotes, the member notes): a
+#     `84 01` member bitmap (`ivt_f2_footnote_bitmap()`) selects which members carry a
+#     value, then ONLY those texts are stored (popcount = record count). When no member
+#     carries one, the bitmap AND the text block vanish entirely -- so the column
+#     physically disappears though the dictionary still names it. Measured 1:1 across
+#     the corpus: a `_Description`/`_ItemNotes` field in the dictionary <=> exactly the
+#     EN+FR `84 01` bitmaps in the directory; no such field <=> no bitmap. (These
+#     member notes are what `ivt_f2_dir_footnotes()` already decodes; a fuller reader
+#     could scatter them into a per-member column here.)
+# So the run -> column mapping is NOT positional against the dictionary; each clean
+# DENSE run's ROLE is inferred (ordinal vs label vs uid), the dictionary supplying the
+# vocabulary and the EN-before-FR schema order (`ivt_f2_dim_dict_en_first()`).
 
 # The field dictionary for ANY dimension's block directory (generalised from the
 # geography-only `ivt_f2_geo_field_schema()`). Scans the directory for the
