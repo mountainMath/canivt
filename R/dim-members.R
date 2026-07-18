@@ -42,7 +42,10 @@ ivt_f2_dim_field_schema <- function(raw, dir) {
     i <- 5L                                            # skip the 81 02 <nfields> 00 header
     while (i < length(b) - 1L) {                       # scan the [02][len][name] records
       L <- b[i + 1L]
-      if (b[i] == 0x02L && L >= 3L && L <= 40L && i + 1L + L <= length(b)) {
+      # L >= 2: field NAMES can be two characters ("DQ"/"QD", the data-quality flag
+      # column) -- the old `>= 3` threshold silently DROPPED them, under-counting the
+      # dictionary (CRO0163850_CT7 read 5 fields for a 6-column codebook).
+      if (b[i] == 0x02L && L >= 2L && L <= 40L && i + 1L + L <= length(b)) {
         nm <- raw_to_latin1(as.raw(b[(i + 2L):(i + 1L + L)]))
         if (!grepl("[[:cntrl:]]", nm)) { out <- c(out, nm); i <- i + 2L + L; next }
       }
