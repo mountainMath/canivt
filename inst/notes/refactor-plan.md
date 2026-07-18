@@ -506,3 +506,41 @@ dispatcher*, and the *combined-string safety net*, not a single mega-parser.
    work; each gets its own validation entry in decode-history.md.
 6. §7 geography recover-then-specialize — build the snapshot harness first, then
    migrate in the 6 gated steps above.
+
+## §8 Unify geography with data-dimension parsing (IN PROGRESS)
+
+**Premise (validated by probe):** every dimension — geography AND data — stores its
+codebook the same way: a `81 02 <nfields> 00` field dictionary naming its columns in
+ONE shared vocabulary (`Code / English Desc / Desc Français / … / UID/IDU / Level`),
+followed by the member-value runs. Geography's dictionary is a data dimension's plus
+geo-specific columns. Confirmed on 12 tables across every lineage (modern DGUID,
+custom EO/cro, 2016, 1991, flow, Business Patterns).
+
+**The load-bearing subtlety (measured, NOT assumed):** the field dictionary is a
+SCHEMA of columns that MAY exist, not a manifest of stored runs. "Code" is the member
+ordinal (different framing, not a value run); `_Description`/`_ItemNotes` bleed into
+the footnote region and are not clean runs; the Pascal scanner also reads footnote/
+definition blocks as ~cnt-length runs. So `n_fields ≠ n_runs` is the NORM for data
+dims, not just the EO2654 edge case. The unification therefore is NOT "map runs 1:1 to
+fields" — it is "classify each clean run's ROLE (ordinal / EN label / FR label / uid),
+the dictionary supplying the vocabulary + EN-before-FR schema order, never a positional
+guess."
+
+- [x] **§8.1** Generalize `ivt_f2_geo_field_schema()` → `ivt_f2_dim_field_schema(raw,
+  dir)` (dim-members.R); the geography reader now delegates to it (`ents$dir`). One
+  implementation of the field-dictionary read for all dimensions.
+- [x] **§8.2** New `ivt_f2_dim_members(raw, k)` / `ivt_f2_dim_members_from_dir(raw,
+  dim, dir)` → a per-dimension member tibble (`member_id`, `ordinal`, `label_en`,
+  `label_fr`, `uid` when the dict names one). Role-inference classifies each run.
+  **`ivt_f2_dim_dir_label1()` now delegates to it** — the data-dim label reader goes
+  through the unified member reader. GATED: data-dim label parity **173/173
+  byte-identical** across the corpus; geo-snapshot FAIL 0, corpus ledger FAIL 0, unit
+  FAIL 0.
+- [ ] **§8.3** Migrate the geography readers onto `ivt_f2_dim_members` where the
+  layout is schema+parallel-arrays (modern DGUID, custom EO). The schema-less storage
+  (inline combined-string, flow POR/POW, bare codes, EO2654 unstored-column) stays a
+  declared per-dimension "combined column, decipher it" fallback — the current
+  Stage-3, relocated from geography-level to dimension-level.
+- [ ] **§8.4** Make "which dimension is geography" a READ of the member tibbles (has
+  `UID/IDU` + `Level` columns → geography; may return several → flow) rather than the
+  `ivt_f2_dir_is_geo()` byte-signature probe. Naturally handles multi-geography flow.

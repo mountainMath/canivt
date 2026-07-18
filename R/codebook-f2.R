@@ -887,25 +887,11 @@ ivt_f2_geo_assemble_runs <- function(ents, n_geo) {
 # such dictionary. This makes the run -> column mapping METADATA-DRIVEN rather than
 # a content guess (see `ivt_f2_geo_combined()`).
 ivt_f2_geo_field_schema <- function(raw, ents) {
-  if (is.null(ents) || is.null(ents$off) || is.null(ents$len)) return(NULL)
-  n <- length(raw)
-  for (r in seq_len(ents$n)) {
-    off <- ents$off(r); len <- ents$len(r)
-    if (len < 8L || len > 4000L || off + len > n) next
-    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L) next
-    b <- as.integer(raw[(off + 1L):(off + len)]); out <- character(0)
-    i <- 5L                                            # skip the 81 02 <nfields> 00 header
-    while (i < length(b) - 1L) {                       # scan the [02][len][name] records
-      L <- b[i + 1L]
-      if (b[i] == 0x02L && L >= 3L && L <= 40L && i + 1L + L <= length(b)) {
-        nm <- raw_to_latin1(as.raw(b[(i + 2L):(i + 1L + L)]))
-        if (!grepl("[[:cntrl:]]", nm)) { out <- c(out, nm); i <- i + 2L + L; next }
-      }
-      i <- i + 1L
-    }
-    if (length(out) >= 2L) return(out)                 # a real field list
-  }
-  NULL
+  if (is.null(ents) || is.null(ents$dir)) return(NULL)
+  # geography's dictionary is read by the SAME generic reader every dimension uses
+  # (dim-members.R) -- the whole point of the field dictionary is that geography and
+  # data dimensions share it. `ents$dir` is the geography block-directory matrix.
+  ivt_f2_dim_field_schema(raw, ents$dir)
 }
 
 # Assign the geography schema field names to member roles. The file's OWN field

@@ -151,45 +151,18 @@ ivt_f2_total_name <- function(labels) {
 # untrimmed, as stored; `fr`/`name_fr` NULL/NA when only one block is present) or
 # NULL.
 ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
-  cnt <- as.integer(dim$count)
-  if (is.na(cnt) || cnt < 1L) return(NULL)
   nm <- dim$name
   if (is.null(nm) || is.na(nm) || !nzchar(nm)) return(NULL)
-  # locate the doubled-name marker entry (81 02 02 00 + this dimension's name)
-  mk <- ivt_f2_dir_marker_entry(raw, nm, dir)
-  if (mk == 0L || mk >= nrow(dir)) return(NULL)
-  # a data dimension with more than 256 members stores its label blocks CHUNKED,
-  # exactly like the chunked geography codebook (98-400-X2016203's 825-member
-  # "Selected characteristics": 256-member chunks in growing groups, per group
-  # the EN chunk run then the FR chunk run, the trailing partial chunk as a
-  # dense block) -- the single-block read below cannot assemble those.
-  if (cnt > 256L) {
-    ck <- ivt_f2_dim_dir_label_chunks(raw, cnt, dir, mk)
-    if (!is.null(ck)) {
-      en_first <- ivt_f2_dim_dict_en_first(raw, dir)
-      if (is.na(en_first)) en_first <- ivt_f2_label_lang_fallback(nm, ck[[1L]], ck[[2L]])
-      en <- if (en_first) ck[[1L]] else ck[[2L]]
-      fr <- if (en_first) ck[[2L]] else ck[[1L]]
-      return(list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr)))
-    }
-  }
-  # the EN/FR member blocks are the first two member-array entries after it
-  cand <- ivt_f2_dir_member_arrays(
-    raw, dir, cnt, rows = (mk + 1L):nrow(dir), max_keep = 2L,
-    accept = function(t) {
-      if (identical(t, as.character(seq_len(cnt)))) return(NULL)  # ordinal block
-      if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) return(NULL)  # garbage
-      t
-    })
-  if (!length(cand)) return(NULL)
-  if (length(cand) == 1L)
-    return(list(en = cand[[1L]], fr = NULL, name_fr = NA_character_))
-  # assign languages by the dictionary schema order (English Desc / Desc Francais)
-  en_first <- ivt_f2_dim_dict_en_first(raw, dir)
-  if (is.na(en_first)) en_first <- ivt_f2_label_lang_fallback(nm, cand[[1L]], cand[[2L]])
-  en <- if (en_first) cand[[1L]] else cand[[2L]]
-  fr <- if (en_first) cand[[2L]] else cand[[1L]]
-  list(en = en, fr = fr, name_fr = ivt_f2_total_name(fr))
+  # delegate to the unified per-dimension member reader (dim-members.R): it collects
+  # the clean member-value runs, isolates the ordinal (Code) run, and assigns the two
+  # label runs EN/FR by the dictionary schema order -- the same logic this function
+  # used to carry inline, now shared with the geography read. Repackage its tibble as
+  # the historical `list(en, fr, name_fr)` the label consumers expect.
+  m <- ivt_f2_dim_members_from_dir(raw, dim, dir)
+  if (is.null(m) || is.null(m[["label_en"]])) return(NULL)
+  list(en = m[["label_en"]],
+       fr = m[["label_fr"]],                         # NULL when the column is absent
+       name_fr = attr(m, "name_fr", exact = TRUE))
 }
 
 # Walk a dimension slot directory's entries for candidate member arrays of
