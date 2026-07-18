@@ -286,7 +286,15 @@ tests and detection gate do). Design points:
   states it never fires on the current corpus. Schema output byte-identical on all
   12 tables.
 
-## 7. Geography: unify on recover-then-specialize (PLANNED — 2026-07-17)
+## 7. Geography: unify on recover-then-specialize (DONE — 2026-07-17)
+
+All six migration steps landed (each gated on: geography snapshot identical +
+corpus FAIL 0). The shared Stage 1 (`ivt_f2_geo_entries()`), the single dispatcher
+(`ivt_f2_geo_read()`), and the combined-string safety net (`ivt_f2_geo_combined()`)
+are in; the two ladders and six Stage-1 copies are gone. A latent full-path bug
+(custom/bare tables returned an all-NA tibble) was fixed as a side effect. Two
+custom-export tables (EO3278_T1_CDCSD, EO2654_2011_Van) remain geo-NAME gaps needing
+dedicated readers — see step 4 and coverage.md. Detail per step below.
 
 Goal (owner request): the geography read is still the most diffuse part of the
 parser — **6 layout readers** (`ivt_f2_geo_inline_dir`, `ivt_f2_geo_attrs_dir`,
@@ -466,10 +474,19 @@ corpus ledger (`CANIVT_CORPUS_TESTS=1`) FAIL 0.
    not even resolve a geo block directory (its geography dimension is misread as
    "2011 Census", `ivt_f2_geo_entries()` NULL) -- a descriptor / geo-identify
    gap. Both remain genuine gaps for a future pass (own decode-history entry).
-5. **Demote the byte-scans** (`ivt_f2_geo_dguids`, stride-walk) to explicit
+5. [x] **Demote the byte-scans** (`ivt_f2_geo_dguids`, stride-walk) to explicit
    last-resort inside their specializers, each already `ivt_fallback()`-loud;
-   confirm 98100013 full-attr snapshot still byte-identical.
-6. Update CLAUDE.md code map, coverage.md, decode-history.md; retire the
+   confirm 98100013 full-attr snapshot still byte-identical. DONE 2026-07-17 --
+   satisfied by existing structure, no code change. Verified both byte-scans are
+   already explicit, loud, last-resort: `ivt_f2_geo_dguids()` (byte scan) is
+   called ONLY inside `ivt_f2_geo_uids()` immediately after its `ivt_fallback()`,
+   after `ivt_f2_geo_dguids_dir()` (positional) returns NULL; the stride walk
+   (`ivt_f2_codebook_blocks`/`ivt_f2_geo_names`/`ivt_f2_geo_root_dir`) is inside
+   `ivt_f2_geo_attributes()` after its `ivt_fallback()`, reached only when
+   `ivt_f2_geo_attrs_dir()` (positional) returns NULL. 98100013's full read
+   exercises the stride walk (its snapshot `full_warnings` = `canivt_fallback`)
+   and is in `GEO_SNAP_FULL` -- byte-identical (geo-snapshot FAIL 0).
+6. [x] Update CLAUDE.md code map, coverage.md, decode-history.md; retire the
    superseded ladder comments.
 
 ### Explicitly NOT done (kept as documented specializations)

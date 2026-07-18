@@ -1249,6 +1249,33 @@ directory slot table**:
   (the `$X–$Y` brackets roll up to "With income" → "Total - Income groups";
   "Median income $" is a separate top-level statistic).
 
+## [x] Geography read consolidated — recover-then-specialize (2026-07-17)
+
+The geography read (the most diffuse part of the parser — six layout readers reached
+through two fallthrough ladders, each re-walking the geo slot directory) is now one
+path (refactor-plan.md §7). A shared Stage 1 `ivt_f2_geo_entries()` locates the geo
+block directory ONCE and exposes lazy, memoized per-entry accessors that all six
+readers consume; a single dispatcher `ivt_f2_geo_read(raw, full)` runs the ordered
+specializer chain that both `ivt_f2_geo_light()` (metadata default) and
+`ivt_f2_geographies()` (`geo_attributes = TRUE`) share as thin wrappers, `full`
+selecting only the schema step. Sharing the custom/bare specializers across both
+paths fixed a latent bug — the full path used to return an all-NA tibble for
+custom/bare tables. A new Stage 3 `ivt_f2_geo_combined()` (`canivt_geo_unparsed`,
+loud) is the last-resort verbatim safety net for an unrecognized layout. The whole
+read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` — light for
+every corpus table, full for 20, incl. the stride-walk-only 98-10-0013; opt-in
+`test-geo-snapshot.R`). Geography output byte-identical across the corpus.
+
+Two known **geo-name** gaps remain (both custom exports, cells decode fine; only the
+geography member names/uids are absent — the tables are otherwise supported):
+- [ ] **EO3278_T1_CDCSD** — an attribute-major chunked geography codebook (groups
+  1,1,2,4,8… like the schema'd `attrs_dir`) but with NO GEO_NAME schema, so
+  `attrs_dir` (schema-gated) skips it and its members decode nameless. Needs a
+  schema-less `attrs_dir` variant (a new specializer); Stage 3 deliberately does not
+  assemble a multi-chunk codebook (a mis-stitched chunk order would mislabel members).
+- [ ] **EO2654_2011_Van** — the geography dimension is misread (named "2011 Census";
+  `ivt_f2_geo_entries()` resolves no block directory). A descriptor / geo-identify gap.
+
 ## Summary
 
 For the **reference tables** (family 1: 98-10-0241; 3-dim family 2: 98-10-0023;

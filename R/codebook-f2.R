@@ -710,32 +710,15 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
   ivt_f2_geo_simple_schema(raw, n_geo, blocks, start)
 }
 
-# Light geography table for the metadata path, family-agnostic and located from
-# the metadata, not the content. Returns a list of per-member columns (each may
-# be NULL/absent) keyed by the metadata column names: `geo_label(_fr)` /
-# `geo_name(_fr)` / `geo_uid` plus whatever attributes the layout stores
-# (`geo_level`, `geo_type(_abbr)`, `prov_abbr`, `alt_geo_code`, `pr_code`,
-# `dqf_code`, `dqf_note`, `tnr_short_form`). Layouts, in priority order:
-#   1. the inline "name (code) [type] flag [(pct%)]" codebook -> the pre-DGUID
-#      tables (1991-2016, cro/ord); positional from the dim-1 block directory,
-#      else marker-anchored; bilingual names (split from the combined label) +
-#      character GEOUIDs + type abbreviation / quality flag / non-response rate
-#      where the vintage stores them;
-#   2. single-chunk schema'd tables (98-10-0241/0077/0662) -> the FULL
-#      directory-driven positional attribute read (`ivt_f2_geo_attrs_dir()`,
-#      untrimmed): bilingual names, DGUID, level, type, quality flag + note,
-#      non-response rate; the single-block schema/content readers
-#      (`ivt_f2_geo_simple()`) as fallback (names + DGUIDs only);
-#   3. the fast DGUID scan -> the large chunked modern tables (98-10-0023/0129):
-#      uid only (the full table needs the slower read_ivt(geo_attributes = TRUE)
-#      path).
-# The LEAN default geography read for `metadata$geographies` (packed downstream
-# into a list with all-NA columns dropped). Intentionally distinct from the full
-# `ivt_f2_geographies()` (the read_ivt(geo_attributes = TRUE) path): this ladder
-# uses CHEAP readers (uid-only for the big chunked tables), whereas the full path
-# runs the ~30 s complete attribute scan and keeps every column (incl. all-NA
-# ones) as a tibble. They are two deliberately-different contracts, not a merge
-# candidate -- see refactor-plan.md §5.1.
+# The metadata light path and the full `geo_attributes = TRUE` path are two
+# deliberately-different CONTRACTS over the SAME dispatcher (`ivt_f2_geo_read()`
+# below): the light default returns a list of per-member columns (`geo_label(_fr)`
+# / `geo_name(_fr)` / `geo_uid` plus whatever attributes the layout stores),
+# packed downstream into `metadata$geographies` with all-NA columns dropped; the
+# full path keeps every column (incl. all-NA) as a tibble. `full` also selects the
+# CHEAP readers (uid-only for the big chunked tables) over the ~30 s complete
+# attribute scan. Not a merge candidate -- see refactor-plan.md §5.1.
+#
 # The single geography DISPATCHER (refactor-plan.md §7.3): one ordered specializer
 # chain that both entry points share, run once. `full` selects only the SCHEMA
 # step -- the cheap light readers (single-chunk `attrs_dir`, the schema-named

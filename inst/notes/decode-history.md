@@ -189,6 +189,35 @@ Milestones that were once on the "likely next tasks" list and are now done.
 Kept for the record; the current architecture they produced is described in
 `CLAUDE.md`.
 
+- **Geography read consolidated — recover-then-specialize (2026-07-17).** The
+  geography read was the most diffuse part of the parser: six layout readers
+  (`inline_dir`, `attrs_dir`, `flow_dir`, `custom`, `bare_codes`, `dguids_dir`)
+  reached through two separate fallthrough ladders (`ivt_f2_geo_light` for the
+  metadata default, the front of `ivt_f2_geographies` for `geo_attributes = TRUE`),
+  each re-implementing the same Stage 1 — locate the geography dimension's slot
+  directory and recover its member arrays. Consolidated per refactor-plan.md §7,
+  gated at every step on a byte-identical geography snapshot (`geo-snapshot.csv`,
+  a deterministic `rlang::hash()` of both read paths + the distinct fallback classes
+  each emits — the corpus ledger only exercises the light path, so this is the only
+  net for the full attribute path) plus corpus FAIL 0. Steps: (1) `ivt_f2_geo_entries()`
+  walks the geo block directory ONCE and exposes lazy, memoized per-entry
+  `records`/`strict`/`values` accessors that all six readers now consume — laziness
+  is load-bearing (eagerly scanning 98-10-0023's 6,244 entries measured ~17 s, so
+  `dguids_dir`'s O(1) probe path must never touch the run-scanner). (2) A single
+  dispatcher `ivt_f2_geo_read(raw, full)` runs one ordered specializer chain both
+  entry points share as thin wrappers, `full` selecting only the schema step
+  (comprehensive `ivt_f2_geo_attributes()` vs the cheap `attrs_dir`/uid-only read,
+  schema-gated so custom/bare fall through) — this **fixed a latent bug**: the full
+  path used to fall to `ivt_f2_geo_attributes()` for a schema-less custom/bare table
+  and return an all-NA tibble; it now decodes them. (3) Stage 3
+  `ivt_f2_geo_combined()` (`canivt_geo_unparsed`, loud/strict-error) is the
+  last-resort verbatim safety net that surfaces the codebook's own member-length run
+  on an unrecognized layout (it does NOT assemble a multi-chunk codebook — a
+  mis-stitched chunk order would mislabel members). The byte scans (`ivt_f2_geo_dguids`,
+  the stride walk) were already explicit loud last-resorts inside their specializers;
+  98-10-0013's stride-walk full read is snapshot-guarded byte-identical. Two custom
+  exports (EO3278_T1_CDCSD, EO2654_2011_Van) remain geo-name gaps (cells fine) needing
+  dedicated readers — see coverage.md.
 - **Unified cell decode — DONE.** One `ivt_layout()` + `ivt_decode()` (`decode.R`)
   decodes every table, reproducing the two former decoders **byte-identical** on all
   six reference tables (0241/0077/0662 data-dim straddle, 0023/0129/1991 geography
