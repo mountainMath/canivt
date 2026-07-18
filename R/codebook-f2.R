@@ -826,7 +826,7 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   # 6. Stage 3 safety net (refactor-plan.md §7.4): nothing above claimed the
   #    layout AND the uid scan came up short -- rather than emit nameless
   #    geography, surface the codebook's own member strings VERBATIM (loud).
-  combined <- ivt_f2_geo_combined(ivt_f2_geo_entries(raw), n_geo)
+  combined <- ivt_f2_geo_combined(raw, ivt_f2_geo_entries(raw), n_geo)
   if (!is.null(combined)) return(combined)
   list(geo_name = NULL, geo_uid = uid)
 }
@@ -874,28 +874,98 @@ ivt_f2_geo_assemble_runs <- function(ents, n_geo) {
   })
 }
 
+# The geography dimension's field dictionary, when it carries one. Some exports
+# (the EO custom lineage) store geography EXACTLY like a data dimension: a
+# `81 02 <nfields> 00` dictionary block that NAMES its columns in order -- the same
+# "Code / English Desc / Desc Francais / ..." vocabulary a data-dim dictionary uses
+# (`ivt_f2_dim_dict_en_first()`), not the modern DGUID attribute schema
+# (`GEO_NAME_EN` ...) that `ivt_f2_geo_schema()` recognises. Each stored column is a
+# `[02][len][name]` record (the key "Code" field uses a different framing and is the
+# member ordinal, not a stored run), so the `[02]` records name the value runs in
+# storage order. Returns the ordered field names (latin-1, so "Desc Francais" and
+# other accented names survive), or NULL when the geography directory carries no
+# such dictionary. This makes the run -> column mapping METADATA-DRIVEN rather than
+# a content guess (see `ivt_f2_geo_combined()`).
+ivt_f2_geo_field_schema <- function(raw, ents) {
+  if (is.null(ents) || is.null(ents$off) || is.null(ents$len)) return(NULL)
+  n <- length(raw)
+  for (r in seq_len(ents$n)) {
+    off <- ents$off(r); len <- ents$len(r)
+    if (len < 8L || len > 4000L || off + len > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L) next
+    b <- as.integer(raw[(off + 1L):(off + len)]); out <- character(0)
+    i <- 5L                                            # skip the 81 02 <nfields> 00 header
+    while (i < length(b) - 1L) {                       # scan the [02][len][name] records
+      L <- b[i + 1L]
+      if (b[i] == 0x02L && L >= 3L && L <= 40L && i + 1L + L <= length(b)) {
+        nm <- raw_to_latin1(as.raw(b[(i + 2L):(i + 1L + L)]))
+        if (!grepl("[[:cntrl:]]", nm)) { out <- c(out, nm); i <- i + 2L + L; next }
+      }
+      i <- i + 1L
+    }
+    if (length(out) >= 2L) return(out)                 # a real field list
+  }
+  NULL
+}
+
+# Assign the geography schema field names to member roles. The file's OWN field
+# names decide -- the same principle as `ivt_f2_dim_dict_en_first()` reading
+# "English Desc" / "Desc Francais". `UID`/`IDU` is the uid; a French description
+# is `geo_name_fr`; any other description / name field is `geo_name`; every other
+# field (Geo Code, Level, data-quality) is not surfaced. Returns an integer role
+# per field: 1 name, 2 name_fr, 3 uid, NA otherwise.
+ivt_f2_geo_field_roles <- function(fields) {
+  vapply(fields, function(f) {
+    u <- toupper(f)
+    if (grepl("UID|IDU", u)) 3L
+    else if (grepl("FRAN", u)) 2L                      # "Desc Francais" / "Français"
+    else if (grepl("DESC|NAME|NOM", u)) 1L
+    else NA_integer_
+  }, integer(1), USE.NAMES = FALSE)
+}
+
 # Stage 3 of the geography read (refactor-plan.md §7.4): the last-resort catch-all,
 # reached only when no specializer recognized the layout and the uid scan did not
 # deliver a complete array. It follows the owner's directive -- locate the geography
 # metadata like any other dimension (Stage 1 `ents`), recover each item positionally
-# (`ivt_f2_geo_assemble_runs()`, the schema-free chunk assembler), THEN try to
-# DECIPHER the individual components, and only as a LAST RESORT surface the whole
-# member as one string:
-#   - `geo_name`/`geo_name_fr`: the most word-like run(s) -- letters, and multi-word
-#     or near-unique (excludes short type/level runs like "PR"/"CD"); the EN vs FR
-#     copy is picked by `ivt_f2_frscore()`;
-#   - `geo_uid`: a near-unique code-like run (no spaces, alphanumeric), preferring
-#     one carrying a type prefix (e.g. "PR10"/"CD1001") over a bare numeric code;
-#   - if NO run reads as a name, `geo_label = geo_name =` every run joined per member
-#     into one verbatim string (the directive's "entire member information as a
-#     string"), `geo_uid = NA`.
-# LOUD (`canivt_geo_unparsed`, a strict-mode error): the split is heuristic, not a
-# validated positional parse, so a consumer knows to inspect it. Returns a
-# light-style column list, or NULL when the blocks are not a clean chunk roster.
-ivt_f2_geo_combined <- function(ents, n_geo) {
+# (`ivt_f2_geo_assemble_runs()`, the schema-free chunk assembler), THEN identify the
+# columns -- PREFERRING the file's own field dictionary when it has one:
+#   - if the geography directory carries a `81 02` field dictionary
+#     (`ivt_f2_geo_field_schema()`) whose named columns match the assembled runs
+#     one-to-one, the mapping is METADATA-DRIVEN: `geo_name` = the English
+#     description field, `geo_name_fr` = the French one, `geo_uid` = the field the
+#     file NAMES "UID/IDU" (`ivt_f2_geo_field_roles()`). No content guessing.
+#   - otherwise the columns are deciphered heuristically: `geo_name` = the most
+#     word-like run (letters + multi-word/near-unique; EN/FR pair by
+#     `ivt_f2_frscore()`), `geo_uid` = a unique, space-free, digit-bearing code run;
+#     and if NO run reads as a name, every run is joined per member into one
+#     verbatim string (the directive's "entire member information as a string").
+# LOUD (`canivt_geo_unparsed`, a strict-mode error): even the schema-mapped read is
+# not the validated primary positional decode, so a consumer knows to inspect it.
+# Returns a light-style column list, or NULL when the blocks are not a clean roster.
+ivt_f2_geo_combined <- function(raw, ents, n_geo) {
   if (is.null(ents) || is.na(n_geo) || n_geo < 1L) return(NULL)
   runs <- ivt_f2_geo_assemble_runs(ents, n_geo)
   if (is.null(runs) || !length(runs)) return(NULL)
+  # PRINCIPLED path: the geography dimension's own field dictionary names the runs.
+  fields <- ivt_f2_geo_field_schema(raw, ents)
+  if (!is.null(fields) && length(fields) == length(runs)) {
+    roles <- ivt_f2_geo_field_roles(fields)
+    ni <- which(roles == 1L); fi <- which(roles == 2L); ui <- which(roles == 3L)
+    if (length(ni) >= 1L) {                            # a named-column layout
+      name <- runs[[ni[1L]]]
+      out <- list(geo_label = name, geo_name = name,
+                  geo_uid = if (length(ui)) runs[[ui[1L]]] else rep(NA_character_, n_geo))
+      if (length(fi)) out$geo_name_fr <- runs[[fi[1L]]]
+      ivt_fallback(paste(
+        "Geography layout unrecognized by every specializer; recovered {n_geo}",
+        "member(s) by assembling the codebook's arrays positionally and mapping",
+        "them to columns via the dimension's OWN field dictionary",
+        "({paste(fields, collapse = ' / ')})."),
+        class = "canivt_geo_unparsed")
+      return(out)
+    }
+  }
   nn_of  <- function(v) v[!is.na(v) & nzchar(v)]
   spaces   <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else mean(grepl("[[:space:]]", nn)) }
   letters  <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else mean(grepl("[A-Za-z]", nn)) }

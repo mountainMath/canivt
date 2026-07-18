@@ -222,12 +222,19 @@ Kept for the record; the current architecture they produced is described in
   last resort, whole member as a string), closing the last two geo-name gaps.
   `ivt_f2_geo_assemble_runs()` reconstructs the codebook's parallel arrays into full
   member-length runs with the same group/chunk geometry `attrs_dir` uses but inferring
-  the run count from the block count (no schema needed); the decipher picks the display
-  name (most human-readable non-uid run, or the first non-uid run, EN/FR pair when two
-  are wordy) and the uid (fully-unique, space-free, digit-bearing code, type-tagged
-  preferred), joining every run per member into one string only when nothing reads as a
-  name. Closed **EO3278_T1_CDCSD** (attribute-major chunked, no GEO_NAME schema: 5,146
-  names EN+FR + `PR10`/`CD1001` uids) and **EO2654_2011_Van** (geography is descriptor
+  the run count from the block count. Column identity is **metadata-driven where the
+  file declares it**: these exports carry a `81 02` field dictionary in the geography
+  directory (the data-dim vocabulary "Code / English Desc / Desc Francais / Geo Code /
+  DQ / Level/Niveau / UID/IDU", which `ivt_f2_geo_schema()` -- tuned to the modern
+  `GEO_NAME_EN` schema -- did not recognise); `ivt_f2_geo_field_schema()` +
+  `ivt_f2_geo_field_roles()` read the field names and map each run to `geo_name` /
+  `geo_name_fr` / `geo_uid` positionally, no guessing. The content heuristic (display
+  name = most human-readable non-uid run; uid = unique digit-bearing code; whole-string
+  last resort) is the FALLBACK when no matching dictionary exists. Closed
+  **EO3278_T1_CDCSD** (chunked; field dictionary matched 1-to-1: 5,146 names EN+FR +
+  the file's declared `UID/IDU` SGC codes `10`/`1001`/`1008001` -- the earlier heuristic
+  had mis-picked the `Geo Code` column `PR10`/`CSD…`) and **EO2654_2011_Van** (geography
+  is descriptor
   dim 2 named "Geography" → `ivt_f2_geo_dim_index()` header-name fallback
   `canivt_geo_by_name`; its slot dir over-declares 109 vs 92 real entries →
   `ivt_f2_geo_block_dir()` short-directory acceptance `canivt_geo_dir_short`, validated

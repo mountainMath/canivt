@@ -105,19 +105,19 @@ test_that("the Stage 3 safety net surfaces verbatim labels on an unknown roster"
     values = function(r) blocks[[r]],
     strict = function(r) list(values = blocks[[r]], dense = FALSE)
   )
-  g <- expect_warning(ivt_f2_geo_combined(ents, 4L), class = "canivt_geo_unparsed")
-  expect_warning(ivt_f2_geo_combined(ents, 4L), class = "canivt_fallback")
-  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  g <- expect_warning(ivt_f2_geo_combined(raw(0), ents, 4L), class = "canivt_geo_unparsed")
+  expect_warning(ivt_f2_geo_combined(raw(0), ents, 4L), class = "canivt_fallback")
+  g <- suppressWarnings(ivt_f2_geo_combined(raw(0), ents, 4L))
   expect_identical(g$geo_name, names_run)   # verbatim, most name-like run
   expect_identical(g$geo_label, names_run)
   expect_identical(g$geo_uid, codes_run)    # the all-code run becomes the uid
   # nothing member-length -> NULL (the uid-only read stands), and no false warning
   short <- list(n = 1L, values = function(r) c("a", "b"),
                 strict = function(r) NULL)
-  expect_no_warning(expect_null(ivt_f2_geo_combined(short, 4L)))
+  expect_no_warning(expect_null(ivt_f2_geo_combined(raw(0), short, 4L)))
   # strict mode upgrades the recovery to a hard error
   withr::local_options(canivt.strict = TRUE)
-  expect_error(ivt_f2_geo_combined(ents, 4L), class = "canivt_geo_unparsed_error")
+  expect_error(ivt_f2_geo_combined(raw(0), ents, 4L), class = "canivt_geo_unparsed_error")
 })
 
 test_that("Stage 3 deciphers name/uid and picks the display over the code run", {
@@ -127,7 +127,7 @@ test_that("Stage 3 deciphers name/uid and picks the display over the code run", 
   cu   <- c("CU0001", "CU0002", "CU0003", "CU0004")
   ents <- list(n = 2L, values = function(r) list(disp, cu)[[r]],
                strict = function(r) list(values = list(disp, cu)[[r]], dense = FALSE))
-  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  g <- suppressWarnings(ivt_f2_geo_combined(raw(0), ents, 4L))
   expect_identical(g$geo_name, disp)        # the mixed display run, not the CU codes
   expect_identical(g$geo_uid, cu)           # the uniform digit-bearing code = uid
 })
@@ -138,7 +138,7 @@ test_that("Stage 3 recognizes an EN/FR display pair", {
   code <- c("01", "13", "24", "35")
   ents <- list(n = 3L, values = function(r) list(en, fr, code)[[r]],
                strict = function(r) list(values = list(en, fr, code)[[r]], dense = FALSE))
-  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  g <- suppressWarnings(ivt_f2_geo_combined(raw(0), ents, 4L))
   expect_identical(g$geo_name, en)          # English copy by frscore
   expect_identical(g$geo_name_fr, fr)
   expect_identical(g$geo_uid, code)
@@ -150,7 +150,7 @@ test_that("Stage 3 surfaces the run verbatim when no display column exists", {
   only <- c("A01", "B02", "C03", "D04")
   ents <- list(n = 1L, values = function(r) only,
                strict = function(r) list(values = only, dense = FALSE))
-  g <- suppressWarnings(ivt_f2_geo_combined(ents, 4L))
+  g <- suppressWarnings(ivt_f2_geo_combined(raw(0), ents, 4L))
   expect_identical(g$geo_label, only)
   expect_identical(g$geo_name, only)
 })

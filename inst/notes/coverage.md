@@ -1279,22 +1279,37 @@ schema-free reader, closing the last two geo-name gaps:
 - **`ivt_f2_geo_assemble_runs()`** reconstructs the codebook's parallel member arrays
   into full member-length runs using the SAME power-of-two group/chunk geometry the
   schema'd `ivt_f2_geo_attrs_dir()` uses, but inferring the run count from the block
-  count (`k / total_chunks`) instead of a schema — so it needs no GEO_NAME dictionary.
-- The **decipher** step picks, from the assembled runs: the display name (the most
-  human-readable non-uid run — spaces / lower-case — or the first non-uid run when
-  every member is a bare code; an EN/FR pair when two runs are clearly wordy) and the
-  uid (a fully-unique, space-free, digit-bearing code run, preferring a type-tagged
-  one like `CD1001` over a bare number). If no run reads as a name, every run is
-  joined per member into one verbatim string (the directive's true last resort).
-- **[x] EO3278_T1_CDCSD** — attribute-major chunked codebook (groups 1,1,2,4,8…), no
-  GEO_NAME schema: 5,146/5,146 names (EN + FR) + type-tagged uids (`PR10`, `CD1001`,
-  `CSD1001105`).
-- **[x] EO2654_2011_Van** — geography is descriptor dimension 2, named "Geography"
+  count (`k / total_chunks`) instead of a schema.
+- **Column identity is METADATA-DRIVEN where the file declares it.** These exports
+  carry a `81 02` field dictionary in the geography directory — the SAME
+  "Code / English Desc / Desc Français / Geo Code / DQ / Level/Niveau / UID/IDU"
+  vocabulary a data-dimension dictionary uses (`ivt_f2_geo_field_schema()`), not the
+  modern DGUID attribute schema `ivt_f2_geo_schema()` looks for. When its named
+  columns match the assembled runs one-to-one, the run → column mapping is read from
+  the file's OWN field names (`ivt_f2_geo_field_roles()`): `geo_name` = the English
+  description field, `geo_name_fr` = the French one, `geo_uid` = the field the file
+  literally NAMES `UID/IDU`. No content guessing.
+- The **content heuristic is the FALLBACK** (only when there is no matching field
+  dictionary): display name = the most human-readable non-uid run (spaces / lower-case,
+  or the first non-uid run when every member is a bare code; EN/FR pair when two runs
+  are wordy); uid = a fully-unique, space-free, digit-bearing code run. If no run reads
+  as a name, every run is joined per member into one verbatim string (the true last
+  resort).
+- **[x] EO3278_T1_CDCSD** — attribute-major chunked codebook (groups 1,1,2,4,8…) with
+  a `Code/English Desc/…/UID/IDU` field dictionary: read SCHEMA-DRIVEN, 5,146/5,146
+  names (EN + FR) + the file's declared `UID/IDU` uids (SGC codes `10` / `1001` /
+  `1008001`). (The earlier heuristic had mis-picked the `Geo Code` column, `PR10` /
+  `CSD1001105`, as the uid — the field dictionary corrects it.)
+- **[~] EO2654_2011_Van** — geography is descriptor dimension 2, named "Geography"
   in the header but with no decodable signature, so `ivt_f2_geo_dim_index()` gained a
   header-NAME fallback (`canivt_geo_by_name`); its slot directory over-declares its
   entry count (109 vs 92 real), so `ivt_f2_geo_block_dir()` gained a geography-scoped
   short-directory acceptance (`canivt_geo_dir_short`, validated downstream by
-  `ivt_f2_check_geo_count()`): 3,433/3,433 names + `CU…` uids.
+  `ivt_f2_check_geo_count()`): 3,433/3,433 names + `CU…` uids. Its field dictionary
+  declares 5 columns but only 4 are stored (one field is empty/absent), so the
+  run → column map is NOT 1-to-1 and it falls to the content HEURISTIC — the one
+  remaining table whose geography column identity is a guess, not read from the
+  schema. (Resolving which field is unstored would make it schema-driven too.)
 
 All loud (`canivt_geo_unparsed` etc., strict-mode errors) — the split is heuristic,
 not a validated positional parse. Both tables' cell counts are unchanged (geography
