@@ -28,3 +28,6 @@ Meta/
 # Knitted vignette output (source is vignettes/*.Rmd)
 /vignettes/*.html
 /vignettes/*.R
+
+# session scratch (working artifacts, never committed)
+scratchpad/

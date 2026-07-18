@@ -102,7 +102,8 @@ ivt_f2_is_dguid_block <- function(t)
 # NULL when the directory/probe does not resolve (the caller falls back to the
 # scan, loudly).
 ivt_f2_geo_dguids_dir <- function(raw) {
-  d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
+  ents <- ivt_f2_geo_entries(raw); if (is.null(ents)) return(NULL)
+  d <- ents$dir                                          # cheap O(1) probe over entries
   n_geo <- ivt_f2_geo_count(raw)
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
   n <- length(raw)
@@ -145,7 +146,7 @@ ivt_f2_geo_dguids_dir <- function(raw) {
   lay <- ivt_f2_chunk_layout(n_geo)
   if (length(cand) != 2L * lay$n_chunks) return(NULL)
   chunk_vals <- function(entry, want) {              # strict parse -> want-long chunk
-    e <- ivt_f2_dir_entry_members(raw, d[entry, "off"], d[entry, "len"])
+    e <- ents$strict(entry)
     if (is.null(e)) return(NULL)
     v <- e$values
     if (!e$dense && length(v) > want && all(is.na(v[(want + 1L):length(v)])))
@@ -402,6 +403,61 @@ ivt_f2_geo_block_dir <- function(raw) {
     }
   }
   NULL
+}
+
+# Stage 1 of the geography read (refactor-plan.md §7): locate the geography
+# dimension's block directory ONCE (`ivt_f2_geo_block_dir()`, exactly how the data
+# dimensions are located) and expose a LAZY, memoized per-entry reader so every
+# geography specializer recovers member arrays through the same walk rather than
+# re-implementing "walk the directory, parse each value entry" six times. Returns
+# NULL when no geography block directory resolves.
+#
+# The object exposes, over the `n` directory entries in member-id (logical) order:
+#   $n            entry count;  $dir  the block-directory matrix (off/len columns)
+#   $off(r) / $len(r)   the r-th entry's byte offset / length
+#   $records(r)   run-scanner texts (`ivt_f2_dir_entry_records()`) -- how attrs_dir
+#                 and inline_dir CLASSIFY entries (kept per §4/§7 risk register)
+#   $strict(r)    strict header-driven parse (`ivt_f2_dir_entry_members()`):
+#                 list(values, dense) or NULL
+#   $values(r)    strict-first member array (`strict$values`, else `records`) --
+#                 what flow_dir / custom consume
+#   $dense(r)     `strict$dense`, or FALSE when there is no strict parse
+# records() and strict() are computed on first touch and cached, so a reader that
+# never needs the run-scanner (dguids_dir's O(1) probe over the 6,244-entry
+# 98-10-0023 geography directory) never pays for it -- eagerly scanning every entry
+# measured ~17 s, the regression the memo work in §3 exists to avoid.
+ivt_f2_geo_entries <- function(raw) {
+  d <- ivt_f2_geo_block_dir(raw)
+  if (is.null(d)) return(NULL)
+  n <- nrow(d)
+  rec <- vector("list", n); str <- vector("list", n)
+  got_rec <- logical(n);    got_str <- logical(n)
+  # cache with single-bracket `x[r] <<- list(v)` (NOT `x[[r]] <<- v`): a NULL
+  # strict parse assigned via `[[<-` would DELETE the slot and shrink the cache,
+  # misaligning every later entry.
+  records <- function(r) {
+    if (!got_rec[r]) {
+      rec[r] <<- list(ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"]))
+      got_rec[r] <<- TRUE
+    }
+    rec[[r]]
+  }
+  strict <- function(r) {
+    if (!got_str[r]) {
+      str[r] <<- list(ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"]))
+      got_str[r] <<- TRUE
+    }
+    str[[r]]
+  }
+  list(
+    n = n, dir = d,
+    off     = function(r) d[r, "off"],
+    len     = function(r) d[r, "len"],
+    records = records,
+    strict  = strict,
+    values  = function(r) { s <- strict(r); if (is.null(s)) records(r) else s$values },
+    dense   = function(r) { s <- strict(r); if (is.null(s)) FALSE else s$dense }
+  )
 }
 
 # Locate the geography attribute dictionary block ("GEO_NAME_EN ... DGUID_EN ...")
@@ -773,13 +829,9 @@ ivt_f2_scan_digit_records <- function(raw, off, len) {
 # records supplies the uids).
 ivt_f2_geo_bare_codes <- function(raw, n_geo) {
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
-  d <- ivt_f2_descriptor(raw)
-  if (is.null(d) || !length(d$dims)) return(NULL)
-  gi <- ivt_f2_geo_dim_index(raw, d)
-  slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
-  if (is.null(slots)) return(NULL)
-  dir <- ivt_f2_dim_dir(raw, gi, slots)
-  if (is.null(dir)) return(NULL)
+  ents <- ivt_f2_geo_entries(raw)                       # Stage 1 (shared locator)
+  if (is.null(ents)) return(NULL)
+  dir <- ents$dir                                       # its own digit-record scan
   n <- length(raw)
   parts <- vector("list", nrow(dir))
   for (r in seq_len(nrow(dir))) {
@@ -813,10 +865,9 @@ ivt_f2_geo_custom <- function(raw, n_geo) {
   d <- ivt_f2_descriptor(raw)
   if (is.null(d) || !length(d$dims)) return(NULL)
   gi <- ivt_f2_geo_dim_index(raw, d)
-  slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
-  if (is.null(slots)) return(NULL)
-  dir <- ivt_f2_dim_dir(raw, gi, slots)
-  if (is.null(dir)) return(NULL)
+  ents <- ivt_f2_geo_entries(raw)                       # Stage 1 (shared locator)
+  if (is.null(ents)) return(NULL)
+  dir <- ents$dir                                       # its own marker + member-array walk
   mk <- ivt_f2_dir_marker_entry(raw, d$dims[[gi]]$name, dir)
   if (mk <= 0L || mk >= nrow(dir)) return(NULL)
   cand <- ivt_f2_dir_member_arrays(
@@ -1325,7 +1376,7 @@ ivt_f2_is_ordinal <- function(t) {
 # stored label whitespace (the single-block tables indent `geo_name` by hierarchy
 # depth, which `ivt_label_depth()` reads; the metadata light path relies on it).
 ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
-  d <- ivt_f2_geo_block_dir(raw); if (is.null(d)) return(NULL)
+  ents <- ivt_f2_geo_entries(raw); if (is.null(ents)) return(NULL)
   schema <- ivt_f2_geo_schema(raw); if (is.null(schema) || !length(schema)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw); if (is.na(n_geo) || n_geo < 1L) return(NULL)
   # value blocks in directory (logical) order, ordinal- and framing-filtered. The
@@ -1333,14 +1384,15 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   # as always); the strict header-driven parse then supplies the VALUES where it
   # applies, preserving explicit empty records as NA holes (absent members, e.g.
   # 98-10-0662's aggregate member 26) and flagging bit-headed dense arrays, both of
-  # which the run-scanner silently fragments or packs.
-  vb <- vector("list", nrow(d)); k <- 0L
-  for (r in seq_len(nrow(d))) {
-    t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
+  # which the run-scanner silently fragments or packs. (Copy the cached strict
+  # result into a fresh list -- ents$strict(r) is memoized, must not be mutated.)
+  vb <- vector("list", ents$n); k <- 0L
+  for (r in seq_len(ents$n)) {
+    t <- ents$records(r)
     if (length(t) >= 3L && !ivt_f2_is_ordinal(t)) {
-      e <- ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"])
-      if (is.null(e)) e <- list(values = t, dense = FALSE, strict = FALSE)
-      else e$strict <- TRUE
+      s <- ents$strict(r)
+      e <- if (is.null(s)) list(values = t, dense = FALSE, strict = FALSE)
+           else list(values = s$values, dense = s$dense, strict = TRUE)
       if (trim) e$values <- trimws(e$values)
       k <- k + 1L; vb[[k]] <- e
     }
@@ -1895,8 +1947,8 @@ ivt_f2_geo_marker_region <- function(raw) {
 # inst/notes/coverage.md; the viewer re-sorts within a residence for display.
 ivt_f2_geo_flow_dir <- function(raw) {
   if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern schema'd layout
-  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
-  if (is.null(d)) return(NULL)
+  ents <- ivt_f2_geo_entries(raw)                       # Stage 1 (shared)
+  if (is.null(ents)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw)
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
   # Codes are 3-9 digits: 7-digit CSDs (2011/2016 99-0xx/98-400 CSD flows),
@@ -1912,13 +1964,13 @@ ivt_f2_geo_flow_dir <- function(raw) {
   # member whose combined record is missing or truncated in a tail partial chunk.
   name_dict <- new.env(hash = TRUE, parent = emptyenv())
   scan_blocks <- 0L                                       # blocks the strict parse could not read
-  for (r in seq_len(nrow(d))) {
+  for (r in seq_len(ents$n)) {
     # BYTE-EXACT records first (`ivt_f2_dir_entry_members`, the two value-block
     # framings): the loose run-scanner fragments records in dense tail chunks -- how
     # a handful of names were silently lost before -- so it is only the fallback.
-    e <- ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"])
+    e <- ents$strict(r)
     if (!is.null(e)) { t <- e$values }
-    else { t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"]); scan_blocks <- scan_blocks + 1L }
+    else { t <- ents$records(r); scan_blocks <- scan_blocks + 1L }
     if (length(t) < 3L || length(t) > 512L || ivt_f2_is_ordinal(t)) next
     tt <- trimws(t)
     nn <- tt[!is.na(tt) & nzchar(tt)]
@@ -2040,8 +2092,8 @@ ivt_f2_flow_sides <- function(label) {
 
 ivt_f2_geo_inline_dir <- function(raw) {
   if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern layout: not inline
-  d <- ivt_f2_dim_dir(raw, ivt_f2_geo_dim_index(raw))
-  if (is.null(d)) return(NULL)
+  ents <- ivt_f2_geo_entries(raw)                       # Stage 1 (shared)
+  if (is.null(ents)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw)
   if (is.na(n_geo) || n_geo < 1L) return(NULL)
   lay <- ivt_f2_chunk_layout(n_geo)
@@ -2051,13 +2103,12 @@ ivt_f2_geo_inline_dir <- function(raw) {
   # run-scanner, values strict-first (see ivt_f2_dir_entry_members). Dense values
   # are usable as-is: if a dense block skipped absent members its record count
   # misses the chunk size below and we fall back.
-  vb <- vector("list", nrow(d)); k <- 0L
-  for (r in seq_len(nrow(d))) {
-    t <- ivt_f2_dir_entry_records(raw, d[r, "off"], d[r, "len"])
+  vb <- vector("list", ents$n); k <- 0L
+  for (r in seq_len(ents$n)) {
+    t <- ents$records(r)
     if (length(t) >= 3L && length(t) <= 256L && !ivt_f2_is_ordinal(t)) {
-      e <- ivt_f2_dir_entry_members(raw, d[r, "off"], d[r, "len"])
       k <- k + 1L
-      vb[[k]] <- if (is.null(e)) t else e$values
+      vb[[k]] <- ents$values(r)                        # strict-first, records fallback
     }
   }
   length(vb) <- k

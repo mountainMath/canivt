@@ -286,6 +286,156 @@ tests and detection gate do). Design points:
   states it never fires on the current corpus. Schema output byte-identical on all
   12 tables.
 
+## 7. Geography: unify on recover-then-specialize (PLANNED — 2026-07-17)
+
+Goal (owner request): the geography read is still the most diffuse part of the
+parser — **6 layout readers** (`ivt_f2_geo_inline_dir`, `ivt_f2_geo_attrs_dir`,
+`ivt_f2_geo_flow_dir`, `ivt_f2_geo_custom`, `ivt_f2_geo_bare_codes`,
+`ivt_f2_geo_dguids_dir`) plus a legacy byte-scan stride-walk
+(`ivt_f2_geo_attributes` → `ivt_f2_codebook_blocks`/`ivt_f2_geo_groups_chunked`/
+`ivt_f2_extract_attr`/`ivt_f2_geo_names`/`ivt_f2_geo_root_dir`), reached through
+**two separate fallthrough ladders** (`ivt_f2_geo_light` for `metadata$geographies`
+and the front of `ivt_f2_geographies` for `geo_attributes = TRUE`). Each reader
+**re-does the same Stage 1** — locate the geography dimension's slot directory
+(`ivt_f2_dim_dir(raw, geo_dim)`, *exactly* how the data dimensions are located)
+and recover its member arrays — before diverging. And there is **no graceful
+fallback**: an unrecognized layout returns NULL and either falls through to
+uid-only or trips `ivt_f2_check_geo_count()`/`_names()`.
+
+Target: locate + recover **once** (metadata-driven, shared with the data
+dimensions), then run a chain of **specializers** that each interpret the
+recovered arrays for uid / label / bilingual label / auxiliary fields (non-return
+rate, quality flag, …); if none fits, emit a warning and surface the raw combined
+string **verbatim** rather than mis-parsing it. This directly realizes the
+owner's model and folds the two ladders + six Stage-1 copies into one path.
+
+### Reader distribution (measured, 51-table corpus, 2026-07-17)
+
+`inline_dir` 25 · `uid_only` (DGUID scan) 9 · `custom` 6 · `attrs_dir` 5 ·
+`flow` 4 · `bare_codes` 3. Full-attribute path (`geo_attributes = TRUE`): every
+schema'd table resolves via `attrs_dir` **except `98100013`** (ADA), whose
+irregular directory drops a trailing partial → it is the **only** table that
+still needs the stride-walk + reverse-root override. The corpus ledger reads the
+*default* path, so **the stride-walk is not corpus-covered** — the snapshot below
+must pin it.
+
+### Target architecture
+
+```
+ivt_f2_geo_read(raw, full = FALSE) →                # replaces geo_light + front of geographies
+  gi   <- ivt_f2_geo_dim_index(raw)                 # same locator as data dims
+  ents <- ivt_f2_geo_entries(raw, gi)               # Stage 1 (SHARED): recover all
+  for spec in SPECIALIZERS:                          # Stage 2: ordered, first non-NULL wins
+     g <- spec(raw, ents, full)                      #   each interprets `ents`
+     if (!is.null(g)) return(finalize(g))
+  finalize(ivt_f2_geo_combined(ents))               # Stage 3: verbatim, LOUD (canivt_geo_unparsed)
+```
+
+- **Stage 1 — `ivt_f2_geo_entries(raw, gi)` (the real dedup).** Walk the geo slot
+  directory; recover every value entry strict-first
+  (`ivt_f2_dir_entry_members()`, run-scanner fallback), returning the entry list
+  in directory order: `list(off, len, values, dense, strict, n)` with ordinal /
+  framing entries flagged (`ivt_f2_is_ordinal`). This is the byte-for-byte Stage 1
+  copied today into `attrs_dir`, `inline_dir`, `flow_dir`, `custom`, `bare_codes`,
+  `dguids_dir`. It uses the *same primitives* `ivt_f2_dir_member_arrays()` (the
+  data-dim label reader) uses.
+- **Stage 2 — specializers over the shared entries.** Same interface
+  `function(raw, ents, full) → geo-tibble | NULL`; ordered as the ladders are
+  today (flow → inline → schema-attrs/uid → custom → bare). Each keeps its
+  **own** assembly + parse internals (the load-bearing tolerances below), but no
+  longer re-walks the directory. `dguids_dir` (uid) and `attrs_dir` (full) become
+  the two faces of the schema specializer, chosen by `full`.
+- **Stage 3 — `ivt_f2_geo_combined(ents)` (new, the owner's safety net).** When no
+  specializer claims: pick the most member-complete member-length run and expose
+  it verbatim as `geo_label` = `geo_name`, `geo_uid` = NA (or a run that is
+  unambiguously all-code as the uid), warn `canivt_geo_unparsed` (strict-mode
+  error). Guarantees every member gets *a* label on a never-seen layout — the
+  behavior absent today.
+- **`finalize()`** = the existing tail shared by both entry points:
+  `ivt_f2_geo_fill_label` → `ivt_f2_flag_dqf_note_truncation` →
+  `ivt_geo_col_order` → `ivt_f2_check_geo_count` / `_names`.
+
+### Risk register — load-bearing tolerances that MUST survive byte-identical
+
+These are why §4 declined a single parameterized consumer; they stay **inside**
+their specializers, fed from shared `ents`:
+
+1. `attrs_dir` per-chunk **dense re-alignment** via the plain-array NA-hole
+   pattern + the `k == 2·nattr·Σsizes` gate (98-10-0662 aggregate member 26).
+2. `inline_dir` **partial-first rotation** + `skip`-prefix search (2006 vintage;
+   98-400-X2016120/0328 auxiliary blocks).
+3. `flow_dir` is a **code-join, not positional** — anchors on the code/code uid
+   array and joins combined records by code; keep as its own specializer.
+4. The **stride-walk full read** (`ivt_f2_geo_attributes` fallback +
+   `ivt_f2_geo_root_dir`) is the ONLY full reader for `98100013` — demote to
+   last-resort inside the schema specializer's `full` branch, do **not** delete.
+5. Per-group **language order** varies (root group FR-first) — `ivt_f2_pick_en`
+   stays the per-group primary.
+6. `dguids_dir` **identical-copy** check + the byte-scan `ivt_f2_geo_dguids`
+   last-resort (98-10-0013 reverse-root chunk below the marker region).
+
+### Validation harness (build FIRST, before any code moves)
+
+`scratchpad/geo-snapshot.rds` already captures the **light** path for all 51
+tables. Extend to a committed test helper capturing, per table:
+- `ivt_f2_geo_light(raw, n_geo)` (default path), AND
+- `ivt_f2_geographies(raw)` **including `98100013`, 98100023, 98100478,
+  98100662, 1003011** (the full-attribute path the corpus ledger never exercises),
+- the exact set + order of `canivt_*` fallback warnings emitted.
+Every migration step below must reproduce this snapshot `identical()`, plus the
+corpus ledger (`CANIVT_CORPUS_TESTS=1`) FAIL 0.
+
+### Migration steps (each gated on: snapshot identical + corpus FAIL 0)
+
+1. [x] **Snapshot harness** — light + full + warning-set for the tables above.
+   DONE 2026-07-17. `tests/testthat/helper-geo-snapshot.R` (capture: a
+   deterministic `rlang::hash()` of each read's returned object + the ordered
+   `canivt_*` warning set), `tests/testthat/fixtures/geo-snapshot.csv` (the
+   frozen 51-table baseline: `light_hash`/`light_warnings` for every ledger
+   table + `full_hash`/`full_warnings` for the 16 `GEO_SNAP_FULL` tables — the
+   plan's five plus the cheap small schema'd/flow tables), and the opt-in
+   `tests/testthat/test-geo-snapshot.R` (regenerate via `geo_snapshot_regen()`).
+   Verified GREEN end-to-end against the corpus; every subsequent step must keep
+   it so.
+2. [x] **Extract Stage 1** `ivt_f2_geo_entries()`; refactor the 6 readers to
+   consume it (behavior-preserving; no output change). Biggest, safest win.
+   DONE 2026-07-17. `ivt_f2_geo_entries(raw)` (codebook-f2.R) locates the geo
+   block directory ONCE (`ivt_f2_geo_block_dir()`, proven byte-identical to the
+   `ivt_f2_dim_dir(geo_dim)` the four inline/flow/custom/bare readers used — the
+   legacy-slot fallback fires on **no** corpus table) and exposes LAZY, memoized
+   per-entry accessors `$records(r)` / `$strict(r)` / `$values(r)` / `$dense(r)`
+   over the `$dir` matrix. Laziness is load-bearing: eagerly scanning all 6,244
+   entries of 98-10-0023 measured ~17 s, so dguids_dir's O(1) probe path must
+   never touch `$records`. All six readers (`dguids_dir`, `attrs_dir`,
+   `inline_dir`, `flow_dir`, `custom`, `bare_codes`) now consume it instead of
+   re-walking the directory. Cache subtlety: entries are stored via
+   `x[r] <<- list(v)`, never `x[[r]] <<- v` (a NULL strict parse via `[[<-`
+   deletes the slot and misaligns the cache). Verified against the §7.1
+   snapshot: every `light_hash`/`full_hash`/`full_warnings` byte-identical; the
+   only delta is 5 tables (3 CBP bare_codes + 2 EO) emitting **one fewer
+   duplicate** `canivt_descriptor_*` warning replay (bare_codes no longer
+   re-parses the descriptor) — a benign reduction in duplicate noise, output
+   unchanged, no fallback vanished; fixture updated to match. Unit suite FAIL 0,
+   corpus ledger FAIL 0 / 51 tables.
+3. **Single dispatcher** `ivt_f2_geo_read(raw, full)`; point `ivt_f2_geo_light`
+   and `ivt_f2_geographies` at it (thin wrappers, contracts unchanged — light
+   drops all-NA cols to a list, full keeps the tibble; see §5.1, NOT merged).
+4. **Stage 3** `ivt_f2_geo_combined()` + `canivt_geo_unparsed`; a synthetic
+   unit test (a doctored directory with an unknown run roster) proves it warns
+   and returns verbatim labels.
+5. **Demote the byte-scans** (`ivt_f2_geo_dguids`, stride-walk) to explicit
+   last-resort inside their specializers, each already `ivt_fallback()`-loud;
+   confirm 98100013 full-attr snapshot still byte-identical.
+6. Update CLAUDE.md code map, coverage.md, decode-history.md; retire the
+   superseded ladder comments.
+
+### Explicitly NOT done (kept as documented specializations)
+
+Flow code-join (#3), the 98100013 stride-walk (#4), and the dense re-alignment
+(#1) are **not** collapsed into the shared assembler — that is the §4 finding,
+still correct. The win here is the *shared Stage-1 recovery*, the *single
+dispatcher*, and the *combined-string safety net*, not a single mega-parser.
+
 ## Suggested order
 
 1. §1 correctness fixes (done).
@@ -294,3 +444,5 @@ tests and detection gate do). Design points:
 4. §4 strict-first harmonization + shared helpers; §5 alongside.
 5. §6 dense-bitstream decode and structural marker identification — new format
    work; each gets its own validation entry in decode-history.md.
+6. §7 geography recover-then-specialize — build the snapshot harness first, then
+   migrate in the 6 gated steps above.
