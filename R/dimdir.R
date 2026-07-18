@@ -459,14 +459,18 @@ ivt_f2_dir_has_bare_codes <- function(raw, dir, min_codes = 100L, max_blocks = 8
   FALSE
 }
 
-# Does this dimension slot directory hold a GEOGRAPHY codebook? TRUE when it
-# lists (a) a dictionary/schema block naming the GEO_NAME attribute (the modern
-# DGUID layout's geography attribute schema -- data-dimension dictionaries name
-# Code / English Desc / Desc Francais instead), or (b) a member array whose
-# records parse as the inline combined geography format ("<name> (<code>)
-# [<type>] <flag>", IVT_F2_INLINE_PAT). Only the first few member arrays are
-# strict-parsed; name/code sibling arrays that do not match the pattern are
-# skipped, not disqualifying.
+# Does this dimension slot directory hold a GEOGRAPHY codebook? Identified from the
+# dimension's own FIELD DICTIONARY first (metadata-driven, §8.4) -- a `81 02` block
+# is geography when it names (a) the modern DGUID attribute `GEO_NAME`, (b) the
+# origin-destination flow schema (`POR/POW` / `LDR/LDT`, Place Of Residence/Work), or
+# (c) a `UID/IDU` uid column TOGETHER with a `Level/Niveau` or `Geo Code` column --
+# all geography-specific field names a data-dimension dictionary (which names Code /
+# English Desc / Desc Francais / _Description / _ItemNotes) never carries. Only when
+# no dictionary declares geography does it fall back to (d) the CONTENT probe: a
+# member array whose records parse as the inline combined format ("<name> (<code>)
+# [<type>] <flag>", IVT_F2_INLINE_PAT) -- for the schema-thin vintages whose dict is
+# not slot-reachable. Only the first few member arrays are strict-parsed; name/code
+# sibling arrays that do not match the pattern are skipped, not disqualifying.
 ivt_f2_dir_is_geo <- function(raw, dir, max_member_entries = 6L) {
   n <- length(raw); tried <- 0L
   for (r in seq_len(nrow(dir))) {
@@ -476,6 +480,12 @@ ivt_f2_dir_is_geo <- function(raw, dir, max_member_entries = 6L) {
     if (b0 == 0x81L && b1 == 0x02L && len <= 4000L) {
       txt <- raw_to_latin1(raw[(off + 1L):(off + len)])
       if (grepl("GEO_NAME", txt, fixed = TRUE)) return(TRUE)
+      # metadata-driven: the field dictionary declares geography-specific columns.
+      uid_field <- grepl("UID", txt, fixed = TRUE) || grepl("IDU", txt, fixed = TRUE)
+      lvl_field <- grepl("Niveau", txt, fixed = TRUE) ||
+        grepl("Level", txt, fixed = TRUE) || grepl("Geo Code", txt, fixed = TRUE)
+      if (grepl("POR/POW", txt, fixed = TRUE) || grepl("LDR/LDT", txt, fixed = TRUE) ||
+          (uid_field && lvl_field)) return(TRUE)
     } else if (b0 == 0x01L && b1 == 0x01L && len >= 24L &&
                tried < max_member_entries) {
       tried <- tried + 1L
