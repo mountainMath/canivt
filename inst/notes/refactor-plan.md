@@ -605,3 +605,23 @@ materialize the sparse `_Description` column per-member from the `84 01` bitmap 
   NOT the physical STORAGE (combined display string vs parallel columns) — that
   irreducible structural probe lives only in the `custom` family (EO3278 parallel vs
   cro0172986 combined carry near-identical dicts). Byte-identical gate.
+- [x] **§8.7 — NEGATIVE RESULT: no metadata marker for combined-vs-parallel storage
+  (2026-07-18).** Hunted for a declarative flag distinguishing the two `custom`-family
+  storages (parallel attribute arrays vs one fused display string). Determined FIRST
+  that the variation is **per-file** (tracks the export tool: `EO3278`/`EO2654` parallel;
+  the census inline vintages + `cro`/`CMHC`/`CRO`/`ord` combined) — the same-tool
+  `cro0172986_ct7`/`_ct8` pair stores identically yet differs in the dictionary
+  field-struct bytes, so that struct is per-file layout noise, not a flag. Then checked
+  every candidate location and found **none**: the `81 02` dict header is IDENTICAL
+  parallel-vs-combined (`88 0a ff af` on both EO3278 and cro0172986); the descriptor
+  type byte is a width tag (`0x0d` spans EO3278-parallel AND 95F0170X-combined); the
+  geo slot's 2nd u32 is an allocation size (`≈ nextpow2(n_entries)`); a full 1 KB header
+  scan yielded exactly one separator (`@829`) that is that same allocation byte, read
+  coincidentally (for EO2654 geography is dim 2, so `@829` is dim 1's slot). The format
+  does not encode it because Beyond 20/20 never needed to — it reads the DISPLAY LABEL
+  (the name array / combined string, always metadata-driven) and shows it; decomposing
+  the label into name/uid/code is *our* goal, not the file's. So the robust design is
+  the one in place: read the display label from metadata, then STRUCTURALLY probe for
+  parallel attribute arrays (inline pattern-match, else parallel assemble). Do NOT
+  invent a marker heuristic from the 2 parallel exemplars. **The §8 geography arc is
+  complete.**
