@@ -585,7 +585,23 @@ materialize the sparse `_Description` column per-member from the `84 01` bitmap 
   already rich + validated on the big tables and both paths now follow the same
   "file's own field name → role" principle; a literal single reader would risk
   regressions for no gain (two genuinely distinct schema blocks + vocabularies).
-- [ ] **§8.4** (revisit) Make "which dimension is geography" a READ of the FIELD
-  DICTIONARY (declares `UID/IDU` + `Level/Niveau`?) rather than the
-  `ivt_f2_dir_is_geo()` byte-signature probe — this uses only the schema, NOT the 1:1
-  run map, so it is not blocked by §8.3. Naturally handles multi-geography flow.
+- [x] **§8.4 — geography-dimension identification from the field dictionary
+  (2026-07-18).** `ivt_f2_dir_is_geo()` now identifies a geography dimension from its
+  OWN field dictionary first: a `81 02` block is geography when it names `GEO_NAME`
+  (modern DGUID), the `POR/POW` / `LDR/LDT` flow schema, or a `UID/IDU` column
+  together with a `Level/Niveau` or `Geo Code` column — geography-specific field names
+  a data-dimension dictionary never carries. The inline-pattern CONTENT probe (regex
+  over member strings) is now the fallback for the schema-thin vintages whose dict is
+  not slot-reachable. Additive + byte-identical (every `geo_dim_index` unchanged; no
+  data dim carries the geo vocabulary → no false positives). EO2654 (dict not
+  slot-reachable) + CBP (no dict) keep their header-name / bare-code identification.
+- [x] **§8.6 — explicit encoding classifier + dispatcher routing (2026-07-18).**
+  `ivt_f2_geo_encoding(raw)` classifies the geography encoding family purely from the
+  field dictionary (`dguid`/`flow`/`bare`/`custom`/`none`), non-overlapping across the
+  52-table corpus. `ivt_f2_geo_read()` routes the `dguid`/`bare` branches on it, so
+  "why this reader" is an auditable metadata decision. The combined-string families
+  (flow/custom/inline) share the inline entry (self-detecting), so a mis-classification
+  cannot mis-read. KEY LIMIT recorded: the dictionary declares the logical columns but
+  NOT the physical STORAGE (combined display string vs parallel columns) — that
+  irreducible structural probe lives only in the `custom` family (EO3278 parallel vs
+  cro0172986 combined carry near-identical dicts). Byte-identical gate.
