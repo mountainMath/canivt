@@ -763,36 +763,86 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
 # readers, a list for the custom/bare/uid readers), with the uid column already
 # renamed to `geo_uid`; the two wrappers apply their distinct contracts (§5.1:
 # light = list with all-NA columns dropped; full = tibble keeping every column).
+# The geography ENCODING family, classified from the file's OWN geography field
+# dictionary -- metadata-driven, no member content. The `81 02` field-name vocabulary
+# self-describes the encoding, robustly and non-overlapping across the whole corpus
+# (52 tables), so this is the explicit decision point the dispatcher routes on:
+#
+#   "dguid"  the modern DGUID attribute schema (the dictionary declares GEO_NAME_EN
+#            ... DGUID_EN ...) -- read by the schema / attribute path.
+#   "flow"   origin-destination commuting flow (the dictionary declares POR/POW,
+#            LDR/LDT -- Place Of Residence/Work) -- read by the flow reader.
+#   "custom" a `81 02` free-form field dictionary (English Desc / Geo Code / UID/IDU /
+#            Level / DQ / Unof. ...) WITHOUT the DGUID schema -- the pre-DGUID inline
+#            vintages AND the custom tabulations. NOTE: the dictionary declares the
+#            logical columns but NOT the physical STORAGE (combined display string vs
+#            parallel columns), which the readers still resolve structurally (the
+#            inline reader claims a combined-string codebook; a parallel one falls to
+#            the schema-mapped assembler). So "custom" is one metadata family spanning
+#            two storages -- the irreducible content probe lives here, and only here.
+#   "bare"   a codebook of bare numeric GEOUIDs with no recognizable field dictionary
+#            (Canadian Business Patterns dissemination-area codes).
+#   "none"   no geography block directory / dictionary resolved.
+#
+# Returns the family string. This is descriptive provenance + an audit hook; the
+# dispatcher's specializers still self-detect, so a mis-classification cannot silently
+# mis-read (the wrong reader returns NULL and the chain continues).
+ivt_f2_geo_encoding <- function(raw)
+  ivt_memo(raw, "geo_encoding", function() ivt_f2_geo_encoding_impl(raw))
+
+ivt_f2_geo_encoding_impl <- function(raw) {
+  ents <- ivt_f2_geo_entries(raw)
+  if (is.null(ents) || is.null(ents$dir)) return("none")
+  dir <- ents$dir; n <- length(raw)
+  has <- function(tok) {
+    for (r in seq_len(nrow(dir))) {
+      off <- dir[r, "off"]; len <- dir[r, "len"]
+      if (off + len > n) next
+      if (grepl(tok, raw_to_latin1(raw[(off + 1L):(off + len)]), fixed = TRUE)) return(TRUE)
+    }
+    FALSE
+  }
+  if (has("GEO_NAME_EN")) return("dguid")
+  if (has("POR/POW") || has("LDR/LDT")) return("flow")
+  if (is.null(ivt_f2_geo_field_schema(raw, ents))) return("bare")
+  "custom"
+}
+
 ivt_f2_geo_read <- function(raw, full = FALSE) {
   n_geo <- ivt_f2_geo_count(raw)
-  # 1. inline family (flow -> pre-DGUID inline codebook -> marker-region scan). It
-  #    returns NULL for the schema'd DGUID tables, so they fall through to the
-  #    schema step; it wins for the schema-absent 1991/2006/2011/2016 vintages
-  #    (incl. the single-block 2016 case whose uid is the bare code in the combined
-  #    block). Light gates on the declared count; full accepts it unconditionally.
+  # The metadata-declared encoding family is the EXPLICIT routing decision
+  # (`ivt_f2_geo_encoding()`, read from the geography field dictionary). The
+  # `dguid`/`bare` branches are gated on it so the "why this reader" is auditable;
+  # the combined-string families (`flow`, `custom`, the inline vintages) share the
+  # inline entry, which self-detects and returns NULL otherwise -- so a
+  # mis-classification still cannot mis-read (the chain falls through).
+  enc <- ivt_f2_geo_encoding(raw)
+  # 1. combined-string codebooks: origin-destination flow, the pre-DGUID inline
+  #    vintages, and the combined-string custom tabulations all present as one
+  #    "<name> (<code>) <flag>" member array the inline reader parses. It returns
+  #    NULL for the DGUID attribute tables. Light gates on the declared count; full
+  #    accepts it unconditionally.
   g <- ivt_f2_geo_inline(raw)
   if (!is.null(g) && (full || is.na(n_geo) || nrow(g) == n_geo)) {
     names(g)[names(g) == "geouid"] <- "geo_uid"
     return(g)       # incl. dqf_code: on the 2016 tables its last digit marks
   }                 # wholly-suppressed geographies
-  # 2. schema'd attribute codebook.
-  if (full) {
-    # the comprehensive attribute scan, but only when a geography schema exists --
-    # otherwise a schema-less custom/bare table would be claimed here with an
-    # all-NA table instead of reaching its specializer below.
-    if (!is.null(ivt_f2_geo_schema(raw))) {
+  # 2. the modern DGUID attribute codebook (enc == "dguid": dictionary declares
+  #    GEO_NAME_EN ...).
+  if (enc == "dguid") {
+    if (full) {
+      # the comprehensive attribute scan.
       g <- ivt_f2_geo_attributes(raw)
       names(g)[names(g) == "dguid"] <- "geo_uid"
       return(g)
     }
-  } else {
     # single-chunk schema'd tables (98-10-0241/0077/0662): the directory-driven
     # positional attribute read is cheap here (one group of one chunk) and fully
     # metadata-addressed; trim = FALSE keeps the hierarchy indentation. GEO_NAME can
     # carry legitimate NA holes (98-10-0662's derived aggregate member has no
-    # attributes); the display Member Name (`geo_label`), which every member
-    # carries, must be complete for the read to be accepted. Bigger tables skip this
-    # (~20 s on a 63k-geography codebook; the uid scan below is ~3x faster).
+    # attributes); the display Member Name (`geo_label`), which every member carries,
+    # must be complete for the read to be accepted. Bigger tables skip this (~20 s on
+    # a 63k-geography codebook; the uid scan below is ~3x faster).
     if (!is.na(n_geo) && n_geo <= 256L) {
       at <- ivt_f2_geo_attrs_dir(raw, trim = FALSE)
       if (!is.null(at) && nrow(at) == n_geo &&
@@ -801,7 +851,7 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
         return(at)
       }
     }
-    # schema-named single block (2021 DGUID) or the content-based array detector
+    # schema-named single block (2021 DGUID)
     simple <- ivt_f2_geo_simple(raw, n_geo)
     if (!is.null(simple)) {
       geo_uid <- if (length(simple$dguid) == n_geo) simple$dguid
@@ -814,10 +864,12 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   #    combined-string member array, no GEO_NAME_EN schema, English only).
   cust <- ivt_f2_geo_custom(raw, n_geo)
   if (!is.null(cust)) return(cust)
-  # 4. the Canadian Business Patterns lineage: a chunked codebook of bare numeric
-  #    GEOUIDs (8-digit DA codes), no DGUID shape and no GEO_NAME schema.
-  bare <- ivt_f2_geo_bare_codes(raw, n_geo)
-  if (!is.null(bare)) return(bare)
+  # 4. the Canadian Business Patterns lineage (enc == "bare"): a chunked codebook of
+  #    bare numeric GEOUIDs (8-digit DA codes), no DGUID shape and no field dictionary.
+  if (enc == "bare") {
+    bare <- ivt_f2_geo_bare_codes(raw, n_geo)
+    if (!is.null(bare)) return(bare)
+  }
   # 5. chunked DGUID tables (0023/0129/0013/...): the uid-only read is the primary
   #    for these (their names come from the read_ivt(geo_attributes = TRUE) path).
   #    A COMPLETE uid array is the expected outcome here, so it wins.
