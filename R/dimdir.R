@@ -231,9 +231,14 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   # the historical `list(en, fr, name_fr)` the label consumers expect.
   m <- ivt_f2_dim_members_from_dir(raw, dim, dir, include_notes = FALSE)
   if (is.null(m) || is.null(m[["label_en"]])) return(NULL)
+  # the per-member `_Description` prose (the indicator definition on the facet /
+  # quantity dimension of the 02-gen survey tables); NULL on dimensions that carry none.
+  desc <- ivt_f2_dim_prose_texts(raw, dir, as.integer(dim$count))
   list(en = m[["label_en"]],
        fr = m[["label_fr"]],                         # NULL when the column is absent
-       name_fr = attr(m, "name_fr", exact = TRUE))
+       name_fr = attr(m, "name_fr", exact = TRUE),
+       desc_en = if (!is.null(desc)) desc$en else NULL,
+       desc_fr = if (!is.null(desc)) desc$fr else NULL)
 }
 
 # Walk a dimension slot directory's entries for candidate member arrays of
@@ -519,8 +524,14 @@ ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   # table -- where this never fires, dimension 1 having matched above -- is
   # untouched.
   dim_name <- function(x) { nm <- x$name; if (is.null(nm) || is.na(nm)) "" else nm }
+  # The pre-DGUID `02 00 20 00` survey products (Health Statistics 1999,
+  # Census of Agriculture 1996, Small Area Business 1996) name their geographic
+  # dimension explicitly ("REGION", "Provinces", "Geography") but carry no UID /
+  # GEO_NAME schema and no inline pattern, so no dimension matches a geography
+  # SIGNATURE -- the header name is the only geography evidence the file gives.
   geo_named <- which(vapply(d$dims, function(x)
-    grepl("^\\s*(geograph|géograph)", dim_name(x), ignore.case = TRUE), logical(1)))
+    grepl("^\\s*(geograph|géograph|region|région|province)",
+          dim_name(x), ignore.case = TRUE), logical(1)))
   # only OVERRIDE the dimension-1 default (and warn) when the header names a
   # NON-first dimension "Geography" -- when dimension 1 itself is so named, the
   # default already returns it, so this stays silent and changes nothing.

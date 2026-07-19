@@ -37,9 +37,13 @@ member-ordinal; equals \code{member_id} when the file stores no ordinal block),
 \code{label} (the stored label, untrimmed), \code{level} (the label as it appears in
 the tidy output), \code{level_fr} (the French label, \code{NA} when the file carries
 none for that column), \code{depth} (hierarchy depth implied by the label
-indentation) and \code{parent_id} (the \code{member_id} of this member's parent in
+indentation), \code{parent_id} (the \code{member_id} of this member's parent in
 that hierarchy -- the nearest preceding member at a shallower depth, \code{NA}
-for top-level members).
+for top-level members), and \code{description}/\code{description_fr} (the member's
+\verb{_Description} prose -- the indicator definition carried by the facet /
+quantity dimension of the older survey tables, e.g. a total fertility rate's
+"... the number of children born per 1,000 women ...", which states the
+value's units; \code{NA} for the many dimensions/tables that carry none).
 }
 \description{
 Returns one row per (column, member) for every labelled column that

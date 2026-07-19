@@ -204,6 +204,40 @@ ivt_f2_codebook_dim_markers <- function(raw, search_start) {
   data.frame(offset = off, name = nm, stringsAsFactors = FALSE)
 }
 
+# The FRENCH dimension name from the codebook doubled-name marker, given the English
+# name. `ivt_f2_total_name()` recovers `name_fr` from a "Total - <name>" first member
+# (census dimensions), but the FACET / quantity dimensions of the `02 00 20 00` survey
+# tables have no such member -- their French name lives only in the `81 02 02 00`
+# doubled-name marker, stored as a combined "<EN><FR>" run right after the English copy
+# ("QuantifierQuantificateur"). Strip the known English prefix to recover the French.
+# Guarded so the modern doubled-EN markers ("SexSex") are rejected (`fr == en`): this
+# only supplies a name_fr that DIFFERS from the English, so it never corrupts a
+# correctly-doubled name and only fills what `ivt_f2_total_name()` left NA.
+ivt_f2_dim_name_fr_marker <- function(raw, en_name) {
+  if (is.null(en_name) || is.na(en_name) || nchar(en_name) < 3L) return(NA_character_)
+  v <- as.integer(raw); n <- length(v)
+  if (n < 8L) return(NA_character_)
+  hits <- which(v[seq_len(n - 3L)] == 0x81L & v[2:(n - 2L)] == 0x02L &
+                v[3:(n - 1L)] == 0x02L & v[4:n] == 0x00L)
+  for (m in hits) {
+    seg <- raw[(m + 4L):min(n, m + 200L)]
+    b <- as.integer(seg)
+    pr <- (b >= 32L & b <= 126L) | (b >= 160L)     # latin-1 printable (incl. accents)
+    r <- rle(pr); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
+    for (k in which(r$values)) {
+      if (r$lengths[k] < nchar(en_name) + 3L) next
+      run <- sub("^[^[:alpha:]]*", "",             # drop a leading digit/separator
+                 raw_to_latin1(seg[starts[k]:ends[k]]))
+      if (startsWith(run, en_name)) {
+        fr <- trimws(substr(run, nchar(en_name) + 1L, nchar(run)))
+        if (nchar(fr) >= 3L && fr != en_name && grepl("^[[:alpha:]]", fr) &&
+            !grepl("[0-9]", fr)) return(fr)
+      }
+    }
+  }
+  NA_character_
+}
+
 # Match a codebook marker name to one of `dims` (descriptor records). The marker
 # and the descriptor draw the name from the same doubled-name field, but one may be
 # truncated harder than the other, so match when the shorter is a prefix of the
@@ -3117,10 +3151,19 @@ ivt_f2_descriptor_impl <- function(raw) {
   # the 0x01. The name may start with an uppercase letter OR a digit ("1995
   # Household Income (3)" in the 1996 table 95F0250XDB96001 -- the
   # uppercase-only anchor silently dropped that dimension).
-  walk_records <- function(v, Lend, cap, lenient = FALSE) {
+  walk_records <- function(v, Lend, cap, lenient = FALSE, max_gap = Inf) {
     dims <- list()
     k <- 4L
+    last_end <- NA_integer_                 # end (+1) of the last accepted record
     while (k <= Lend - 1L && length(dims) < cap) {
+      # CONTIGUITY break (used when the record region is not delimited by a title
+      # -- the `02 00 20 00` survey generation): genuine dimension records sit
+      # back-to-back (the next `[count][type][01]<name>` framing opens within a
+      # few bytes of the previous name's end), whereas the block directory / value
+      # data that follows them is a large gap away. Once at least one record is in
+      # hand, a run of more than `max_gap` bytes with no further record ends the
+      # walk before it can mine the codebook member labels for stray matches.
+      if (is.finite(max_gap) && !is.na(last_end) && k > last_end + max_gap) break
       c1 <- v[k + 1L]
       # the standard walk anchors an UPPERCASE- or DIGIT-led name after the 0x01;
       # the accept-all pass also admits a lowercase-led name (the 2016 custom
@@ -3202,7 +3245,7 @@ ivt_f2_descriptor_impl <- function(raw) {
           dims[[length(dims) + 1L]] <- list(name = nm,
                                             count = count, type = type,
                                             double01 = double01)
-          k <- e; next
+          last_end <- e; k <- e; next
         }
        }
       }
@@ -3218,7 +3261,26 @@ ivt_f2_descriptor_impl <- function(raw) {
   # bound the search there so stray 0x01 bytes in later binary do not match.
   txt <- intToUtf8(ifelse(v >= 32L & v <= 126L, v, 46L))
   facet <- regexpr("FACET04", txt)
-  Lend <- if (facet > 0) facet - 1L else length(v)
+  Lend <- if (facet > 0) facet - 1L else {
+    # The older `02 00 20 00` container generation (Health Statistics 1999,
+    # Census of Agriculture 1996, Small Area Business 1996) carries no "FACET04"
+    # title to bound the records. Its dimension records sit contiguously between
+    # the descriptor header and the first VALUE BLOCK (they always precede the
+    # value data and the codebook, which the accept-all pass would otherwise mine
+    # for stray printable member labels). The page directory (@558) locates that
+    # first value block, so bound the walk there. Falls back to the whole window
+    # when the page directory does not resolve, preserving prior behaviour for any
+    # other FACET04-less supported file.
+    vb <- tryCatch({
+      a <- ivt_f2_dir_anchor_header(raw)
+      if (is.null(a)) NA_integer_ else rd_u32(raw, a)
+    }, error = function(e) NA_integer_)
+    if (!is.na(vb) && vb > D + 32L && vb <= n) min(vb - D, length(v)) else length(v)
+  }
+  # the contiguity gap only bounds the accept-all pass on the title-less 02-gen
+  # (FACET04-delimited files need no gap; the non-lenient pass legitimately skips
+  # ambiguous records, so it is never gap-bounded).
+  rec_gap <- if (facet > 0) Inf else 8L
   dims <- walk_records(v, Lend, ndim)
 
   # INVERTED layout (97-570-X1981002, 98-400-X2016019): the dimension records
@@ -3265,7 +3327,8 @@ ivt_f2_descriptor_impl <- function(raw) {
     if (lead >= 2L) ndim_auth <- lead
   }
   if (length(dims) < ndim_auth && ndim_auth >= 2L && ndim_auth <= 32L) {
-    lung <- walk_records(v, Lend, min(32L, ndim_auth + 4L), lenient = TRUE)
+    lung <- walk_records(v, Lend, min(32L, ndim_auth + 4L), lenient = TRUE,
+                         max_gap = rec_gap)
     if (length(lung) == ndim_auth) {
       ivt_fallback(sprintf(paste(
         "Descriptor: only %d of %d dimensions matched the standard doubled-name",

@@ -196,11 +196,22 @@ ivt_f2_dimensions <- function(raw) {
     # only, so these are NULL/NA on a dimension the directories miss.
     members_fr <- if (is_geo) NULL else dl$fr
     name_fr <- if (is_geo || is.null(dl)) NA_character_ else dl$name_fr
+    # `ivt_f2_total_name()` (dl$name_fr) recovers the French dimension name from a
+    # "Total - <name>" member; the facet/quantity dimensions of the 02-gen survey
+    # tables have no such member, so fall back to the doubled-name marker's combined
+    # "<EN><FR>" run (e.g. "Quantifier"/"Quantificateur").
+    if (!is_geo && (is.null(name_fr) || is.na(name_fr)))
+      name_fr <- ivt_f2_dim_name_fr_marker(raw, dim$name)
     ordinal <- if (!is_geo && !is.null(dirord) && length(dirord) >= i)
       dirord[[i]] else NULL
+    # per-member `_Description` prose (the indicator definition), when the dimension
+    # carries it; NULL/absent otherwise so existing outputs are unchanged.
+    description    <- if (is_geo || is.null(dl)) NULL else dl$desc_en
+    description_fr <- if (is_geo || is.null(dl)) NULL else dl$desc_fr
     list(name = ivt_f2_dim_name(dim, is_geo, vl), name_fr = name_fr,
          count = dim$count, type = dim$type, is_geography = is_geo,
-         members = members, members_fr = members_fr, ordinal = ordinal)
+         members = members, members_fr = members_fr, ordinal = ordinal,
+         description = description, description_fr = description_fr)
   })
 }
 
@@ -260,8 +271,17 @@ ivt_f2_master_identity <- function(raw) {
     t <- raw_to_latin1(raw[(off + 5L):(off + 4L + tl)])
     p <- trimws(strsplit(t, "\r\n", fixed = TRUE)[[1]])
     p <- p[nzchar(p)]
-    if (length(p) < 2L || nchar(p[1]) > 40L) next  # "<product id>" then "<title>"
-    cand[[length(cand) + 1L]] <- p
+    if (length(p) < 2L) next
+    # Two shapes: the 1981 profile blob is a bare "<product_id>\r\n<title>" (short
+    # first line = the id); the `02 00 20 00` survey blob is LABELLED
+    # "Title:\r\n<title>\r\nSource:\r\n<source>" -- the "Title:"/"Titre:" line is a
+    # label, NOT a product id (there is none), so drop it and keep the next line as
+    # the title.
+    if (grepl("^(Title|Titre)\\s*:?$", p[1L], ignore.case = TRUE)) {
+      cand[[length(cand) + 1L]] <- c(NA_character_, p[2L])
+    } else if (nchar(p[1L]) <= 40L) {
+      cand[[length(cand) + 1L]] <- c(p[1L], p[2L])
+    }
   }
   if (!length(cand)) return(NULL)
   sc <- vapply(cand, function(p) ivt_f2_frscore(p[2]), 0)
@@ -426,10 +446,19 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   # (`ivt_f2_geo_light()`), since the pre-DGUID inline geography codebook also occurs
   # in modern-export files (e.g. the 2006/2011 census tables).
   inline <- ivt_f2_geo_is_inline(raw)
-  info <- if (inline) ivt_f2_legacy_identity(raw) else ivt_table_info(raw)
+  # The older `02 00 20 00` survey generation carries no reliable inline identity
+  # text (its `ivt_header_text()` scan hits binary and `ivt_table_info()` returns
+  # garbage); identity lives ONLY in the master-directory "Title:" blob, resolved
+  # in the fallback below. Skip the inline readers for it.
+  gen02 <- length(raw) >= 1L && as.integer(raw[1L]) == 2L
+  info <- if (gen02) list(product_id = NA_character_, title_en = NA_character_,
+                          title_fr = NA_character_, universe = NA_character_)
+          else if (inline) ivt_f2_legacy_identity(raw) else ivt_table_info(raw)
   if (is.na(info$product_id) && is.na(info$title_en)) {
-    # the 1981 profile vintage: no inline identity text and zeroed @40/@48 title
-    # pointers -- the identity blobs are master-directory entries instead
+    # the 1981 profile vintage AND the 02-gen survey files store identity as
+    # master-directory text blobs; `ivt_f2_master_identity()` handles both the
+    # bare "<product_id>\r\n<title>" (1981) and the labelled
+    # "Title:\r\n<title>\r\nSource:\r\n<source>" (02-gen) shapes.
     mi <- ivt_f2_master_identity(raw)
     if (!is.null(mi)) info <- mi
   }

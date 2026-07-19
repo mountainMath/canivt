@@ -198,6 +198,54 @@ ivt_f2_dim_member_notes <- function(raw, dir, cnt) {
   list(en = en, fr = fr)
 }
 
+# Per-member DESCRIPTION prose -- the `_Description` field of the dimension's field
+# dictionary, as stored by the older `02 00 20 00` survey tables: a FULL-LENGTH text
+# block rather than the modern `84 01`-bitmap member note. Each block reuses the
+# plain-array header `[01 01][u16 len-4][01]` but its payload is a single latin1 prose
+# string (the indicator definition, e.g. the TFR's "... the number of children born
+# per 1,000 women during their reproductive period."), often NUL-padded to the block
+# length. Told from a member LABEL block (`[01 01][u16][01][00][strlen]<text>`) by its
+# first payload byte being printable text -- not the `0x00` of the label's nested
+# Pascal length -- and required to be prose (>= 20 chars with whitespace). EN vs FR by
+# content score; each language's blocks map to members in directory (member) order.
+# Returns list(en, fr), each length `cnt` (NA where absent), or NULL.
+ivt_f2_dim_prose_texts <- function(raw, dir, cnt) {
+  n <- length(raw); texts <- character(0)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 16L || off < 0L || off + len > n) next
+    if (raw[off + 1L] != as.raw(0x01L) || raw[off + 2L] != as.raw(0x01L)) next
+    if (isTRUE(rd_u16(raw, off + 2L) != len - 4L)) next   # plain-array payload len
+    if (raw[off + 5L] != as.raw(0x01L)) next              # single-record marker
+    if (as.integer(raw[off + 6L]) < 32L) next             # a LABEL's 0x00 Pascal length
+    payload <- raw[(off + 6L):(off + len)]
+    z <- which(payload == as.raw(0x00L))                  # stop at trailing NUL padding
+    if (length(z)) payload <- payload[seq_len(z[1L] - 1L)]
+    txt <- trimws(raw_to_latin1(payload))
+    # FOOTNOTE prose ("Footnote N ..." / "Renvoi N ...") is excluded -- those are the
+    # member footnotes, already surfaced as scoped footnote records.
+    if (nchar(txt) >= 20L && grepl("[[:space:]]", txt) &&
+        !grepl("^(Footnote|Renvoi|FOOTNOTE|RENVOI)\\b", txt))
+      texts <- c(texts, txt)
+  }
+  if (!length(texts)) return(NULL)
+  sc <- vapply(texts, ivt_f2_frscore, 0)
+  # POSITIONAL member mapping, but only when unambiguous: member 1 for a singleton
+  # dimension (the facet/quantity indicator's definition, the common case) or exactly
+  # one text per member (dense). A sparser multi-member set carries no in-block member
+  # index, so it is dropped rather than mis-aligned onto the wrong member.
+  map1 <- function(v) {
+    if (!length(v)) return(rep(NA_character_, cnt))
+    if (cnt == 1L) return(v[1L])
+    if (length(v) == cnt) return(v)
+    NULL
+  }
+  en <- map1(texts[sc <= 0]); fr <- map1(texts[sc > 0])
+  if (is.null(en) || is.null(fr)) return(NULL)
+  if (all(is.na(en)) && all(is.na(fr))) return(NULL)
+  list(en = en, fr = fr)
+}
+
 # The clean member-value runs of one dimension (length exactly `cnt`), in storage
 # order, from the rows after its doubled-name marker (or the whole directory when the
 # marker did not resolve). Chunked (>256-member) dimensions reuse the geography/label

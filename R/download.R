@@ -72,8 +72,11 @@ ivt_store_download <- function(tmp, dest_dir, out_name) {
     if (!length(ivt)) cli::cli_abort("No .ivt file found in the downloaded archive.")
     return(ivt[1])
   }
-  if (!identical(as.integer(sig), c(4L, 0L, 32L, 0L))) {
-    cli::cli_warn("Downloaded payload lacks the IVT {.val 04 00 20 00} signature.")
+  # byte 0 is the container-generation tag (0x04 modern, 0x02 older survey);
+  # the trailing three bytes `00 20 00` are shared across both generations.
+  if (!identical(as.integer(sig)[2:4], c(0L, 32L, 0L)) ||
+      !as.integer(sig)[1L] %in% c(2L, 4L)) {
+    cli::cli_warn("Downloaded payload lacks the IVT {.val 00 20 00} signature.")
   }
   out <- file.path(dest_dir, out_name)
   file.copy(tmp, out, overwrite = TRUE)

@@ -94,8 +94,10 @@ for (i in seq_len(nrow(mk_ledger))) {
     rm(raw); gc(verbose = FALSE)
     # every marker this file exercises must be in the catalog
     expect_identical(ivt_marker_violations(obs), character(0))
-    # the file signature is always the IVT one for a corpus table
-    expect_identical(obs$file_sig, IVT_MARKER_SET$file_sig)
+    # the file signature is always an IVT one for a corpus table: shared tail
+    # `00 20 00`, byte 0 the generation tag (0x04 modern, 0x02 older survey)
+    expect_identical(obs$file_sig[2:4], IVT_MARKER_SET$file_sig_tail)
+    expect_true(obs$file_sig[1L] %in% IVT_MARKER_SET$file_sig_b0)
     # a supported table's descriptor signature byte (when it HAS a descriptor block)
     # must be catalogued. The no-descriptor-block survey lineage (LFHR / criminal
     # justice, `ivt_f2_descriptor_from_slots()`) has no signature at all, so

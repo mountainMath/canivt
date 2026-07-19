@@ -33,9 +33,13 @@
 #'   `label` (the stored label, untrimmed), `level` (the label as it appears in
 #'   the tidy output), `level_fr` (the French label, `NA` when the file carries
 #'   none for that column), `depth` (hierarchy depth implied by the label
-#'   indentation) and `parent_id` (the `member_id` of this member's parent in
+#'   indentation), `parent_id` (the `member_id` of this member's parent in
 #'   that hierarchy -- the nearest preceding member at a shallower depth, `NA`
-#'   for top-level members).
+#'   for top-level members), and `description`/`description_fr` (the member's
+#'   `_Description` prose -- the indicator definition carried by the facet /
+#'   quantity dimension of the older survey tables, e.g. a total fertility rate's
+#'   "... the number of children born per 1,000 women ...", which states the
+#'   value's units; `NA` for the many dimensions/tables that carry none).
 #' @seealso [collect_ivt()]
 #' @examples
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")
@@ -60,6 +64,13 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
     if (is.null(fr) || length(fr) != length(v)) rep(NA_character_, length(v))
     else fix(fr)
   }
+  # per-member description text (the `_Description` indicator definition), aligned to
+  # `v`; NA when the dimension carries none (so most columns/tables get an all-NA
+  # column that leaves existing outputs unchanged)
+  desc_col <- function(v, desc) {
+    if (is.null(desc) || length(desc) != length(v)) rep(NA_character_, length(v))
+    else desc
+  }
   for (j in seq_along(datacols)) {
     if (j > length(data_dims)) break
     d <- data_dims[[j]]
@@ -74,7 +85,9 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
       label = d$members, level = fix(d$members),
       level_fr = fr_level(d$members, d$members_fr),
       depth = ivt_label_depth(d$members),
-      parent_id = ivt_label_parent(d$members))
+      parent_id = ivt_label_parent(d$members),
+      description = desc_col(d$members, d$description),
+      description_fr = desc_col(d$members, d$description_fr))
   }
   # geography columns, as ivt_tidy emits them (uids are never trimmed there)
   geo <- meta$geographies
@@ -88,13 +101,16 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
       label = v, level = if (col == "geo_uid") v else fix(v),
       level_fr = if (col %in% names(geo_fr)) fr_level(v, geo[[geo_fr[[col]]]])
                  else rep(NA_character_, length(v)),
-      depth = ivt_label_depth(v), parent_id = ivt_label_parent(v))
+      depth = ivt_label_depth(v), parent_id = ivt_label_parent(v),
+      description = rep(NA_character_, length(v)),
+      description_fr = rep(NA_character_, length(v)))
   }
   if (!length(out)) return(tibble::tibble(
     column = character(0), dimension = character(0), dimension_fr = character(0),
     member_id = integer(0), ordinal = integer(0), label = character(0),
     level = character(0), level_fr = character(0), depth = integer(0),
-    parent_id = integer(0)))
+    parent_id = integer(0), description = character(0),
+    description_fr = character(0)))
   do.call(rbind, out)
 }
 

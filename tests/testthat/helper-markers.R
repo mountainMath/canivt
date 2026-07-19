@@ -13,7 +13,10 @@
 
 # The documented byte sets (§C/§D/§E/§F/§A of markers.md).
 IVT_MARKER_SET <- list(
-  file_sig          = c(0x04L, 0x00L, 0x20L, 0x00L),
+  # byte 0 is a container-generation tag (0x04 modern census/custom, 0x02 the
+  # older split-definition survey products); the trailing three bytes are shared.
+  file_sig_b0       = c(0x02L, 0x04L),
+  file_sig_tail     = c(0x00L, 0x20L, 0x00L),
   page_b0           = c(0x82L, 0x84L, 0x88L, 0xa2L, 0xa4L, 0xa8L),  # plain + mask
   page_b0_dense     = c(0x02L, 0x04L, 0x08L),                       # high nibble 0
   page_b3           = c(0x08L, 0x09L, 0x0aL, 0x0cL),
@@ -122,7 +125,8 @@ ivt_marker_violations <- function(obs) {
   add <- function(what, bad)
     if (length(bad)) v <<- c(v, sprintf("%s: %s", what,
       paste(sprintf("0x%02x", bad), collapse = " ")))
-  if (!identical(obs$file_sig, IVT_MARKER_SET$file_sig))
+  if (!identical(obs$file_sig[2:4], IVT_MARKER_SET$file_sig_tail) ||
+      !obs$file_sig[1L] %in% IVT_MARKER_SET$file_sig_b0)
     v <- c(v, paste("file signature:", paste(sprintf("0x%02x", obs$file_sig), collapse = " ")))
   add("page b0",  setdiff(obs$page_b0[obs$page_b0 >= 0x80L], IVT_MARKER_SET$page_b0))
   add("dense b0", setdiff(obs$page_b0[obs$page_b0 < 0x80L], IVT_MARKER_SET$page_b0_dense))

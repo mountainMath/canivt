@@ -4,7 +4,14 @@
 # 2 (single contiguous directory, e.g. 98-10-0023), or NA when unrecognised.
 ivt_family <- function(raw) {
   if (length(raw) < 8L) return(NA_integer_)
-  if (!identical(as.integer(raw[1:4]), c(4L, 0L, 32L, 0L))) return(NA_integer_)
+  # Byte 0 is a container-generation tag: `04` is the modern census/custom
+  # lineage, `02` the older survey products (Health Statistics 1999, Census of
+  # Agriculture 1996, Small Area Business 1996) -- same header field layout and
+  # page/value model, a different descriptor bounding (no FACET04) handled in
+  # `ivt_f2_descriptor()`. The three trailing signature bytes (`00 20 00`) are
+  # shared; `ivt_f2_decodable()` still gates alien files.
+  if (!identical(as.integer(raw[2:4]), c(0L, 32L, 0L)) ||
+      !as.integer(raw[1L]) %in% c(2L, 4L)) return(NA_integer_)
   # The cell decode is unified (see decode.R); `family` now only selects the
   # metadata path. The two differ in *which dimension straddles* the 2048-bit page
   # boundary: when the data dimensions alone overflow it a data dimension

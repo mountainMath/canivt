@@ -182,6 +182,55 @@ tables, and viewer/CSV-validated on the wider corpus:
   decoded column (geographies.csv) + `dqf_legend.csv`. Corpus-validated:
   geo_uid order byte-identical on all 26 supported tables; old `geo_name` ==
   new `geo_label` everywhere.
+- **Health Statistics 1999 `00060104`** — first of the older **`02 00 20 00`
+  split-definition survey generation** (2026-07-19). Container byte 0 is `02`,
+  not `04`; everything downstream is the same model — descriptor at the standard
+  `81 01 20 00 f0 … 80 03` signature (via the master-dir scan), page directory
+  `[u32 off][u16 len][u16 len]` at `@558`, pages `marker(4) + 256-byte presence +
+  sparse values` with the same width nibble. Three adaptations: `ivt_family()`
+  accepts byte 0 ∈ {2,4}; the descriptor walk has no `FACET04` title, so it is
+  bounded at the nested `81 01 <u16 len>` FACET01 block at `D+16` (recovering the
+  `REGION` geography, a name+display record the doubled-name splitter drops);
+  geography carries no UID/GEO_NAME schema and is identified by the header name
+  (the geo-name fallback now also matches `region`/`province`). Result
+  `Quantifier(1) × Geography(13 = Canada + provinces + territories) ×
+  Period(37 = 1961–1997)` = **451 cells**, bilingual province names, the int16
+  block decoding Canada's real total-fertility-rate series `3.84 → 1.55`.
+  **The "scaling" question is CLOSED — there is no integer scaling.** The values
+  are complete integers in the indicator's own units, which the facet member's
+  `_Description` states: the TFR reads *"the number of children born per 1,000 women
+  during their reproductive period"*, so `3840` is literally 3840 per 1,000 women
+  (= 3.84 per woman), a genuine value — not a fixed-point that needs dividing. That
+  is why no decimals byte exists (searched exhaustively: `b2` is only the width/
+  trailer; the dec-"3"/dec-"0" facet codebooks are byte-identical). No scale warning
+  is emitted; the raw integers are correct. Siblings `EDDTAB39` (Agriculture,
+  float64) and `EMPLOY1` (Small Area Business, int32) share the generation but
+  arrange descriptors differently — next onboarding step.
+- **Health at a Glance line generalised** (2026-07-19): sampling 20 more files from
+  the GPVU3L dataset showed the single-file title-block bound was too tight for the
+  multi-dimension tables (records spill past the FACET01 title). Two metadata-driven
+  rules make the descriptor walk uniform for the whole title-less generation: bound the
+  record region at the **first value block** (the page directory's first entry, always
+  after the records and before the codebook), and add a **contiguity break** to the
+  accept-all pass (records sit back-to-back; a >8-byte gap after the last one ends the
+  walk before it mines codebook member labels). **10 of 21 sampled Health files now
+  decode** (3–7 dims, int16/int32/float64, geography at descriptor position 2–6,
+  multi-facet `Quantifier(2)` tables); ledger rows `SP3_GPVU3L_00060108` (3630,
+  abortions+births, Canada = Σprovinces + territories) and `_00060208` (301, Pap-smear
+  counts) added. The wider sample also CLOSED the scale question: the page `b2` byte is
+  the value width/trailer (NOT decimals — `00060104` and `00060108` are both int16
+  `b2 = 0x80`) and the facet codebooks diff to nothing but member-count bytes — because
+  there is **no integer scaling at all**. The values are complete integers in the
+  indicator's own units (the TFR `_Description`: "children born per 1,000 women"), so
+  `3840` is a genuine value, not a fixed-point. No scale warning is emitted. Also fixed
+  two identity gaps on this generation: `product_id` (the "Title:/Source:" inline block
+  is now read by `ivt_table_info()` in the fallback, so the "Title:" LABEL is no longer
+  mistaken for the id, and the FR title is recovered) and the French dimension name
+  (`ivt_f2_dim_name_fr_marker()` strips the English prefix off the doubled-name marker's
+  "<EN><FR>" run — "Quantifier"→"Quantificateur", "Period"→"Périodes" — guarded `fr!=en`
+  so modern doubled-EN markers are untouched). Remaining un-decoded Health variants: a
+  `04`-separator time dimension (`00060101`/`00060102`) and large-count time dims failing
+  the page pre-flight (`ANNUAL(120)`).
 
 ## Completed work log
 

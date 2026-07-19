@@ -23,11 +23,13 @@ All offsets are **0-based** (binary layout). Byte strings are big-endian written
 
 | bytes | meaning | recognizer |
 |-------|---------|-----------|
-| `04 00 20 00` | THE IVT file signature — every supported file (modern, legacy, profile, custom, Business Patterns) | `read.R` / `ivt_store_download()` |
-| `02 00 20 00` | a **different** container family (e.g. Health Statistics 1999) — **not decodable**, rejected before decode | `ivt_is_supported()` returns FALSE |
+| `04 00 20 00` | THE modern IVT file signature — census/custom lineages (modern, legacy, profile, custom, Business Patterns) | `read.R` / `ivt_store_download()` |
+| `02 00 20 00` | the older **survey** generation (Health Statistics 1999, Census of Agriculture 1996, Small Area Business 1996) — same header/page/value model, no `FACET04` title; integer facet values are complete (in the indicator's own units, stated in the member `_Description`), NOT fixed-point | `ivt_family()` accepts byte 0 ∈ {2,4} |
 
-The signature alone does not imply decodability: same-signature containers that
-fail the page pre-flight (`ivt_page_preflight()`) are still rejected.
+Byte 0 is a container-generation tag (`04` modern, `02` older survey); the three
+trailing bytes `00 20 00` are shared. The signature alone does not imply
+decodability: same-signature containers that fail the page pre-flight
+(`ivt_page_preflight()`) are still rejected.
 
 ## B. Header pointer slots (fixed offsets, not byte markers)
 

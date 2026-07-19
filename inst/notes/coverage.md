@@ -990,9 +990,66 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   machinery (gated on a UID-less field dictionary + a clean `n_geo` label read; loud
   `canivt_geo_datadim`). Result: `Year(1) × Geography(1="Selected Police Services") ×
   Offence(30)` = **30 cells**, bilingual geography + all 30 motivation-category labels,
-  `strict_clean = FALSE`. The `02 00 20 00`-signature Borealis products (Health
-  Statistics, Census of Agriculture, Small Area Business) are a distinct earlier
-  generation, still open.
+  `strict_clean = FALSE`.
+- [x] **`02 00 20 00` split-definition survey generation — Health Statistics 1999
+  (`00060104`) DECODED, SUPPORTED** (2026-07-19; `SP3_GPVU3L_00060104,TRUE,FALSE,451`).
+  The first onboarded file of the older Beyond 20/20 generation whose container byte 0
+  is `02`, not `04`. Everything downstream of the header is the **same model**: the
+  descriptor sits at the standard `81 01 20 00 f0 … 80 03` signature (resolved via the
+  master-directory scan), the page directory is the usual `[u32 off][u16 len][u16 len]`
+  at `@558`, and the pages are the modern `marker(4) + 256-byte presence + sparse
+  values` model with the same width nibble (`2/4/8` = int16/int32/float64). Three small
+  adaptations: (a) `ivt_family()` accepts byte 0 ∈ {2,4}; (b) the descriptor walk has
+  no `FACET04` title to bound the records, so `ivt_f2_descriptor()` bounds them at the
+  nested `81 01 <u16 len>` FACET01 title block at `D+16` (else the accept-all pass
+  wanders into the codebook member blocks) — this recovers the geography record
+  `REGION` (a name+display record the doubled-name splitter drops); (c) the geography
+  dimension carries no UID / GEO_NAME schema, so it is identified by the header
+  dimension name (the geo-name fallback now also matches `region`/`province`, loud
+  `canivt_geo_by_name`). Result: `Quantifier(1="Total fertility rate") ×
+  Geography(13 = Canada + provinces + territories) × Period(37 = 1961–1997)` = **451
+  non-zero cells**, bilingual province names EN+FR, year labels; the int16 value block
+  decodes Canada's real total-fertility-rate series (`3.84 → 1.55`).
+  **Generalised across the Health at a Glance line** (2026-07-19): sampling 20 more
+  files from the same dataset showed the single-`00060104` bound (the nested FACET01
+  title block) was too tight for the multi-dimension tables — their records spill past
+  the title block. Replaced it with two metadata-driven rules that make the walk
+  uniform: bound the record region at the **first value block** (the page directory's
+  first entry — records always precede the value data and codebook), and add a
+  **contiguity break** to the accept-all pass (genuine records sit back-to-back; once
+  one is in hand, a >8-byte gap with no further record ends the walk before it can mine
+  codebook member labels). With these, **10 of 21 sampled Health files decode** (3–7
+  dimensions, int16/int32/float64, geography at descriptor position 2–6, and
+  multi-facet `Quantifier(2)` tables) — up from 1. `00060108` (therapeutic abortions +
+  births, geography at dim 3) is internal-consistency-validated (Canada = Σprovinces +
+  territories). The `02` container is **not** limited to these 3 datasets by vintage
+  alone: Income Trends 1976-2006 and Census of Agriculture 2001 are byte-0 `04`, so the
+  `02` generation is specifically the **late-1990s survey products** (Health at a
+  Glance 1999, Census of Agriculture 1996, Small Area Business 1996).
+  **RESOLVED — there is NO integer scaling; the values are complete.** The apparent
+  "scaling" was a misreading. The `.ivt` stores each facet's values as complete integers
+  in the **indicator's own units**, and those units are stated in the facet member's
+  `_Description`. For the TFR, the description reads: *"This indicator shows the number of
+  children born **per 1,000 women** during their reproductive period."* — so the stored
+  `3840` is literally *3840 children per 1,000 women* (= 3.84 per woman): a genuine,
+  complete value, not a fixed-point that needs dividing. This is why no decimals byte was
+  ever found (there is none), why the `b2` byte only tracks the value width/trailer, and
+  why the dec-"3" vs dec-"0" facet codebooks are byte-identical — the difference was
+  never encoded because there is no decimal scaling. `read_ivt()` returns the raw
+  integers as the correct values; **no scale warning** is emitted. The unit statement
+  lives in the facet member's `_Description`, which `ivt_members()` now SURFACES as
+  `description`/`description_fr` (`ivt_f2_dim_prose_texts()` reads the full-length
+  `[01 01][u16 len][01]<prose>` block, NUL-padding trimmed, footnote-prefixed notes
+  excluded, mapped positionally only when unambiguous — a singleton facet or a dense
+  one-per-member set; `NA` for the many dimensions/tables carrying none, so modern files
+  and existing Parquet are unchanged). **Remaining un-decoded Health variants** (future work): a time
+  dimension framed with a `04` separator instead of `01` (`00060101`/`00060102`,
+  "Standard Dimension"/"ANNUAL" statistical tables), and large-count time dimensions
+  (`ANNUAL(120)`) that pass the descriptor but fail the page pre-flight.
+  The two siblings (Census of Agriculture 1996
+  `EDDTAB39`, float64; Small Area Business 1996 `EMPLOY1`, int32) share the generation
+  but arrange their descriptors differently (inverted / nested codebooks) and are the
+  next onboarding step.
 - [x] **No-descriptor-block survey lineage — LFHR `Table-051` + criminal-justice
   `h2530002` DECODED, SUPPORTED** (2026-07-19). The UCR siblings: same `04 00 20 00`
   header but **no dimension-descriptor block at all** — no `81 01 20 00 f0` signature,
@@ -1445,9 +1502,12 @@ up to 2001 (a known `canivt_descriptor_lenient` fallback -> `strict_clean =
 FALSE`; its `product_id`/`title` decode NA, a minor identity gap).
 
 Not yet decodable -- the frontier the Borealis catalogue surfaces (2026-07-18):
-whole non-census lineages remain unsupported, notably the **`02 00 20 00`
-container family** (Health Statistics at a Glance 1999 -- a different first
-signature byte, rejected before decode), the **2006 Profile Series**
+whole non-census lineages remain unsupported, notably the rest of the
+**`02 00 20 00` split-definition survey generation** (Census of Agriculture 1996
+`EDDTAB39` + Small Area Business 1996 `EMPLOY1` -- the Health Statistics 1999
+sibling `00060104` is now SUPPORTED, see above; these two share the container but
+arrange their descriptors differently and still need onboarding), the **2006
+Profile Series**
 (94-575-/94-576-XCB2006*, valid `04`-family + 3-dim descriptor but
 pre-flight-rejected), the **Labour Force Historical Review** (descriptor does
 not parse), **Uniform Crime Reporting** and the **2016 Census of Agriculture**
