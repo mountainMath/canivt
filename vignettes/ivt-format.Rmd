@@ -17,9 +17,12 @@ knitr::opts_chunk$set(
 This vignette documents the Statistics Canada *Beyond 20/20* `.ivt` binary
 format as reverse-engineered for `canivt`, and shows how the package's functions
 map onto each part of the file. It is aimed at anyone who wants to understand,
-validate, or extend the parser. For day-to-day use see `?read_ivt`. The
-authoritative, more detailed spec ships with the package:
-`system.file("notes/ivt-format.md", package = "canivt")`.
+validate, or extend the parser. For day-to-day use see `?read_ivt`. Two more detailed references ship with the
+package: the authoritative byte-format spec
+`system.file("notes/ivt-format.md", package = "canivt")`, and a terse catalog of
+every byte marker/signature the decoder keys on,
+`system.file("notes/markers.md", package = "canivt")` (self-checked by
+`tests/testthat/test-markers.R`).
 
 ## One layout, one decoder
 
@@ -264,11 +267,20 @@ tab <- read_ivt(ivt_download("98100023"), geo_attributes = TRUE)
 ivt_tidy(tab)
 ```
 
-Footnotes sit near the codebook. In the modern format each is framed and tagged
-by a leading `Footnote N` / `Renvoi N` marker; `canivt` recovers each as a
-maximal run of text bytes beginning with that marker. The legacy format instead
-stores them as `(N) text` lines under a `Footnotes` section header in one notes
-block.
+Footnotes are read **from the header**, not by scanning. Table-level (cube) notes
+come from the master directory; each dimension's notes come from its per-dimension
+slot directory (the `@824 + 14·(k−1)` table above). Within a dimension each note
+carries a **scope** — a *member* note (annotating one geography or data member) or
+a whole-*dimension* note — resolved structurally: a `84 01` member bitmap opens the
+footnote region and lists, in member order, which members carry a note, so each
+note surfaces with its `scope`, owning `dimension` and `member_id`/`member_refs`.
+The text itself is tagged `Footnote N` (EN) / `Renvoi N` (FR); a bounded tail scan
+of those markers survives only as a loud fallback when the slot directories list
+none. (Those same `Renvoi N` texts also appear per-member in the geography
+directory's tail as `[01 01][u16 len-4][01]` text blobs — told apart from member
+arrays by their NUL-free payload so they are not miscounted as attributes; see
+`markers.md` §F.) The legacy pre-DGUID files instead cite notes as `(N)` markers
+embedded in the member labels, linked back to the members that carry them.
 
 ```{r}
 str(meta$footnotes[[1]])
