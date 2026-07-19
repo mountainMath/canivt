@@ -90,8 +90,19 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   mk <- if (named) ivt_f2_dir_marker_entry(raw, nm, dir) else 0L
   # a named dimension whose doubled-name marker does not resolve yields NULL (the
   # caller falls back), exactly as the former label reader did -- the whole-directory
-  # scan is reserved for the (future) nameless-geography case.
-  if (named && (mk == 0L || mk >= nrow(dir))) return(NULL)
+  # scan is reserved for the (future) nameless-geography case. EXCEPTION: when the
+  # marker resolves but is the LAST directory entry, the member arrays precede it --
+  # the older `04 00 20 00` survey tables' singleton reference dimension stores its
+  # one member as a `81 02 01 00` value block BEFORE the name marker (ucr's "Year" ->
+  # "2006"). Recover it directly rather than declaring the dimension unresolved.
+  if (named && mk >= nrow(dir) && mk > 0L) {
+    vb <- ivt_f2_dim_value_block_labels(raw, dir, setdiff(seq_len(nrow(dir)), mk))
+    if (length(vb) == cnt)
+      return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
+                            label_en = vb))
+    return(NULL)
+  }
+  if (named && mk == 0L) return(NULL)
 
   # --- collect the clean member-value runs (length cnt) ---
   runs <- ivt_f2_dim_member_runs(raw, dir, cnt, mk)
@@ -199,10 +210,47 @@ ivt_f2_dim_member_runs <- function(raw, dir, cnt, mk) {
     return(if (is.null(ck)) list() else ck)
   }
   rows <- if (mk > 0L && mk < nrow(dir)) (mk + 1L):nrow(dir) else seq_len(nrow(dir))
-  ivt_f2_dir_member_arrays(
+  runs <- ivt_f2_dir_member_arrays(
     raw, dir, cnt, rows = rows, max_keep = 8L,
     accept = function(t) {
       if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) return(NULL)
       t
     })
+  if (length(runs)) return(runs)
+  # The older `04 00 20 00` survey tables store a singleton reference dimension's
+  # member (ucr2.2_3-2006's "Year" -> "2006") NOT as a `[01 01]` member array but as
+  # per-member `81 02 01 00` VALUE blocks, which the array reader above cannot see.
+  # Recover them positionally: one label per such block, in directory order.
+  vb <- ivt_f2_dim_value_block_labels(raw, dir, rows)
+  if (length(vb) == cnt) list(vb) else list()
+}
+
+# Single member labels stored as `81 02 01 00` VALUE blocks (one per member), told
+# apart from the same-tagged field-NAME / schema block by structure: a value block's
+# trailing `[u8 strlen][latin-1 string]` reaches the block's END exactly, whereas a
+# field-dictionary block ("Code", "Description", ...) carries schema bytes after its
+# name. Returns the labels in directory order (may be empty). Used only as the
+# member-run fallback for dimensions with no `[01 01]`/`[81 01]` member array.
+ivt_f2_dim_value_block_labels <- function(raw, dir, rows) {
+  n <- length(raw); out <- character(0)
+  for (r in rows) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || len > 512L || off + len > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 3L]) != 0x01L) next
+    # the member value occupies the block tail: a [strlen][string] ending at off+len.
+    end <- off + len
+    found <- NA_character_
+    for (p in (off + 5L):(end - 1L)) {
+      k <- as.integer(raw[p])
+      if (k >= 1L && k <= 40L && p + k == end) {
+        s <- as.integer(raw[(p + 1L):(p + k)])
+        if (all(s >= 32L & s <= 126L | s >= 160L)) {     # printable latin-1
+          found <- raw_to_latin1(raw[(p + 1L):(p + k)]); break
+        }
+      }
+    }
+    if (!is.na(found) && !grepl("[[:cntrl:]]", found)) out <- c(out, found)
+  }
+  out
 }

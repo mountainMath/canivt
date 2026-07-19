@@ -3,7 +3,7 @@
 #' The fixed header carries one 14-byte record per descriptor dimension (in
 #' descriptor order, geography = dimension 1) at `@824 + 14*(k-1)`:
 #'
-#'     [u32 dir_ptr][u32 ?][u32 n_entries][2 bytes]
+#'     [u32 dir_ptr][u32 alloc][u32 n_entries][u16 flag]
 #'
 #' `dir_ptr` points at that dimension's **block directory** -- a table of the
 #' familiar 8-byte entries `[u32 off][u16 len][u16 len]` (the same shape as the
@@ -12,6 +12,23 @@
 #' directory pointer. `n_entries` is the entry count (the decoded table may run
 #' up to a few entries short when null slots are skipped), which makes the slot
 #' self-validating.
+#'
+#' All four fields are resolved except one flag; the decoder reads `dir_ptr` and
+#' `n_entries`, and cross-checks with `alloc`:
+#'  - `alloc` (@+4, once the `?` field): the block directory's power-of-two
+#'    ALLOCATED slot capacity, `== nextpow2(n_entries)` on 243/243 corpus slots
+#'    (n_entries is the used count). `ivt_f2_dim_dir_impl()` uses it to validate
+#'    n_entries -- a slot whose `alloc != nextpow2(n_entries)` is a misread and is
+#'    rejected before the directory is read.
+#'  - `flag` (@+12): 0 on 240/243 corpus slots, 1 on exactly the three
+#'    double-indirection chunked-DGUID GEOGRAPHY directories (98-10-0023/-0129/-0174).
+#'    `ivt_f2_dim_dir_impl()` uses it to DIRECT the indirection-depth order (flag != 0
+#'    -> try `slot -> struct -> directory` first; else the direct read first),
+#'    replacing the old direct-first trial-and-error with a metadata-driven choice.
+#'    The precise semantic is still inferred from three same-valued cases and
+#'    unproven, so the other depth stays a fallback and the `n_entries` check gates
+#'    every candidate -- a mis-flag reorders attempts, it cannot mis-read. The one
+#'    residual.
 #'
 #' Each dimension's directory lists that dimension's complete codebook in
 #' LOGICAL order with exact offsets and lengths: its dictionary/schema block,
@@ -24,6 +41,28 @@
 #' 98-10-0241, 98-10-0077 (7 dims), 98-10-0129 (4), 98-10-0023 and the 1991
 #' legacy 1003011 (3): every data-dimension label block byte-identical to the
 #' marker-anchored reader, every footnote set equal to the tail scan.
+#'
+#' TWO THINGS THIS TABLE IS NOT (both have bitten a decode, keep them in mind):
+#'
+#'  - **`n_entries` is a BLOCK count, NOT the member count.** The members live
+#'    *inside* one or two of the blocks (the EN and FR label arrays, each a single
+#'    entry holding every member); the rest of the `n_entries` blocks are
+#'    member-count-independent (schema, doubled-name marker, ordinal array, note
+#'    blocks, `84 01` note bitmap, `04 01` separators). There is no relation
+#'    between the two numbers -- ucr2.2_3-2006: Offence 24 entries / 30 members,
+#'    Geography 12 / 1, Year 4 / 1. The member count comes from the DESCRIPTOR,
+#'    reconciled against the member ARRAY (`ivt_f2_dir_member_count()` counts the
+#'    records inside the `01 01`/`81 01` block), NEVER from `n_entries`. Passing
+#'    `n_entries` as the count mis-nests the layout (the first UCR attempt decoded
+#'    24 cells against a 30-bit presence record).
+#'  - **A dimension's blocks are individually addressed, NOT one contiguous
+#'    region.** Each `[off, off+len)` is exact, but the blocks are frequently
+#'    non-adjacent and INTERLEAVED across dimensions (98-10-0241's seven dimensions'
+#'    `[min, max)` envelopes overlap; the chunked geography of 98-10-0023 is split
+#'    into non-adjacent regions whose envelope brackets the small data dims). So a
+#'    dimension's codebook is the exact SET of its `n_entries` blocks -- never treat
+#'    `[min off, max off+len)` as one dimension's byte range, and do not assume the
+#'    blocks tile without gaps.
 #'
 #' The old `IVT_F2_DIR_SLOTS = c(824, 572, 712)` guesses were partial hits on
 #' this table: `@824` is dimension 1 (geography); `@852` is dimension 3 (the
@@ -58,17 +97,25 @@ ivt_f2_dim_slots <- function(raw, m = NULL) {
     s <- IVT_HDR_DIM_SLOT0 + (k - 1L) * IVT_HDR_DIM_STRIDE
     if (s + 12L > n) return(NULL)
     out[[k]] <- list(dim = k, slot = s, ptr = rd_u32(raw, s),
-                     n_entries = rd_u32(raw, s + 8L))
+                     alloc = rd_u32(raw, s + 4L),
+                     n_entries = rd_u32(raw, s + 8L),
+                     # the u16 @+12 flag: 1 on the double-indirection chunked-geography
+                     # directories (dir_ptr -> struct -> directory), 0 on the direct ones.
+                     # Read defensively so a slot truncated at EOF still yields ptr/alloc/n.
+                     flag = if (s + 14L <= n) rd_u16(raw, s + 12L) else NA_integer_)
   }
   out
 }
 
-# Resolve dimension k's block directory from its header slot. The slot's
-# `n_entries` field validates the decode: the parsed table must reach it (up to
-# 4 skipped null slots) and not run past it, so a slot whose pointer means
-# something else on some layout is rejected rather than misread. Tries the two
-# indirection depths (slot -> directory, and slot -> struct -> directory).
-# Returns the (off, len) entry matrix, or NULL.
+# Resolve dimension k's block directory from its header slot. Three header fields
+# drive it, all metadata: `alloc` (@+4) VETOES a misread slot up front
+# (alloc != nextpow2(n_entries)); `n_entries` (@+8) validates the decode (the
+# parsed table must reach it, up to 4 skipped null slots, and not run past it, so a
+# slot whose pointer means something else on some layout is rejected rather than
+# misread); and `flag` (@+12) directs which of the two indirection depths (slot ->
+# directory, vs slot -> struct -> directory) to try FIRST -- the double-indirection
+# chunked-geography directories carry flag != 0. Returns the (off, len) entry
+# matrix, or NULL.
 #
 # Memoized per (raw, k): each dimension's directory is consumed by the label,
 # ordinal, footnote AND geography readers, so it is decoded once. The result is
@@ -84,20 +131,44 @@ ivt_f2_dim_dir_impl <- function(raw, k, slots = NULL) {
   sl <- slots[[k]]
   if (is.na(sl$ptr) || sl$ptr < 1 || is.na(sl$n_entries) ||
       sl$n_entries < 1 || sl$n_entries > 1e6) return(NULL)
+  # Cross-check n_entries against the slot's `alloc` field (@+4): the block
+  # directory is allocated a power-of-two number of slots and `alloc ==
+  # nextpow2(n_entries)` holds on every corpus slot (243/243, all vintages). A slot
+  # whose bytes do not satisfy this is a misread (its pointer means something else
+  # on an unknown layout), so reject it rather than trust its n_entries -- the
+  # caller then falls back. Guarded on a PRESENT (non-zero) alloc so that should a
+  # future vintage leave the field zero, the check simply abstains rather than
+  # wrongly vetoing a good slot.
+  if (!is.null(sl$alloc) && !is.na(sl$alloc) && sl$alloc > 0L &&
+      sl$alloc != ivt_f2_nextpow2(sl$n_entries)) return(NULL)
   want <- as.integer(sl$n_entries)
   ok <- function(d) !is.null(d) && nrow(d) <= want && nrow(d) >= max(1L, want - 4L)
-  d <- ivt_f2_read_dir_at(raw, sl$ptr, max_entries = want + 4L)
-  if (ok(d)) return(d)
-  d <- ivt_f2_read_dir_at(raw, rd_u32(raw, sl$ptr), max_entries = want + 4L)
-  if (ok(d)) return(d)
-  # some exports (the 2006 custom-order crosstabs cro0172986_ct.7/8) store an
-  # ALLOCATED len2 > len that the strict end-of-table sentinel treats as a stop,
-  # truncating the read. Retry admitting any `len2 >= len`, but bounded to the
-  # slot's declared entry count so the relaxed rule cannot run on into garbage.
-  d <- ivt_f2_read_dir_at(raw, sl$ptr, max_entries = want, relaxed = TRUE)
-  if (ok(d)) return(d)
-  d <- ivt_f2_read_dir_at(raw, rd_u32(raw, sl$ptr), max_entries = want, relaxed = TRUE)
-  if (ok(d)) d else NULL
+  # The two indirection depths: DIRECT (slot -> directory) and INDIRECT (slot ->
+  # one-u32 struct -> directory). The slot's `flag` (@+12) is METADATA that says
+  # which layout this is: flag != 0 is the double-indirection chunked-geography
+  # directory (98-10-0023/-0129/-0174), flag 0 the direct one. Use it to try the
+  # declared depth FIRST -- so the big chunked geography's directory is located by
+  # the file's own flag rather than by a direct read that must first fail the
+  # n_entries check. The other depth stays as a fallback (the flag's precise
+  # semantic is inferred, not proven, so a mis-flag still cannot mis-read: `ok()`
+  # gates every candidate), and a NA/absent flag keeps the historical direct-first
+  # order. `alloc` above already vetoed a misread slot before we get here.
+  direct_ptr   <- sl$ptr
+  indirect_ptr <- rd_u32(raw, sl$ptr)               # the indirection struct's first u32
+  indirect_first <- !is.null(sl$flag) && !is.na(sl$flag) && sl$flag != 0L
+  ptrs <- if (indirect_first) c(indirect_ptr, direct_ptr) else c(direct_ptr, indirect_ptr)
+  # strict read first (max_entries = want + 4, honouring the end-of-table sentinel),
+  # then the relaxed read (bounded to `want`) for exports whose blocks store an
+  # ALLOCATED len2 > len the strict sentinel would stop on (cro0172986_ct.7/8).
+  for (relaxed in c(FALSE, TRUE)) {
+    cap <- if (relaxed) want else want + 4L
+    for (p in ptrs) {
+      if (is.na(p) || p < 1L) next
+      d <- ivt_f2_read_dir_at(raw, p, max_entries = cap, relaxed = relaxed)
+      if (ok(d)) return(d)
+    }
+  }
+  NULL
 }
 
 # Which of a dimension's two member-label blocks is English, decided by a
@@ -351,26 +422,49 @@ ivt_f2_dir_member_count <- function(raw, nm, dir) {
 }
 
 # Reconcile descriptor dimension counts against the codebook (called from
-# `ivt_f2_descriptor()`). Only the double-01-framed records are reconciled:
-# their byte shape is shared between the reference-period record
-# [type][count][01][01] ("Year (2)": 0e 02 01 01) and the profile lineage's
-# 1-member "Values" placeholder (00 20 01 01), whose count is NOT stored at
-# that position -- reading 32 there made 97-570-X1981004's layout mis-nest.
+# `ivt_f2_descriptor()`). Two shapes are reconciled:
+#
+# (1) DOUBLE-01-framed records: their byte shape is shared between the
+# reference-period record [type][count][01][01] ("Year (2)": 0e 02 01 01) and
+# the profile lineage's 1-member "Values" placeholder (00 20 01 01), whose count
+# is NOT stored at that position -- reading 32 there made 97-570-X1981004's
+# layout mis-nest.
+#
+# (2) COUNT == 0 records: a real dimension always has >= 1 member, so a zero
+# descriptor count is always a framing misread. The older `04 00 20 00` survey
+# tables (UCR / justice / LFHR lineage, single-area single-year cuts) frame a
+# trivial reference dimension's count where the previous block's tail bytes sit,
+# yielding 0 -- e.g. ucr2.2_3-2006's "Year" (member "2006") reads `00 20 01`,
+# count byte 0.
+#
 # The dimension's own slot-directory member block decides: when the descriptor
 # count exceeds the block's stored slot count (impossible -- slots only pad
-# upward), the real member count replaces it. Dimensions whose directory does
-# not resolve, and counts the codebook cannot contradict, are left untouched,
-# so every validated table is byte-identical through this.
+# upward) OR is zero, the real member count replaces it. A count-0 dimension
+# whose codebook stores no member array at all (the trivial single-member
+# reference dimension: no `[01 01]` array, no ordinal block) defaults to 1,
+# LOUDLY. Dimensions whose directory does not resolve, and positive counts the
+# codebook cannot contradict, are left untouched, so every validated table is
+# byte-identical through this.
 ivt_f2_dim_count_reconcile <- function(raw, dims) {
-  amb <- which(vapply(dims, function(d) isTRUE(d$double01), logical(1)))
+  amb <- which(vapply(dims, function(d)
+    isTRUE(d$double01) || identical(as.integer(d$count), 0L), logical(1)))
   if (!length(amb)) return(dims)
   slots <- ivt_f2_dim_slots(raw, m = length(dims))
   if (is.null(slots)) return(dims)
   for (k in amb) {
+    zero <- identical(as.integer(dims[[k]]$count), 0L)
+    fix_zero <- function() {                          # count-0 last resort: 1, loud
+      nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
+      ivt_fallback(sprintf(paste0(
+        "Dimension %d (\"%s\") has a zero descriptor count and no codebook ",
+        "member array; defaulting to a single member."),
+        k, nm), class = "canivt_zero_count")
+      dims[[k]]$count <<- 1L
+    }
     dir <- ivt_f2_dim_dir(raw, k, slots)
-    if (is.null(dir)) next
+    if (is.null(dir)) { if (zero) fix_zero(); next }
     mc <- ivt_f2_dir_member_count(raw, dims[[k]]$name, dir)
-    if (is.na(mc$slots) || mc$slots < 1L) next
+    if (is.na(mc$slots) || mc$slots < 1L) { if (zero) fix_zero(); next }
     # keep a positive descriptor count the codebook cannot contradict (<= slots);
     # replace it when it OVER-counts (the profile "Values" placeholder read
     # 0x20 = 32 vs 1 real slot) OR is ZERO (the geography placeholder
@@ -379,6 +473,7 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
     # -- lives only in its codebook attribute arrays).
     if (dims[[k]]$count >= 1L && dims[[k]]$count <= mc$slots) next
     if (!is.na(mc$count) && mc$count >= 1L) dims[[k]]$count <- mc$count
+    else if (zero) fix_zero()
   }
   dims
 }

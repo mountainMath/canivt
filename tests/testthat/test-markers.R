@@ -96,10 +96,12 @@ for (i in seq_len(nrow(mk_ledger))) {
     expect_identical(ivt_marker_violations(obs), character(0))
     # the file signature is always the IVT one for a corpus table
     expect_identical(obs$file_sig, IVT_MARKER_SET$file_sig)
-    # a supported table must resolve a descriptor whose b9 we catalogued
-    if (isTRUE(row$supported)) {
-      expect_false(is.na(obs$descriptor_b9))
+    # a supported table's descriptor signature byte (when it HAS a descriptor block)
+    # must be catalogued. The no-descriptor-block survey lineage (LFHR / criminal
+    # justice, `ivt_f2_descriptor_from_slots()`) has no signature at all, so
+    # descriptor_b9 is legitimately NA there -- only assert catalogue membership when
+    # a signature is present.
+    if (isTRUE(row$supported) && !is.na(obs$descriptor_b9))
       expect_true(obs$descriptor_b9 %in% IVT_MARKER_SET$descriptor_b9)
-    }
   })
 }

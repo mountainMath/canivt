@@ -44,7 +44,7 @@ signatures — the decoder reads a structure at each rather than scanning for it
 | `@558` | u16 | **page directory** start — **LOW 16 BITS only** (`ivt_idx0()` unwraps `+ k·65536`) | `IVT_HDR_DIR_PTR` |
 | `@572` | u32 | codebook region start | `IVT_HDR_CODEBOOK_PTR` |
 | `@712` | u32 | **DQF legend** directory | `IVT_HDR_DQF_SLOT` |
-| `@824 + 14·(k−1)` | 14 B | per-dimension **block-directory slot** record `[u32 dir_ptr][u32 ?][u32 n_entries][2B]`, dimension `k` (1 = geography) | `IVT_HDR_DIM_SLOT0` / `IVT_HDR_DIM_STRIDE` |
+| `@824 + 14·(k−1)` | 14 B | per-dimension **block-directory slot** record `[u32 dir_ptr][u32 alloc][u32 n_entries][u16 flag]`, dimension `k` (1 = geography). `alloc` = `nextpow2(n_entries)` (allocated capacity, 243/243). `n_entries` = number of codebook **BLOCKS**, NOT members (members are packed inside the label-array blocks); a dimension's blocks are individually addressed and may interleave across dimensions. `flag` = 1 only on the 3 double-indirection chunked-DGUID geo dirs (else 0); `ivt_f2_dim_dir()` uses it to direct the indirection-depth order (metadata-driven, other depth kept as fallback); semantic inferred/unproven — see ivt-format.md "The 14-byte slot record, field by field" | `IVT_HDR_DIM_SLOT0` / `IVT_HDR_DIM_STRIDE` |
 
 `@32` is not authoritative for all vintages: custom-order exports (ord-08035, cro
 crosstabs) point it at the title/identity block, Business Patterns at a zero slot;
@@ -97,8 +97,9 @@ a **name** block — the only ones the decoder keys on here.
 | bytes | meaning | recognizer |
 |-------|---------|-----------|
 | `81 02 02 00` | **doubled-name** marker — a dimension's name stored twice; the geography anchor and every data-dim label anchor | `ivt_f2_codebook_dim_markers()`, `ivt_f2_dim_dir_label1()` |
-| `81 02 01 00` | **single-name** marker — custom/inline geography laid out like a data dim (CRO extracts, EO2654) | `ivt_f2_dir_name_marker01()` |
+| `81 02 01 00` | **single-name** marker (custom/inline geography laid out like a data dim: CRO extracts, EO2654); also wraps a **single-member VALUE** block on the older survey tables — a `81 02 01 00 …[u8 strlen][latin1 string]` whose string reaches the block END exactly (vs the field-NAME block, which has trailing schema bytes), e.g. ucr2.2_3-2006's "Year" member "2006" | `ivt_f2_dir_name_marker01()`, `ivt_f2_dim_value_block_labels()` |
 | `81 02 03 00` | before-descriptor **retry anchor** for the INVERTED descriptor layout | `ivt_f2_descriptor()` |
+| `81 02 <alloc> 00` | **per-member FLAG block** (`alloc` = a power of two ≥ 8 = `nextpow2(member count)`): one flag byte per member (near-uniform, e.g. `e0`), the rest of `alloc` zero-padded. The reference-period / "Timeseries" dimension of the no-descriptor survey lineage stores its members this way (no label array); member count = the non-zero flag bytes. Distinct from the field dictionary `81 02 <nfields> 00` (small `nfields`, `[02][len][name]` payload) | `ivt_f2_slot_member_count()` |
 
 ## F. Directory value-entry framings (block-directory entries)
 

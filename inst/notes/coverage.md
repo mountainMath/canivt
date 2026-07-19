@@ -966,6 +966,59 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   slot-table rebuild), 22,704,083 cells; `CRO0166131_CT1_1` (Vancouver CMA, the 2016
   custom-extract per-area sibling of `CRO0163850`), 9,269,180 cells. All
   `strict_clean = FALSE`.
+- [x] **Older Borealis survey tables — `ucr2.2_3-2006` (Uniform Crime Reporting)
+  DECODED, SUPPORTED** (2026-07-18). A Borealis `SP3/6OXWOP` file, and the first of
+  the pre-DGUID single-area survey lineage (single geography, single reference year,
+  one real data dimension) to onboard. It carries the standard `04 00 20 00`
+  signature and the **inverted descriptor layout** (records before the
+  `81 01 20 00 f0 … 80 03` signature block; identity prose *after* it), which the
+  existing retry already handles — but three descriptor-layer quirks broke it, each
+  fixed generally: (a) a **zero-count reference dimension** ("Year" → member "2006"):
+  its count byte lands on the previous block's tail (`00 20 01`), read as 0. A count
+  of 0 is always invalid, so `ivt_f2_dim_count_reconcile()` now reconciles `count == 0`
+  the same way it reconciles the double-01 records — from the codebook, defaulting a
+  member-array-less singleton to 1 (loud `canivt_zero_count`). (b) That singleton's
+  member label ("2006") is stored as a **`81 02 01 00` VALUE block** (told from the
+  same-tagged field-NAME/schema block by its trailing `[strlen][string]` reaching the
+  block end), which the `[01 01]`/`[81 01]` array reader could not see — recovered by
+  `ivt_f2_dim_value_block_labels()`, including the case where the name marker is the
+  LAST directory entry (arrays precede it). (c) The single-area **geography is stored
+  exactly like a data dimension** (a `81 02` field dictionary "Code / Description /
+  Description_FRA / _Sort" + per-member `[01 01]` label blocks, no UID) — the
+  schema-free chunk assembler skipped its <3-member blocks and returned garbage, so a
+  new specializer `ivt_f2_geo_datadim()` reads it with the generic dimension-label
+  machinery (gated on a UID-less field dictionary + a clean `n_geo` label read; loud
+  `canivt_geo_datadim`). Result: `Year(1) × Geography(1="Selected Police Services") ×
+  Offence(30)` = **30 cells**, bilingual geography + all 30 motivation-category labels,
+  `strict_clean = FALSE`. The `02 00 20 00`-signature Borealis products (Health
+  Statistics, Census of Agriculture, Small Area Business) are a distinct earlier
+  generation, still open.
+- [x] **No-descriptor-block survey lineage — LFHR `Table-051` + criminal-justice
+  `h2530002` DECODED, SUPPORTED** (2026-07-19). The UCR siblings: same `04 00 20 00`
+  header but **no dimension-descriptor block at all** — no `81 01 20 00 f0` signature,
+  `@32 = 0`, and neither the master directory nor a signature scan resolves one.
+  The **header slot table `@824` is present and valid**, though, and is a complete
+  metadata-driven substitute, so `ivt_f2_descriptor_from_slots()` synthesizes the
+  descriptor from it (loud `canivt_descriptor_from_slots`): the dimension count is
+  the number of populated slots (`alloc == nextpow2(n_entries)` validated), each
+  dimension's member count from its codebook (`ivt_f2_slot_member_count()`: the
+  largest non-numeric `[01 01]`/`[81 01]` member array, else a `81 02 <alloc> 00`
+  per-member FLAG block — the reference-period/"Timeseries" dimension stores one flag
+  byte per member, `alloc = nextpow2(count)` a power of two ≥ 8, count = the non-zero
+  flags), and its name from the codebook doubled-name marker
+  (`ivt_f2_dim_marker_name()`, with `ivt_f2_first_marker_name()` for the time
+  dimension's two markers "Timeseries"/"Date"). Also relaxed `ivt_f2_geo_datadim()`
+  to admit a **schema-less** single-area geography (LFHR's "Canada" is mis-encoded as
+  `bare`; its `[01 01]` label arrays read cleanly via the generic reader). Results,
+  both `strict_clean = FALSE`, internal-consistency plausible: **justice
+  `Geography(1=Canada) × Methods(8) × Timeseries(37, 1974–2010)` = 296 cells**
+  (homicide counts by method by year); **LFHR `Geography(1=Canada) × Sex(3) × Class
+  of worker(4) × Retirement age(2) × Timeseries(35, 1976–2010)` = 800 cells**
+  (retirement ages/rates). KNOWN GAPS (accepted, not decode errors): the Timeseries
+  members surface as ordinal positions, not year strings (the years live in the flag
+  block, not a label array); LFHR's Retirement-age member labels fall to a note-block
+  and read imperfectly. The synthesis fires ONLY when no descriptor block resolves,
+  so the whole existing corpus (which all carry descriptor blocks) is untouched.
 - [x] **1986 census profile `97-570-X1986002` — DECODED, SUPPORTED** (2026-07-07).
   A previously-untested VINTAGE (no 1986 table was in the corpus). It is the
   ordinary profile lineage, identical in shape to the 1981 profiles: `Values(1) ×

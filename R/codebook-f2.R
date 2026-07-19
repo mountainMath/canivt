@@ -866,6 +866,12 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   #    A COMPLETE uid array is the expected outcome here, so it wins.
   uid <- ivt_f2_geo_uids(raw)
   if (length(uid) == n_geo) return(list(geo_name = NULL, geo_uid = uid))
+  # 5b. data-dimension-style geography (field dictionary + per-member label blocks,
+  #     no uid): the older `04 00 20 00` survey tables' single-area geography. Read
+  #     with the generic dimension label machinery before the combined net, whose
+  #     chunk assembler skips the <3-member blocks these single-geography tables use.
+  dd <- ivt_f2_geo_datadim(raw, n_geo)
+  if (!is.null(dd)) return(dd)
   # 6. Stage 3 safety net (refactor-plan.md §7.4): nothing above claimed the
   #    layout AND the uid scan came up short -- rather than emit nameless
   #    geography, surface the codebook's own member strings VERBATIM (loud).
@@ -1198,6 +1204,50 @@ ivt_f2_geo_custom <- function(raw, n_geo) {
     "canivt_geo_custom")
   list(geo_label = labels, geo_name = name,
        geo_uid = ifelse(is.na(code) | !nzchar(code), NA_character_, code))
+}
+
+# Geography stored EXACTLY like a data dimension: a `81 02 <nfields> 00` field
+# dictionary ("Code / English Desc / Desc Francais / _Sort" -- the same vocabulary
+# a data dimension uses, NOT the modern DGUID attribute schema) plus the usual
+# per-member `[01 01]` label blocks, with NO uid field and no combined-string
+# member array. The older `04 00 20 00` survey tables (the UCR / justice / LFHR
+# lineage) present their single-area geography this way -- e.g. ucr2.2_3-2006's
+# "Selected Police Services" (one member) -- so the DGUID / inline / flow / custom /
+# bare readers all decline and the schema-free chunk assembler
+# (`ivt_f2_geo_assemble_runs()`, which skips <3-member blocks) grabs the wrong
+# blocks and returns garbage. Here the geography's OWN slot directory already
+# supports the generic per-dimension label reader, so read it with that
+# (`ivt_f2_dim_dir_label1()`, EN + FR via the dictionary's English/French Desc
+# order). Gated tightly so it never pre-empts a more specific reader: it fires only
+# when a field dictionary is present, declares no UID column (the UID-bearing EO
+# custom exports keep the field-role/combined path that maps their uid run), and
+# the label read yields exactly `n_geo` clean members. Loud (`canivt_geo_datadim`).
+ivt_f2_geo_datadim <- function(raw, n_geo) {
+  if (is.na(n_geo) || n_geo < 1L) return(NULL)
+  ents <- ivt_f2_geo_entries(raw); if (is.null(ents)) return(NULL)
+  schema <- ivt_f2_geo_field_schema(raw, ents)
+  # A uid-bearing field dictionary keeps the field-role/combined path that maps its
+  # uid run (the EO custom exports); otherwise proceed -- INCLUDING the schema-less
+  # case (some single-area survey geographies carry no parseable field dictionary,
+  # just the `81 02 02 00` name marker + `01 01` "Canada" label arrays, and are even
+  # mis-encoded as `bare`). The clean-label gate below (exactly `n_geo` non-NA labels
+  # from the generic dimension reader) is what actually admits it, so a larger
+  # schema-less chunked geography -- which that reader cannot return whole -- still
+  # falls through to the combined net.
+  if (length(schema) && any(ivt_f2_geo_field_role(schema) == "geo_uid", na.rm = TRUE))
+    return(NULL)                                                # uid-bearing -> combined
+  d <- ivt_f2_descriptor(raw); if (is.null(d) || !length(d$dims)) return(NULL)
+  gi <- ivt_f2_geo_dim_index(raw, d)
+  lab <- ivt_f2_dim_dir_label1(raw, d$dims[[gi]], ents$dir)
+  if (is.null(lab) || is.null(lab$en) || length(lab$en) != n_geo || anyNA(lab$en))
+    return(NULL)
+  ivt_fallback(paste(
+    "Geography read as a data-style dimension (field dictionary + per-member label",
+    "blocks, no UID); member names from the generic dimension label reader."),
+    "canivt_geo_datadim")
+  fr <- lab$fr; if (is.null(fr) || length(fr) != n_geo) fr <- rep(NA_character_, n_geo)
+  list(geo_label = lab$en, geo_name = lab$en, geo_name_fr = fr,
+       geo_uid = rep(NA_character_, n_geo))
 }
 
 # Backfill `geo_name` from the display `geo_label` for members that carry a label
@@ -2938,13 +2988,124 @@ ivt_f2_dims_from_slots <- function(raw, slots, ndim) {
   out
 }
 
+# One dimension's member count from its codebook block directory, WITHOUT the
+# descriptor -- used to synthesize the descriptor when the file carries no
+# descriptor block (`ivt_f2_descriptor_from_slots()`). Priority:
+#  1. the largest non-all-numeric `01 01`/`81 01` member-label array (the actual
+#     member labels -- Geography "Canada" -> 1, Methods -> 8, Sex -> 3, ...);
+#  2. a `81 02 <alloc> 00` per-member FLAG block where `alloc` is a power of two
+#     >= 8 (the reference-period / "Timeseries" dimension of the older survey
+#     tables stores its members as one flag byte each, alloc = nextpow2(count),
+#     mostly a single repeated value; count = the non-zero flag bytes). Requiring a
+#     near-uniform flag payload keeps it from mistaking a field dictionary
+#     (`81 02 <nfields> 00`, whose payload is `[02][len][name]` records) for the
+#     flag block -- and it is only reached when the dimension has NO member array.
+# Returns the count, or NA when neither is present (the caller then declines to
+# synthesize rather than guess).
+ivt_f2_slot_member_count <- function(raw, dir) {
+  if (is.null(dir)) return(NA_integer_)
+  n <- length(raw); best <- 0L
+  for (r in seq_len(nrow(dir))) {
+    e <- tryCatch(ivt_f2_dir_entry_members(raw, dir[r, "off"], dir[r, "len"]),
+                  error = function(e) NULL)
+    if (is.null(e)) next
+    v <- e$values; got <- v[!is.na(v)]
+    if (length(got) > best && !all(grepl("^[0-9]+$", got))) best <- length(got)
+  }
+  if (best > 0L) return(best)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + 4L > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 4L]) != 0x00L) next
+    alloc <- rd_u16(raw, off + 2L)
+    if (is.na(alloc) || alloc < 8L || bitwAnd(alloc, alloc - 1L) != 0L) next  # pow2 >= 8
+    if (off + 6L + alloc > n) next
+    flags <- as.integer(raw[(off + 7L):(off + 6L + alloc)])
+    nz <- flags[flags != 0L]
+    if (length(nz) >= 1L && length(unique(nz)) <= 3L) return(length(nz))
+  }
+  NA_integer_
+}
+
+# The name from the FIRST `81 02 02 00` doubled-name marker in a block directory,
+# structurally (no descriptor, no name to match). Unlike `ivt_f2_dim_marker_name()`
+# -- which returns the UNIQUE named marker and declines when a directory carries
+# more than one -- this takes the first, for the reference-period dimension whose
+# directory carries two ("Timeseries" and "Date"). Returns the name or NA.
+ivt_f2_first_marker_name <- function(raw, dir) {
+  if (is.null(dir)) return(NA_character_)
+  n <- length(raw)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 12L || len > 4000L || off + 4L > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 3L]) != 0x02L || as.integer(raw[off + 4L]) != 0x00L) next
+    m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(n, off + len)], 0L)
+    got <- if (nrow(m)) m$name[!is.na(m$name) & nchar(m$name) >= 3L] else character(0)
+    if (length(got)) return(got[1L])
+  }
+  NA_character_
+}
+
+# Synthesize the dimension descriptor from the HEADER SLOT TABLE when the file
+# carries no descriptor block at all -- no `81 01 20 00 f0 .. 80 03` signature,
+# `@32 == 0`, and neither the master directory nor a signature scan resolves one
+# (the older single-area Borealis survey tables: the Labour Force Historical Review
+# and criminal-justice time-series lineage). The slot table is present and valid on
+# these files, is in descriptor order (dimension 1 = geography), and locates every
+# dimension's codebook, so it is a complete metadata-driven substitute: the
+# dimension COUNT is the slot count of populated slots (`alloc == nextpow2(n_entries)`
+# validated), each dimension's member count comes from its codebook
+# (`ivt_f2_slot_member_count()`), and its name from the codebook doubled-name marker
+# (`ivt_f2_dim_marker_name()`). Returns the same `list(n_dim, dims, title)` shape as
+# the descriptor-block parse, or NULL when the slot table is absent / a dimension
+# cannot be sized. LOUD (`canivt_fallback`): a synthesized descriptor is not the
+# file's own, so a consumer knows the read did not come from a descriptor block.
+ivt_f2_descriptor_from_slots <- function(raw) {
+  n <- length(raw)
+  m <- 0L                                        # populated contiguous slots @824
+  for (k in 1:32L) {
+    s <- IVT_HDR_DIM_SLOT0 + (k - 1L) * IVT_HDR_DIM_STRIDE
+    if (s + 12L > n) break
+    ptr <- rd_u32(raw, s); alloc <- rd_u32(raw, s + 4L); ne <- rd_u32(raw, s + 8L)
+    if (is.na(ptr) || ptr < 1L || is.na(ne) || ne < 1L || ne > 1e6) break
+    if (is.na(alloc) || alloc <= 0L || alloc != ivt_f2_nextpow2(ne)) break
+    m <- k
+  }
+  if (m < 2L) return(NULL)
+  slots <- ivt_f2_dim_slots(raw, m = m)
+  if (is.null(slots)) return(NULL)
+  dims <- vector("list", m)
+  for (k in seq_len(m)) {
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    cnt <- ivt_f2_slot_member_count(raw, dir)
+    if (is.na(cnt) || cnt < 1L) return(NULL)     # a dimension we cannot size -> decline
+    nm <- ivt_f2_dim_marker_name(raw, k, slots)
+    # the reference-period dimension carries TWO name markers ("Timeseries" AND
+    # "Date"), which the unique-marker reader declines; take the first named marker.
+    if (is.na(nm)) nm <- ivt_f2_first_marker_name(raw, dir)
+    dims[[k]] <- list(name = nm, count = as.integer(cnt), type = 0L, double01 = FALSE)
+  }
+  ivt_fallback(paste(
+    "No dimension-descriptor block found; the descriptor was synthesized from the",
+    "header slot table (per-dimension counts and names read from each dimension's",
+    "codebook)."), class = "canivt_descriptor_from_slots")
+  list(n_dim = m, dims = dims, title = NA_character_)
+}
+
 ivt_f2_descriptor <- function(raw)
   ivt_memo(raw, "descriptor", function() ivt_f2_descriptor_impl(raw))
 
 ivt_f2_descriptor_impl <- function(raw) {
   n <- length(raw)
   D <- ivt_f2_descriptor_offset(raw)
-  if (is.null(D) || is.na(D) || D < 1 || D + 18 > n) return(NULL)
+  # No descriptor BLOCK anywhere (no signature, @32 == 0, no master-dir / scan hit):
+  # the older single-area survey lineage. Rebuild the descriptor from the header slot
+  # table, which is present and valid on these files. Only reached when the block is
+  # genuinely absent, so it never pre-empts a real descriptor read.
+  if (is.null(D) || is.na(D) || D < 1 || D + 18 > n)
+    return(ivt_f2_descriptor_from_slots(raw))
   D <- as.integer(D)
   ndim <- rd_u16(raw, D + 16L)
 

@@ -100,14 +100,74 @@ u32 @712  → the DATA-QUALITY-FLAG legend (15 entries on 2021 tables: EN/FR
             records per code A..E/R/P, framed [82 01][u16][flags][02][code][00]
             [u16 len][text]; a 1-entry stub on pre-DGUID tables)
 @824+14·(k−1) → dimension k's codebook block directory (14-byte slot records
-            [u32 dir_ptr][u32 ?][u32 n_entries][2B]; see dimdir.R) — the
+            [u32 dir_ptr][u32 alloc][u32 n_entries][u16 flag]; see dimdir.R) — the
             member-label blocks, ordinals, doubled-name marker and per-dimension
             footnotes are all read positionally from these
 ```
 
+**The 14-byte slot record, field by field** (all four fields resolved except one
+flag; the decoder reads `dir_ptr` + `n_entries`, and cross-checks with `alloc`):
+
+- `[u32 dir_ptr]` (@+0) — pointer to the block directory, directly or (the big
+  chunked-geography directories) via a one-`u32` indirection struct.
+- `[u32 alloc]` (@+4) — the block directory's **power-of-two allocated slot
+  capacity**: measured `== nextpow2(n_entries)` on **243/243 corpus slots**, zero
+  mismatches (the same power-of-two allocation the format uses for the presence
+  bitmap and directory strides). Formerly the `?` field. `ivt_f2_dim_dir()` now uses
+  it to **validate `n_entries`**: a slot whose `alloc != nextpow2(n_entries)` is a
+  misread and is rejected before the directory is read (guarded on a non-zero alloc
+  so a future zero-alloc vintage abstains rather than veto a good slot).
+- `[u32 n_entries]` (@+8) — the **used** block-directory entry count (the decoded
+  table may run a few short when null slots are skipped; validates the read).
+- `[u16 flag]` (@+12) — **partially understood**: `0` on 240/243 corpus slots,
+  `1` on exactly the three double-indirection chunked-DGUID **geography**
+  directories (98-10-0023 / -0129 / -0174, all 6,244–6,758 entries). It tracks the
+  extra-indirection / chunked-directory layout. `ivt_f2_dim_dir()` now uses it to
+  **direct** which indirection depth to try first (flag ≠ 0 → the `slot → struct →
+  directory` indirection first; else the direct read first) — a metadata-driven
+  choice replacing the old direct-first trial-and-error, so the big chunked
+  geography's directory is located by the file's own flag. The precise semantic is
+  still inferred from three same-valued cases, not proven, so the OTHER depth
+  remains a fallback and every candidate is gated by the `n_entries` check — a
+  mis-flag reorders attempts but cannot mis-read. This is the one residual fragment.
+
 So the codebook, the notes and the legends are located **from the header**, with
 the bounded tail scans surviving only as fallbacks for layouts whose directories
 do not resolve.
+
+**What the slot table gives, precisely — and what it does NOT.** The slot's
+`dir_ptr` + `n_entries` locate a **block directory** of `n_entries` records
+`[u32 off][u16 len][u16 len]`, and each record gives the **exact byte place
+(`off`) and extent (`len`) of one codebook BLOCK**. That addressing is exact and
+exhaustive: a dimension's codebook *is* exactly this enumerated set of blocks, and
+`ivt_f2_dim_dir()` self-validates the read against `n_entries`. Two things it is
+**not**:
+
+- **`n_entries` is a BLOCK count, not a member count.** A dimension's members are
+  packed *inside* one or two of its blocks (the English label array, the French
+  label array — each a single directory entry holding all members), alongside many
+  member-count-independent blocks: the field dictionary (`81 02 <nfields> 00`), the
+  doubled-name marker (`81 02 02 00`), the ordinal array (`02 01 …`), `81 01 …` note
+  blocks, a `84 01` member-note bitmap, `01 01` note-text blobs, and `04 01 …`
+  id/reference separators. So there is **no relation** between `n_entries` and the
+  member count: ucr2.2_3-2006 has Offence = **24 entries / 30 members**, Geography =
+  **12 entries / 1 member**, Year = **4 entries / 1 member**. The member count comes
+  from the **descriptor** (correct for ordinary dimensions), reconciled against the
+  actual member *array* when the descriptor framing is ambiguous
+  (`ivt_f2_dir_member_count()` counts the records inside the `01 01`/`81 01` block) —
+  **never** from `n_entries`. Feeding `n_entries` in as the count mis-nests the
+  layout (the first UCR attempt decoded 24 garbage cells against a 30-bit presence
+  record).
+- **A dimension's blocks are individually addressed, NOT a contiguous per-dimension
+  region.** On a small table (UCR) each dimension's blocks happen to be contiguous
+  and the dimensions' `[min off, max off+len)` envelopes are disjoint — but that is
+  incidental. In general the blocks are non-adjacent and **interleaved across
+  dimensions**: on 98-10-0241 the seven dimensions' envelopes overlap heavily, and
+  on the chunked-DGUID tables (98-10-0023) the geography directory is split into
+  non-adjacent regions (a reversed root chunk + the bulk) whose envelope *brackets*
+  the small data dimensions' blocks. So "dimension k's codebook" is the exact **set**
+  of its `n_entries` blocks — do not treat `[min off, max off+len)` as a byte range
+  that belongs to one dimension, and do not assume blocks tile without gaps.
 
 ### Undecoded / unused pockets
 
