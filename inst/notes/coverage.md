@@ -1357,3 +1357,28 @@ collective-dwellings crosstab **98-400-X2016019** (both viewer-validated
 cell-exact, 2026-07-06), and the **count-anchored prose-bleed name recovery**
 onboarded the last file, the 2001 F-series **97F0015X** — so **every `.ivt`
 file in the test corpus now decodes**. See the section above.
+
+Coverage-broadening additions (2026-07-18, decoded with no code change):
+the 2021 "Population and dwelling counts" tables **98100019** (Canada + forward
+sortation areas -- postal geography, alphanumeric `A0A` GEOUIDs, a code shape no
+other corpus table carries) and **98100010** (Canada + federal electoral
+districts) extend the corpus to two geographic levels it lacked, both family-2
+strict-clean on the DEFAULT (uid-only light) path. Their FULL attribute read
+(`geo_attributes = TRUE`) is a KNOWN GAP: like 98100013 (ADA) their block
+directory is irregular, so `ivt_f2_geo_attrs_dir()` returns NULL and the
+stride-walk fallback undercounts, leaving a 256-member chunk nameless (loud
+`canivt_geo_count`); the geo-snapshot therefore guards them light-only. And the
+Borealis **95f0491xcb01004** (2001 Census Profile of CMAs,
+`Values x Profile(69) x Geography(150)`) extends the profile lineage from 1991
+up to 2001 (a known `canivt_descriptor_lenient` fallback -> `strict_clean =
+FALSE`; its `product_id`/`title` decode NA, a minor identity gap).
+
+Not yet decodable -- the frontier the Borealis catalogue surfaces (2026-07-18):
+whole non-census lineages remain unsupported, notably the **`02 00 20 00`
+container family** (Health Statistics at a Glance 1999 -- a different first
+signature byte, rejected before decode), the **2006 Profile Series**
+(94-575-/94-576-XCB2006*, valid `04`-family + 3-dim descriptor but
+pre-flight-rejected), the **Labour Force Historical Review** (descriptor does
+not parse), **Uniform Crime Reporting** and the **2016 Census of Agriculture**
+(both `04`-family, descriptor parses, pre-flight-rejected). These are the
+highest-value targets for the next parser-coverage pass.

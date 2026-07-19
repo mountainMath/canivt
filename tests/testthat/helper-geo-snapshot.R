@@ -72,7 +72,14 @@ GEO_SNAP_FULL <- c(
   # the two custom exports whose geography is now recovered by the Stage 3
   # assemble-then-decipher net (EO3278 chunked no-schema; EO2654 geo dim named
   # in the header + a short-directory read).
-  "EO3278_T1_CDCSD", "EO2654_2011_Van"
+  "EO3278_T1_CDCSD", "EO2654_2011_Van",
+  # a 2001 CMA profile (cheap, complete full read; guards its geography names).
+  # The 2021 pop-count tables 98100019 (FSA) / 98100010 (FED) are deliberately
+  # NOT here: their DEFAULT/light read is clean and complete (uid-only), but
+  # their full attribute read is irregular like 98100013 and the stride-walk
+  # fallback undercounts (drops a 256-member chunk), so it is captured light-only
+  # rather than enshrining an incomplete full read (see coverage.md frontier note).
+  "95f0491xcb01004"
 )
 
 # Collapse one table's capture to the committed-fixture row: a deterministic hash
