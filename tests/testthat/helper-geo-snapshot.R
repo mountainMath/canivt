@@ -11,9 +11,12 @@
 # The two paths:
 #   - ivt_f2_geo_light(raw, n_geo)  -- the metadata / default `metadata$geographies`
 #   - ivt_f2_geographies(raw)       -- the read_ivt(geo_attributes = TRUE) full path
-# The corpus ledger only ever exercises the LIGHT path, so the full path (the
-# stride-walk + reverse-root override that only 98100013 reaches) is otherwise
-# UNGUARDED -- this harness is the only regression net for it.
+# The corpus ledger only ever exercises the LIGHT path, so the full path is
+# otherwise UNGUARDED -- this harness is the only regression net for it. (The
+# stride-walk + reverse-root fallback is now unreached by the corpus -- 98100013
+# used to reach it but reads cleanly through the directory path since the footnote
+# text blocks are skipped -- yet is retained as a loud fallback for future
+# genuinely-irregular layouts.)
 
 # Normalize a warning-set string for comparison: NA (path not captured, or an
 # empty warning set stored as "") both read as "".
@@ -74,12 +77,13 @@ GEO_SNAP_FULL <- c(
   # in the header + a short-directory read).
   "EO3278_T1_CDCSD", "EO2654_2011_Van",
   # a 2001 CMA profile (cheap, complete full read; guards its geography names).
-  # The 2021 pop-count tables 98100019 (FSA) / 98100010 (FED) are deliberately
-  # NOT here: their DEFAULT/light read is clean and complete (uid-only), but
-  # their full attribute read is irregular like 98100013 and the stride-walk
-  # fallback undercounts (drops a 256-member chunk), so it is captured light-only
-  # rather than enshrining an incomplete full read (see coverage.md frontier note).
-  "95f0491xcb01004"
+  "95f0491xcb01004",
+  # the 2021 pop-count tables 98100019 (FSA) / 98100010 (FED): their directory
+  # carries per-member footnote TEXT blocks in its tail that used to inflate the
+  # attribute value-block count and defeat the regular-layout gate (FSA +1, FED
+  # +37), forcing the lossy stride-walk. Those blocks are now recognized and
+  # skipped (ivt_f2_dir_is_text_block), so the full read is complete -- guard it.
+  "98100019", "98100010"
 )
 
 # Collapse one table's capture to the committed-fixture row: a deterministic hash

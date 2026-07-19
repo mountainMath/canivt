@@ -194,6 +194,32 @@ test_that("geography attribute group chunk-sizes follow the doubling rule", {
   expect_equal(ivt_f2_geo_group_sizes(300L), c(1, 1))                   # two chunks
 })
 
+test_that("directory footnote text blocks are told apart from member arrays", {
+  u16le <- function(n) as.raw(c(n %% 256L, n %/% 256L))
+  # a footnote/note record: [01 01][u16 len-4][01]<un-terminated latin1 text>.
+  # This is the shape that used to inflate the geography attribute block count on
+  # 98100019 (FSA) / 98100010 (FED) / 98100013 (ADA) and defeat the layout gate.
+  txt  <- charToRaw("Renvoi 1 - Ne comprend pas les donnees ...")
+  body <- c(as.raw(0x01), txt)                          # [01]<text>, no NUL
+  fn   <- c(as.raw(0x01), as.raw(0x01), u16le(length(body)), body)
+  expect_true(ivt_f2_dir_is_text_block(fn, 0L, length(fn)))
+
+  # a plain member array must NOT be mistaken for a text block: its records are
+  # each NUL-terminated. Even a single-slot array (whose n_slots low byte 0x01
+  # mimics the text marker) is rejected by the no-NUL test.
+  rec  <- c(as.raw(0x03), charToRaw("Foo"), as.raw(0x00))          # [03]Foo[00]
+  arr1 <- c(u16le(1L), rec)                                        # [u16 n_slots=1]<rec>
+  m1   <- c(as.raw(0x01), as.raw(0x01), u16le(length(arr1)), arr1)
+  expect_false(ivt_f2_dir_is_text_block(m1, 0L, length(m1)))
+  # a 256-slot array: marker byte is 0x00, rejected outright
+  arr2 <- c(u16le(256L), rec, rec)
+  m2   <- c(as.raw(0x01), as.raw(0x01), u16le(length(arr2)), arr2)
+  expect_false(ivt_f2_dir_is_text_block(m2, 0L, length(m2)))
+  # too-short / wrong header -> FALSE, never an out-of-bounds read
+  expect_false(ivt_f2_dir_is_text_block(as.raw(c(0x01, 0x01, 0x02)), 0L, 3L))
+  expect_false(ivt_f2_dir_is_text_block(fn, 0L, length(fn) - 1L))    # u16 != len-4
+})
+
 test_that("family-2 geography attributes come from the directory-driven read", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
@@ -312,16 +338,17 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
   expect_equal(schema[1], "GEO_NAME")
   expect_true("DGUID" %in% schema)
 
-  # the last chunk group ends in a 71-member partial. It was silently dropped by the
-  # >=150-record block floor (decoding 5,376 of 5,447); the trailing-partial rescue
-  # must recover every geography, DGUID and all, in member order. On this table the
-  # block directory lists the codebook irregularly, so the read goes through the
-  # legacy stride path, and the schema names only 8 of the 11 attributes, so the
-  # slot map falls back to the fixed order -- both must announce themselves.
+  # the last chunk group ends in a 71-member partial that an early >=150-record
+  # block floor once silently dropped (decoding 5,376 of 5,447). The read now goes
+  # through the directory-driven positional path (`ivt_f2_geo_attrs_dir()`) with no
+  # fallback at all: this table is NOT irregular -- its directory tail carries 70
+  # per-member footnote TEXT blocks ("Renvoi 1 / Ne comprend pas ...") that used to
+  # be miscounted as attribute value blocks (defeating the layout gate and forcing
+  # the stride path, whose root override then mislabelled the DQF columns). Those
+  # footnote blocks are now skipped, so every geography, DGUID and all, is recovered
+  # schema-exact in member order with no warning.
   ws <- testthat::capture_warnings(ga <- ivt_f2_geo_attributes(raw))
-  expect_length(ws, 2L)
-  expect_true(any(grepl("stride", ws)))
-  expect_true(any(grepl("slot order", ws)))
+  expect_length(ws, 0L)
   expect_equal(nrow(ga), 5447L)
   expect_equal(sum(!is.na(ga$dguid)), 5447L)
   expect_equal(length(unique(ga$dguid)), 5447L)
@@ -329,11 +356,11 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
   expect_equal(ga$dguid[2], "2021A000210")              # Newfoundland and Labrador
   expect_equal(ga$dguid[5447], "2021S051662080008")     # last member of the 71-partial
 
-  # the root chunk (members 1..256) is reverse-stored, so the byte-ascending stride
-  # walk cannot label it: it leaves the NAME attributes NA and scrambles
-  # prov_abbr / alt_geo_code / pr_code. The whole chunk is overridden by the
-  # positional read from the header block directory (offsets/lengths + schema order),
-  # so every attribute is correct and matches the published Member Name.
+  # the root chunk (members 1..256) is reverse-stored in the file, but the
+  # directory-driven read walks blocks in the header block directory's logical
+  # order, so every attribute is correct and matches the published Member Name
+  # (the byte-ascending stride walk used to leave its NAME attributes NA and
+  # scramble prov_abbr / alt_geo_code / pr_code).
   expect_equal(sum(!is.na(ga$geo_label)), 5447L)
   expect_equal(ga$geo_label[1], "Canada")
   expect_equal(ga$geo_label[2], "Newfoundland and Labrador")

@@ -430,9 +430,16 @@ units) and the directory entries (8-byte entry units).
     directory `tnr_short_form` is exact vs metadata where the stride root-override was
     wrong for 237 members. `geo_label`/`dguid`/`geo_level`/`geo_type`/`geo_type_abbr`/
     `prov_abbr`/`alt_geo_code` stay correct.
-  - **Fallback still runs on 98-10-0013 ADA** (its directory drops a trailing partial →
-    irregular block count → stride path with the `ivt_f2_geo_root_dir()` root override);
-    all its attributes validate exact vs the StatCan metadata CSV.
+  - **98-10-0013 ADA now reads through the directory path too** (2026-07-18). Its
+    directory did not "drop a trailing partial" — its tail carries 70 per-member
+    footnote TEXT blocks ("Renvoi 1 / Ne comprend pas ...") that the block classifier
+    counted as attribute value blocks, so the regular-layout gate tripped and forced
+    the stride path (whose `ivt_f2_geo_root_dir()` root override then MISALIGNED
+    `dqf_code`/`dqf_note` — the schema declares no DQF field, yet the stride walk
+    populated them with bare ALT_GEO_CODE strings). `ivt_f2_dir_is_text_block()` now
+    skips those footnote blocks, so `ivt_f2_geo_attrs_dir()` reads all 5,447 members
+    schema-exact (the spurious DQF columns correctly drop out as all-NA). The
+    stride/root-override fallback is retained (loud) but unreached by the corpus.
 - [x] **The uid-only DEFAULT read is positional too (`ivt_f2_geo_dguids_dir()`) —
   DONE** (2026-07-05). The default metadata path for the chunked tables used the
   byte scan (`ivt_f2_geo_dguids()`), which reads blocks in BYTE order: on
@@ -1263,7 +1270,9 @@ paths fixed a latent bug — the full path used to return an all-NA tibble for
 custom/bare tables. A new Stage 3 `ivt_f2_geo_combined()` (`canivt_geo_unparsed`,
 loud) is the last-resort verbatim safety net for an unrecognized layout. The whole
 read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` — light for
-every corpus table, full for 20, incl. the stride-walk-only 98-10-0013; opt-in
+every corpus table, full for 23, incl. 98-10-0013 / 98100019 (FSA) / 98100010
+(FED), all of which read cleanly through the directory path once the tail footnote
+text blocks are skipped (`ivt_f2_dir_is_text_block()`); opt-in
 `test-geo-snapshot.R`). Geography output byte-identical across the corpus.
 
 The two custom exports that were briefly nameless (EO3278_T1_CDCSD, EO2654_2011_Van)
@@ -1364,10 +1373,19 @@ sortation areas -- postal geography, alphanumeric `A0A` GEOUIDs, a code shape no
 other corpus table carries) and **98100010** (Canada + federal electoral
 districts) extend the corpus to two geographic levels it lacked, both family-2
 strict-clean on the DEFAULT (uid-only light) path. Their FULL attribute read
-(`geo_attributes = TRUE`) is a KNOWN GAP: like 98100013 (ADA) their block
-directory is irregular, so `ivt_f2_geo_attrs_dir()` returns NULL and the
-stride-walk fallback undercounts, leaving a 256-member chunk nameless (loud
-`canivt_geo_count`); the geo-snapshot therefore guards them light-only. And the
+(`geo_attributes = TRUE`) was initially a gap and is now **complete** (2026-07-18):
+the read was not irregular after all -- the geography block directory carries
+per-member FOOTNOTE TEXT blocks in its tail (one "Renvoi 1 / Ne comprend pas les
+données du recensement pour ..." per member that cites the note -- FSA one, FED
+37) that the run-scanner fragmented and the block classifier miscounted as
+attribute value blocks, so the regular-layout gate `k == 2*(nfield+1)*n_chunks`
+tripped (FSA 183 vs 182, FED 73 vs 36) and forced the lossy stride-walk. A text
+block reuses the plain-array header `[01 01][u16 len-4]` but its payload is a lone
+un-terminated latin1 text `[01]<text>` with NO NUL record terminators, so
+`ivt_f2_dir_is_text_block()` now recognizes and skips it structurally; the
+directory-driven `ivt_f2_geo_attrs_dir()` then reads all members (FSA 1647/1647,
+FED 352/352 -- every attribute, DGUID, province, dqf), and the geo-snapshot guards
+the full path. And the
 Borealis **95f0491xcb01004** (2001 Census Profile of CMAs,
 `Values x Profile(69) x Geography(150)`) extends the profile lineage from 1991
 up to 2001 (a known `canivt_descriptor_lenient` fallback -> `strict_clean =

@@ -1676,6 +1676,25 @@ ivt_f2_is_ordinal <- function(t) {
   !anyNA(iv) && length(iv) >= 3L && all(diff(iv) == 1L)
 }
 
+# Is a directory entry a single free-text blob (a footnote/note record) rather than
+# a member value array?  A footnote stored in a block directory reuses the plain-
+# array header `[01 01][u16 len-4]` but its payload is a lone un-terminated latin1
+# text `[01]<text>` (e.g. "Renvoi 1 / Ne comprend pas les données du recensement
+# pour ...") -- no per-member records, no NUL terminators. These sit in the
+# geography directory's TAIL, one per member that cites a note (98-10-0010 carries
+# 37, 98-10-0019 one), and the run-scanner fragments each into a few text pieces
+# that otherwise inflate the value-block count and defeat the regular-layout gate.
+# Distinguished structurally from a member array (whose records are each NUL-
+# terminated `[len][text][00]`): after the single-record marker at off+4 a text
+# blob carries NO 0x00 byte.  Returns FALSE for anything that is not this framing.
+ivt_f2_dir_is_text_block <- function(raw, off, len) {
+  if (len < 6L || off + len > length(raw)) return(FALSE)
+  if (raw[off + 1L] != as.raw(0x01L) || raw[off + 2L] != as.raw(0x01L)) return(FALSE)
+  if (isTRUE(rd_u16(raw, off + 2L) != len - 4L)) return(FALSE)   # plain-array payload len
+  if (raw[off + 5L] != as.raw(0x01L)) return(FALSE)              # single-record marker
+  !any(raw[(off + 6L):(off + len)] == as.raw(0x00L))             # text blob: no NUL terminators
+}
+
 # Directory-driven geography attribute table. Returns the same tibble as
 # `ivt_f2_geo_attributes()`, or NULL to signal the caller to fall back to the stride
 # path (no block directory, no schema, or a value-block total that does not match
@@ -1697,7 +1716,8 @@ ivt_f2_geo_attrs_dir <- function(raw, trim = TRUE) {
   vb <- vector("list", ents$n); k <- 0L
   for (r in seq_len(ents$n)) {
     t <- ents$records(r)
-    if (length(t) >= 3L && !ivt_f2_is_ordinal(t)) {
+    if (length(t) >= 3L && !ivt_f2_is_ordinal(t) &&
+        !ivt_f2_dir_is_text_block(raw, ents$off(r), ents$len(r))) {
       s <- ents$strict(r)
       e <- if (is.null(s)) list(values = t, dense = FALSE, strict = FALSE)
            else list(values = s$values, dense = s$dense, strict = TRUE)
