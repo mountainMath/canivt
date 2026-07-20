@@ -1063,14 +1063,54 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   Census of Agriculture 1996 `EDDTAB39` float64, Small Area Business / employment
   `EMPLOY1` int32, `tb111996`), all internal-consistency-validated where a Total row
   exists (Canada = Σprovinces + territories on `00060101`; `EMPLOY1`, `00060129`,
-  `00060141`). All decode through the loud `canivt_descriptor_02` fallback
-  (`strict_clean = FALSE` in the ledger).
-  **Two known gaps remain** (ledger `supported = FALSE`): `00060117` — a **mixed-width
-  quantifier** (int32 counts + float64 rates in one table) that would force per-width
-  page splitting the unified single-presence-record layout does not model; and
-  `tb611996` — a **multi-page sparse** table whose `prod(entry counts)` matches none of
-  its 8 directory entries for any candidate count, leaving the reference-dimension probe
-  ambiguous (its true count, 3, is only stated in the title "1995 to 1997").
+  `00060141`).
+  **GENERATION COMPLETE — all 23 `byte 0 == 0x02` files decode STRICT-CLEAN**
+  (2026-07-19, second pass). The two remaining gaps were closed by two metadata reads,
+  and the whole gate was promoted from a loud fallback to the generation's designed,
+  QUIET path:
+  - **`tb611996` (4020 cells)**: its reference dimension stores neither codes nor
+    labels — only the **time-series member table** `81 02 <alloc> 00 08 00`
+    (`ivt_f2_time_members()`, markers.md §E.1): `alloc` one-byte member-SLOT flags
+    (**byte-pair-swapped** like every container bitmap; deleted members leave HOLES —
+    its periods sit at slots {1,2,4}) + one u24 little-endian date per member,
+    right-aligned at the block end, **days since 0000-03-01** (proleptic Gregorian;
+    lands on Jan 1 for annual series). Count = non-zero flags (3); labels GENERATED
+    from the dates (1996/1997/1995 in member order — validated by the HAART signature:
+    "Infectious and parasitic diseases" collapses 11.4 → 9.9 → 7.7 across 1995→97).
+    The presence bitmap addresses members **by slot**, so the layout is now
+    slot-aware (`dims[[k]]$slots` → `ivt_layout()` extents + `ivt_f2_cell_grid(pos=)`
+    bit positions + slot→member mapping in `ivt_decode()`; a value at a deleted slot
+    warns `canivt_slot_hole`). Its directory also pads the straddle windows to
+    `np2(count)/ipc` (8 entries, 3 empty tails) — no engine change needed, the decoder
+    only walks the `ceil` windows.
+  - **`00060117` (3120 cells, the "mixed-width quantifier")**: needed NO width
+    machinery at all — the purely positional nesting already puts the Quantifier(2)
+    outside the straddling REGION in the directory (pages `[int32×2, float64×2]`,
+    width per page from each page's own marker, which `ivt_decode_page()` always
+    honoured). The real blocker was `ivt_f2_dim_dir()` accepting a 1-of-4-entry
+    truncated directory (strict read stops at a `used < allocated` entry mid-table),
+    hiding the ANNUAL(15) code array; it now returns the FULLEST candidate that
+    satisfies the slot's `n_entries` (exact reads still win at their precedence rank).
+    Validated: Canada = Σprovinces ±2, care split exact, implied population 23.8M→29M
+    over 1979–1993.
+  - **Quiet early gate**: `ivt_f2_descriptor_02()` no longer warns — the container
+    byte gates it and every count/name is the file's own metadata (only the
+    value-layout count probe stays loud, `canivt_descriptor_02_probe`, now rarely
+    reached). These tables have **NO geography dimension**: REGION/GEOGRAPHY carry no
+    geographic identifiers, so `ivt_f2_geo_dim_index()` returns 0 and they stay
+    ordinary data dimensions (`metadata$geographies` empty; no `geo` cells column).
+    EN/FR label-block order now comes from the generation's own dictionary
+    vocabularies (`ivt_f2_dim_dict_en_first()`: "Label"/"Etiquette",
+    "Description_E"/"_F", "Desc"/"Descf", and the single-letter `01 45`/`01 46`
+    "E"/"F" pair) instead of the loud content score; member labels for code-only
+    reference dimensions read quietly from the code array
+    (`ivt_f2_code_array_members()`, shared with the count read), and footnote TEXT
+    blobs can no longer masquerade as short member runs
+    (`ivt_f2_dir_is_text_block()` now guards the shared member-array walk —
+    00060123's ANNUAL had grabbed two footnote halves as its labels).
+  The `08 00` time table also fixes the `04 00 20 00` no-descriptor siblings' labels
+  (LFHR/h2530002 Timeseries now real years 1976–2010 / 1974–2010, the leading
+  clipped 1974 extrapolated by the median step).
 - [x] **No-descriptor-block survey lineage — LFHR `Table-051` + criminal-justice
   `h2530002` DECODED, SUPPORTED** (2026-07-19). The UCR siblings: same `04 00 20 00`
   header but **no dimension-descriptor block at all** — no `81 01 20 00 f0` signature,

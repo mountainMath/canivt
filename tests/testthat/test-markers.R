@@ -58,6 +58,51 @@ test_that("footnote member bitmap recognizer reads set bits, rejects non-bitmaps
   expect_equal(ivt_f2_footnote_bitmap(mk_member_array()), integer(0))  # 01 01, not 84 01
 })
 
+test_that("time-series member table (81 02 <alloc> 00 08 00) decodes flags, slots and dates", {
+  # tb611996's block verbatim: alloc 4, raw flags e0 e0 e0 00 (pair-swapped ->
+  # slots {1,2,4}, a deleted hole at 3), three u24 dates = Jan 1 of 1996/1997/1995
+  # (days since 0000-03-01: 728965 / 729331 / 728600)
+  blk <- as.raw(c(0x81, 0x02, 0x04, 0x00, 0x08, 0x00,
+                  0xe0, 0xe0, 0xe0, 0x00,
+                  0x85, 0x1f, 0x0b,  0xf3, 0x20, 0x0b,  0x18, 0x1e, 0x0b))
+  dir <- matrix(c(0L, length(blk)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  tm <- ivt_f2_time_members(blk, dir)
+  expect_equal(tm$count, 3L)
+  expect_equal(tm$slots, c(1L, 2L, 4L))
+  expect_equal(tm$labels, c("1996", "1997", "1995"))
+  expect_equal(format(tm$dates, "%Y-%m-%d"),
+               c("1996-01-01", "1997-01-01", "1995-01-01"))
+  # a clipped LEADING date (h2530002 stores n-1 of n) is extrapolated by the step
+  blk2 <- as.raw(c(0x81, 0x02, 0x04, 0x00, 0x08, 0x00,
+                   0xe0, 0xe0, 0xe0, 0x00,
+                   0xff,                                  # clipped fragment
+                   0xab, 0x1c, 0x0b,  0x18, 0x1e, 0x0b)) # 728235 / 728600 = 1994 / 1995
+  dir2 <- matrix(c(0L, length(blk2)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  tm2 <- ivt_f2_time_members(blk2, dir2)
+  expect_equal(tm2$count, 3L)
+  expect_equal(tm2$labels, c("1993", "1994", "1995"))
+  # a name marker (56 00) is not a time table; garbage dates keep the count only
+  nm <- as.raw(c(0x81, 0x02, 0x02, 0x00, 0x56, 0x00, 0x41, 0x42, 0x43, 0x44))
+  dirn <- matrix(c(0L, length(nm)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  expect_null(ivt_f2_time_members(nm, dirn))
+  bad <- as.raw(c(0x81, 0x02, 0x02, 0x00, 0x08, 0x00, 0xe0, 0xe0,
+                  0x01, 0x00, 0x00,  0x02, 0x00, 0x00)) # dates out of range
+  dirb <- matrix(c(0L, length(bad)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  tmb <- ivt_f2_time_members(bad, dirb)
+  expect_equal(tmb$count, 2L)
+  expect_null(tmb$labels)
+})
+
+test_that("slot-aware cell grid maps member bits through slot positions", {
+  # 2 x 3 grid; the inner dimension's members sit at slots {1,2,4} (0-based {0,1,3})
+  lay <- ivt_f2_bit_layout(c(2L, 4L))               # extents: inner padded to 4
+  g_dense <- ivt_f2_cell_grid(c(2L, 3L), lay$stride)
+  g_slot  <- ivt_f2_cell_grid(c(2L, 3L), lay$stride, pos = list(NULL, c(0L, 1L, 3L)))
+  expect_identical(g_dense$tuples, g_slot$tuples)   # member ids unchanged
+  expect_equal(g_dense$bit, c(0L, 1L, 2L, 4L, 5L, 6L))
+  expect_equal(g_slot$bit,  c(0L, 1L, 3L, 4L, 5L, 7L))
+})
+
 # ---- 2. catalog <-> code constants ------------------------------------------
 
 test_that("documented marker byte sets equal the R/ code constants", {

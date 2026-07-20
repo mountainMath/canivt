@@ -160,15 +160,25 @@ ivt_f2_dim_dir_impl <- function(raw, k, slots = NULL) {
   # strict read first (max_entries = want + 4, honouring the end-of-table sentinel),
   # then the relaxed read (bounded to `want`) for exports whose blocks store an
   # ALLOCATED len2 > len the strict sentinel would stop on (cro0172986_ct.7/8).
+  # A read that reaches the DECLARED n_entries wins outright at its precedence
+  # rank; a SHORT read (n_entries allows up to 4 skipped null slots) is kept only
+  # as the best-so-far and returned after every candidate has been tried -- the
+  # `02 00 20 00` survey directories mix `used < allocated` entries mid-table
+  # (00060117's reference dimension: strict stops at entry 2 of 4, hiding the
+  # member code array that sizes the dimension), so an early truncated read must
+  # not shadow a later complete one.
+  best <- NULL
   for (relaxed in c(FALSE, TRUE)) {
     cap <- if (relaxed) want else want + 4L
     for (p in ptrs) {
       if (is.na(p) || p < 1L) next
       d <- ivt_f2_read_dir_at(raw, p, max_entries = cap, relaxed = relaxed)
-      if (ok(d)) return(d)
+      if (!ok(d)) next
+      if (nrow(d) >= want) return(d)
+      if (is.null(best) || nrow(d) > nrow(best)) best <- d
     }
   }
-  NULL
+  best
 }
 
 # Which of a dimension's two member-label blocks is English, decided by a
@@ -190,6 +200,38 @@ ivt_f2_dim_dict_en_first <- function(raw, dir) {
     ie <- regexpr("English Desc", txt, ignore.case = TRUE)
     ifr <- regexpr("Desc Fran", txt, ignore.case = TRUE)
     if (ie > 0L && ifr > 0L) return(ie < ifr)
+  }
+  # The survey generations' dictionary uses different field vocabularies --
+  # "Label" (EN) / "Etiquette" (FR) (00060117's Quantifier, stored in a schema
+  # CONTINUATION block without the `81 02` tag), or the single-letter fields
+  # "E" / "F" right after "Code" (tb611996's dimensions: Pascal records
+  # `01 45` / `01 46` inside the `.. 22 00` schema block) -- so this second
+  # pass scans every short entry and drops the tag gate. Same structural rule:
+  # the language of the two member-label blocks is the dictionary's field order.
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; ln <- dir[r, "len"]
+    if (ln < 12L || ln > 400L || off + ln > length(raw)) next
+    win <- raw[(off + 1L):(off + ln)]
+    txt <- raw_to_latin1(win)
+    ie <- regexpr("\\bLabel\\b", txt)
+    ifr <- regexpr("\\bEtiquette\\b", txt, ignore.case = TRUE)
+    if (ie > 0L && ifr > 0L) return(ie < ifr)
+    ie <- regexpr("Description_E", txt)                # 00060208-style field pair
+    ifr <- regexpr("Description_F", txt)
+    if (ie > 0L && ifr > 0L) return(ie < ifr)
+    # EMPLOY1-style "Desc" / "Descf" pair ("_Description" has no word boundary
+    # before "Desc", so it cannot shadow the standalone field name)
+    ie <- regexpr("\\bDesc\\b", txt)
+    ifr <- regexpr("\\bDescf\\b", txt)
+    if (ie > 0L && ifr > 0L) return(ie < ifr)
+    # the single-letter E/F fields, only inside a `81 02 <n> 00 22 00` schema
+    # block (the Pascal pair `01 45`/`01 46` is too short to trust elsewhere)
+    if (ln >= 8L && win[1] == as.raw(0x81) && win[2] == as.raw(0x02) &&
+        win[5] == as.raw(0x22) && win[6] == as.raw(0x00)) {
+      pe <- grepRaw(as.raw(c(0x01, 0x45)), win, fixed = TRUE)
+      pf <- grepRaw(as.raw(c(0x01, 0x46)), win, fixed = TRUE)
+      if (length(pe) && length(pf)) return(pe[1] < pf[1])
+    }
   }
   NA
 }
@@ -260,6 +302,11 @@ ivt_f2_dir_member_arrays <- function(raw, dir, cnt, rows, accept,
   for (r in rows) {
     len <- dir[r, "len"]
     if (len <= 8L || len < cnt + 4L) next          # separators / tiny framing
+    # footnote / note TEXT blobs (`[01 01][u16 len-4][01]<latin1, no NUL>`) reuse
+    # the plain-array tag and can shed prose fragments that pass as a short
+    # member run (00060123's 2-member ANNUAL grabbed two footnote halves) --
+    # the same structural recognizer the geography attribute walk uses
+    if (ivt_f2_dir_is_text_block(raw, dir[r, "off"], len)) next
     t <- NULL
     e <- tryCatch(ivt_f2_dir_entry_members(raw, dir[r, "off"], len),
                   error = function(e) NULL)
@@ -532,6 +579,14 @@ ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   geo_named <- which(vapply(d$dims, function(x)
     grepl("^\\s*(geograph|géograph|region|région|province)",
           dim_name(x), ignore.case = TRUE), logical(1)))
+  # The `02 00 20 00` survey generation has NO geography dimension in the
+  # package's sense: its regional dimensions ("REGION", "GEOGRAPHY", "Provinces")
+  # carry no standard geographic identifiers (no UID/DGUID, no GEO_NAME schema,
+  # no inline "<name> (<code>)" members), so they are ordinary data dimensions
+  # -- labelled by their own member arrays like any other -- and the table has
+  # no geography column. Return 0 (no geography); every consumer treats the
+  # table as all-data-dimensions.
+  if (isTRUE(d$gen02)) return(0L)
   # only OVERRIDE the dimension-1 default (and warn) when the header names a
   # NON-first dimension "Geography" -- when dimension 1 itself is so named, the
   # default already returns it, so this stays silent and changes nothing.

@@ -115,12 +115,17 @@ single dimension's block directory carries several of these, told apart by `b5`:
 |-------|------|---------|-----------|
 | `81 02 <n> 00 22 00 <field names>` | `0x22` | **field-schema dictionary** — the dimension's column vocabulary (`Code`, `Label`/`Etiquette`, …); the reference/time dimension names its sole field after itself ("Timeseries"), the naming fallback | `ivt_f2_02_schema_name()` |
 | `81 02 02 00 56 00 <EN><sep><desc><FR><sep><desc>` | `0x56` | **bilingual dimension-name marker** — the primary dimension-name source (a directory also holds a `.. 02 00 16 00` code array, so the generic doubled-name reader grabs a code; the `56` sub-byte uniquely tags the name) | `ivt_f2_02_name_marker()` |
-| `81 02 <alloc> 00 16 00 …<tail Pascal codes>` | `0x16` | **member CODE array** — `alloc = nextpow2(count)` Pascal codes at the block tail after a short binary header; the only member source for a reference dimension with no label array (years "1979-80", SEX "0"/"1"/"2"). Trailing pad slots (empty/whitespace) dropped | `ivt_f2_slot_member_count()` |
+| `81 02 <alloc> 00 16 00 …<tail Pascal codes>` | `0x16` | **member CODE array** — `alloc = nextpow2(count)` Pascal codes at the block tail after a short binary header; a member/label source for a reference dimension with no label array (years "1979-80", SEX "0"/"1"/"2"). Trailing pad slots (empty/whitespace) dropped | `ivt_f2_code_array_members()` |
+| `81 02 <alloc> 00 08 00 <alloc slot-flag bytes> … <u24 dates>` | `0x08` | **time-series member table** — `alloc` one-byte member-SLOT flags (**byte-pair-swapped** like every container bitmap; non-zero = populated slot, deleted members leave HOLES — tb611996's periods sit at slots {1,2,4}) + one 3-byte little-endian date per populated slot, right-aligned at the block end: **days since 0000-03-01** (proleptic Gregorian; the value lands on Jan 1 of the period's year for annual series). Count = non-zero flags; labels are GENERATED from the dates (the year, for an annual step); a clipped leading date (h2530002 stores 36 of 37) is extrapolated backward by the median step. The presence bitmap and page directory address these members **by slot**, so the layout carries `dims[[k]]$slots` | `ivt_f2_time_members()` |
 
 The whole descriptor for this generation is rebuilt from the slot table
-(`ivt_f2_descriptor_02()`, LOUD `canivt_descriptor_02`) because its descriptor
-BLOCK is framed irregularly; a lone unsized reference dimension is recovered from
-the value-page layout (`canivt_descriptor_02_probe`). See decode-history.md.
+(`ivt_f2_descriptor_02()`) — the designed, quiet read for `byte 0 == 0x02`
+(the descriptor BLOCK is framed irregularly and is not consulted); a lone
+unsized reference dimension is recovered from the value-page layout (LOUD
+`canivt_descriptor_02_probe`). These tables have **no geography dimension**:
+their regional dimensions (REGION/GEOGRAPHY/Provinces) carry no geographic
+identifiers and stay ordinary data dimensions (`ivt_f2_geo_dim_index()`
+returns 0). See decode-history.md.
 
 ## F. Directory value-entry framings (block-directory entries)
 

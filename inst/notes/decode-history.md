@@ -265,6 +265,66 @@ tables, and viewer/CSV-validated on the wider corpus:
   single-presence-record layout doesn't model) and `tb611996` (multi-page sparse whose
   `prod(entry counts)` matches none of its 8 directory entries → ambiguous probe; true
   count 3 stated only in the title "1995 to 1997").
+- **`02 00 20 00` generation CLOSED — time-series member table, slot-aware layout,
+  quiet gate, no geography dimension** (2026-07-19, second pass). All 23 files now
+  decode **strict-clean**; both remaining gaps fell to metadata reads, not new layout
+  machinery:
+  - **The `81 02 <alloc> 00 08 00` TIME-SERIES MEMBER TABLE** (`ivt_f2_time_members()`)
+    is how B2020 stores a reference dimension with no code/label arrays: `alloc`
+    one-byte member-slot flags + one **u24 LE date per member** right-aligned at the
+    block end. The epoch is **0000-03-01** (proleptic Gregorian — the classic
+    computational-calendar epoch): every stored date lands on Jan 1 of its year,
+    calibrated on three files at once (LFHR Table-051 1976–2010, h2530002 1975–2010
+    with the 1974 lead date clipped by the block length → extrapolated backward by the
+    median step, tb611996 1995–97 — its three dates appear verbatim in LFHR's run).
+    Labels are generated (the year when the sorted median step is 350–380 days, else
+    the ISO period start). Count = non-zero flags; this sized tb611996's ANNUAL
+    RATE = 3, which the value-layout probe could never disambiguate from 4
+    (`np2(3) == np2(4)`, and its `b2 = 0x20` pages have no exact-fit constraint).
+  - **The flag bytes are BYTE-PAIR-SWAPPED and mark member SLOTS, which the presence
+    bitmap addresses** — deleted members leave holes. tb611996's periods sit at slots
+    {1,2,4}: exactly 1/3 of its stored values sat off the dense member grid until the
+    layout became slot-aware (`dims[[k]]$slots` → extent-based nesting/window/stride
+    geometry in `ivt_layout()`, per-member bit positions in `ivt_f2_cell_grid(pos=)`,
+    slot→member `match()` for straddle/paged coordinates in `ivt_decode()`, loud
+    `canivt_slot_hole` if a value ever lands on a hole). The swap direction is
+    self-validating: h2530002's raw flags read hole-at-37 + member-at-38, which the
+    swap turns into the dense 1..37 its fully-dense 296-cell store requires. 4020
+    cells (popcount-exact across 5 data pages + 3 empty `np2`-padded tail windows the
+    decoder never visits); year mapping (1996, 1997, 1995 in member order) confirmed
+    by the HAART signature — "Infectious and parasitic diseases" 11.4 → 9.9 → 7.7
+    across 1995 → 1997, the strongest decline in the table. Its pages also carry a
+    24-byte-per-cause appendix after the value run (`b2 = 0x20`, extent-checked ≤,
+    presence authoritative, ignored).
+  - **`00060117` ("mixed-width") needed NO width machinery**: positional nesting
+    already places Quantifier(2) OUTSIDE the straddling REGION(13, ipc 8 → 2 windows)
+    in the directory — 4 pages `[84, 84, 88, 88]`, one width per page from each page's
+    own marker, which `ivt_decode_page()` always read per-page. The actual blocker:
+    `ivt_f2_dim_dir()` accepted a 1-of-4-entry TRUNCATED directory (the strict read
+    stops at a mid-table `used < allocated` entry, and `n_entries − 4 ≤ 1` let it
+    pass), hiding the ANNUAL(15) fiscal-year code array. It now returns the FULLEST
+    ok() candidate; a read reaching the declared `n_entries` still wins at its
+    precedence rank. 3120 cells; Canada = Σprovinces ±2 rounding, care split exact,
+    count/rate ratio implies Canada's population 23.8M → 29M over 1979–1993.
+  - **Cleanup — the gate is now the DESIGNED path, quiet**: `ivt_f2_descriptor_02()`
+    no longer raises `canivt_descriptor_02` (byte-0 gate + file's own codebook; only
+    the count probe stays loud and is now rarely reachable). **No geography
+    dimension**: per design decision, the generation's REGION/GEOGRAPHY dims carry no
+    geographic identifiers (no UID/DGUID/GEO_NAME/inline pattern), so
+    `ivt_f2_geo_dim_index()` returns **0** and they stay ordinary, fully-labelled
+    data dimensions — `metadata$geographies` is empty, cells carry no `geo` column,
+    and every `gd == 0` consumer (geo_count/block_dir/marker_labels/tidy/print) holds.
+    EN/FR block order is read from the generation's own dictionary vocabularies
+    (`ivt_f2_dim_dict_en_first()` second pass: "Label"/"Etiquette",
+    "Description_E"/"_F", "Desc"/"Descf", single-letter `01 45`/`01 46` E/F fields)
+    replacing the loud content score; code-only reference dims label from
+    `ivt_f2_code_array_members()` (extracted from the count read, shared);
+    `ivt_f2_dir_is_text_block()` now guards `ivt_f2_dir_member_arrays()` so footnote
+    prose can't pose as a short member run (00060123's ANNUAL "1986/1991"); the
+    `56 00` marker name is cleaned of its `<name>2<name>` doubling
+    (`ivt_f2_02_name_clean()`: "ANNUAL    2ANNUAL…" → "ANNUAL"); the descriptor-offset
+    lookup inside the gate is a quiet probe (the block is only an auxiliary name
+    source there — 00060129's `@32` relocation no longer warns).
 
 ## Completed work log
 

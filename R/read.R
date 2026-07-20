@@ -256,7 +256,9 @@ print.ivt <- function(x, ...) {
   cli::cli_h1("IVT table {m$product_id}")
   cli::cli_text(m$title_en)
   cli::cli_text("{nrow(x$cells)} cells | {m$n_geographies} geographies | {length(m$dimensions)} dimensions | {length(m$footnotes)} footnotes")
-  geo_msg <- if (!is.null(m$geographies[["geo_name"]]))
+  geo_msg <- if (length(m$geographies$member_id) == 0L)
+      "no geography dimension (all dimensions are ordinary data dimensions)"
+    else if (!is.null(m$geographies[["geo_name"]]))
       "geography labelled by name + uid"
     else if (!is.null(m$geographies[["geo_uid"]]))
       "geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)"

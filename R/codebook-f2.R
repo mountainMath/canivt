@@ -260,8 +260,10 @@ ivt_f2_match_dim <- function(name, dims) {
 # of list(name, count, labels), one per matched dimension, in codebook order.
 ivt_f2_marker_labels <- function(raw, tail_bytes = 600000L) {
   d <- ivt_f2_descriptor(raw)
-  data_dims <- if (!is.null(d) && length(d$dims) > 1L)
-    d$dims[-ivt_f2_geo_dim_index(raw, d)] else list()
+  data_dims <- if (!is.null(d) && length(d$dims) > 1L) {
+    gi <- ivt_f2_geo_dim_index(raw, d)
+    if (gi >= 1L) d$dims[-gi] else d$dims        # gi == 0: no geography dimension
+  } else list()
   if (!length(data_dims)) return(list())
   start <- max(0L, length(raw) - tail_bytes)
   markers <- ivt_f2_codebook_dim_markers(raw, start)
@@ -430,6 +432,7 @@ ivt_f2_dir_has_geo <- function(raw, d)
 # lets us read the reverse-stored root chunk positionally (`ivt_f2_geo_root_dir`).
 ivt_f2_geo_block_dir <- function(raw) {
   gi <- ivt_f2_geo_dim_index(raw)
+  if (gi == 0L) return(NULL)                           # no geography dimension
   d <- ivt_f2_dim_dir(raw, gi)                         # the geography dimension
   if (!is.null(d)) return(d)
   # the geography dimension's slot directory may OVER-declare its entry count --
@@ -3022,6 +3025,103 @@ ivt_f2_dims_from_slots <- function(raw, slots, ndim) {
   out
 }
 
+# The TIME-SERIES member table of the survey generations: a
+# `81 02 <alloc u16> 00 08 00` block in the reference-period dimension's slot
+# directory (the `08 00` sub-marker distinguishes it from the field-schema
+# `22 00`, name-marker `56 00` and member-code `16 00` blocks). Layout:
+#
+#   [81 02][u16 alloc][08 00]  <alloc one-byte slot flags>  ...  <u24 dates>
+#
+# - the ALLOC slot flags mark which member slots are populated (non-zero;
+#   observed 0xe0/0xa0, with deleted holes -- LFHR Table-051 stores 35 members
+#   across 36 slots). Member ids are the populated slots in slot order, so
+#   `count = #nonzero flags` -- the member count for a dimension that stores NO
+#   code or label array at all (tb611996's 3 years, LFHR's 35, EMPLOY1's 2).
+# - the block TAIL holds one 3-byte little-endian DATE per populated slot, in
+#   slot order: **days since 0000-03-01** (proleptic Gregorian -- the classic
+#   computational-calendar epoch; verified on LFHR Table-051 1976-2010,
+#   h2530002 1975-2010 and tb611996 1995-1997, each landing on January 1 of its
+#   year). The run is right-aligned against the block end; a few leading bytes
+#   may be clipped (h2530002 stores only 36 of its 37 dates -- the missing
+#   LEADING period is extrapolated backward by the run's median step).
+#
+# Member LABELS are generated from the dates -- B2020 itself renders these
+# dimensions from the date table (there is no label array to read): an annual
+# series labels each member with its year, anything else with the ISO period
+# start date. Returns list(count, dates (Date, NA where unrecoverable),
+# labels), or NULL when the directory carries no such block.
+ivt_f2_time_members <- function(raw, dir) {
+  if (is.null(dir)) return(NULL)
+  n <- length(raw)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 10L || off + 6L > n || off + len > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 4L]) != 0x00L || as.integer(raw[off + 5L]) != 0x08L ||
+        as.integer(raw[off + 6L]) != 0x00L) next
+    alloc <- rd_u16(raw, off + 2L)
+    if (is.na(alloc) || alloc < 1L || bitwAnd(alloc, alloc - 1L) != 0L ||
+        6L + alloc > len) next
+    flags <- as.integer(raw[(off + 7L):(off + 6L + alloc)])
+    cnt <- sum(flags != 0L)
+    if (cnt < 1L) next
+    # Member SLOT positions: the flag bytes are BYTE-PAIR-SWAPPED like every
+    # other bitmap in the container; the swapped non-zero positions are the
+    # member slots. Deleted members leave holes (tb611996's periods sit at
+    # slots {1,2,4}), and the presence bitmap addresses members BY SLOT -- the
+    # swap direction is self-validating: h2530002's raw flags read a hole at 37
+    # + a member at 38, which the swap turns into the dense 1..37 its
+    # fully-dense 296-cell store requires.
+    sw <- flags
+    if (alloc >= 2L && alloc %% 2L == 0L) {
+      ev <- seq.int(1L, alloc, 2L); od <- ev + 1L
+      sw[ev] <- flags[od]; sw[od] <- flags[ev]
+    }
+    slots <- which(sw != 0L)
+    # the date run is right-aligned at the block end, 3 bytes per populated slot
+    nd <- min(cnt, (len - 6L - alloc) %/% 3L)
+    days <- integer(0)
+    if (nd >= 1L) {
+      p <- off + len - 3L * nd
+      b <- as.integer(raw[(p + 1L):(off + len)])
+      days <- b[seq(1L, by = 3L, length.out = nd)] +
+        256L * b[seq(2L, by = 3L, length.out = nd)] +
+        65536L * b[seq(3L, by = 3L, length.out = nd)]
+      # sanity: every date within years ~1600-2200 (days since 0000-03-01),
+      # else this is not a date table and the block is left alone
+      if (any(days < 584000L | days > 804000L)) days <- integer(0)
+    }
+    dates <- rep(as.Date(NA), cnt)
+    if (length(days)) {
+      # days since 0000-03-01 -> R Date: RD(1970-01-01) = 719163 and the epoch
+      # sits 306 days before RD day 1, so origin-relative days = stored-306-719163
+      got <- as.Date(days - 306L - 719163L, origin = "1970-01-01")
+      miss <- cnt - length(got)
+      if (miss > 0L && length(got) >= 2L) {
+        # leading period(s) clipped from the stored run (h2530002 stores 36 of
+        # 37 dates): extrapolate backward by the run's median step
+        step <- stats::median(diff(sort(as.integer(got))))
+        got <- c(min(got) - step * (miss:1L), got)
+      }
+      if (length(got) == cnt) dates <- got
+    }
+    labels <- NULL
+    if (!anyNA(dates)) {
+      # frequency from the SORTED dates -- storage order is member order, which
+      # need not be chronological (tb611996 appended its 1995 period last)
+      step <- if (cnt >= 2L) stats::median(diff(sort(as.integer(dates)))) else 365
+      labels <- if (cnt == 1L || (step >= 350 && step <= 380)) {
+        format(dates, "%Y")                       # an annual series: the year
+      } else {
+        format(dates, "%Y-%m-%d")                 # anything else: period start
+      }
+    }
+    return(list(count = as.integer(cnt), slots = slots, dates = dates,
+                labels = labels))
+  }
+  NULL
+}
+
 # One dimension's member count from its codebook block directory, WITHOUT the
 # descriptor -- used to synthesize the descriptor when the file carries no
 # descriptor block (`ivt_f2_descriptor_from_slots()`). Priority:
@@ -3047,6 +3147,12 @@ ivt_f2_slot_member_count <- function(raw, dir) {
     if (length(got) > best && !all(grepl("^[0-9]+$", got))) best <- length(got)
   }
   if (best > 0L) return(best)
+  # the time-series member table (`81 02 <alloc> 00 08 00`, flags + dates) is
+  # the authoritative count for a reference-period dimension that stores no
+  # member array at all (tb611996's alloc-4 table is too small for the generic
+  # flag path below)
+  tm <- ivt_f2_time_members(raw, dir)
+  if (!is.null(tm)) return(tm$count)
   for (r in seq_len(nrow(dir))) {
     off <- dir[r, "off"]; len <- dir[r, "len"]
     if (len < 8L || off + 4L > n) next
@@ -3080,6 +3186,21 @@ ivt_f2_slot_member_count <- function(raw, dir) {
   # like "NUMBER" or "1996-97"). Reached only when the strict `01 01`/`81 01`
   # label reader above found nothing, so it never shrinks a dimension the (more
   # complete) label arrays already sized.
+  codes <- ivt_f2_code_array_members(raw, dir)
+  if (!is.null(codes)) return(length(codes))
+  NA_integer_
+}
+
+# The member CODES of a survey-generation code-array block (`81 02 <alloc> 00
+# <b5> 00`, b5 not one of the schema/name/time sub-markers): the trailing Pascal
+# run whose end is closest to the block end (a stray run inside the binary
+# header ends earlier), with the alloc padding slots dropped. These codes ARE
+# the member list for a reference-period dimension with no separate label array
+# ("1979-80" .. "1993-94"); shared by the member-count and member-label reads.
+# Returns the codes in storage order, or NULL.
+ivt_f2_code_array_members <- function(raw, dir) {
+  if (is.null(dir)) return(NULL)
+  n <- length(raw)
   drop_pad <- function(x) {                          # trim trailing empty/space slots
     keep <- nzchar(trimws(x)); if (!any(keep)) return(character(0))
     x[seq_len(max(which(keep)))]
@@ -3089,8 +3210,8 @@ ivt_f2_slot_member_count <- function(raw, dir) {
     if (len < 8L || off + 6L > n) next
     if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
         as.integer(raw[off + 4L]) != 0x00L) next
-    if (as.integer(raw[off + 5L]) %in% c(0x22L, 0x56L)) next   # schema / name marker
-    hi <- off + len; cnt <- 0L; end_best <- -1L
+    if (as.integer(raw[off + 5L]) %in% c(0x22L, 0x56L, 0x08L)) next   # schema / name / time marker
+    hi <- off + len; best <- NULL; end_best <- -1L
     i <- off + 6L
     while (i < hi) {
       if (is.null(rd_pascal(raw, i))) { i <- i + 1L; next }
@@ -3102,13 +3223,13 @@ ivt_f2_slot_member_count <- function(raw, dir) {
       }
       t <- drop_pad(texts)
       if (length(t) >= 1L && max(nchar(t)) <= 64L && j > end_best) {
-        cnt <- length(t); end_best <- j
+        best <- t; end_best <- j
       }
       i <- max(j, i + 1L)
     }
-    if (cnt > 0L) return(cnt)
+    if (length(best)) return(best)
   }
-  NA_integer_
+  NULL
 }
 
 # The name from the FIRST `81 02 02 00` doubled-name marker in a block directory,
@@ -3126,7 +3247,7 @@ ivt_f2_first_marker_name <- function(raw, dir) {
         as.integer(raw[off + 3L]) != 0x02L || as.integer(raw[off + 4L]) != 0x00L) next
     m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(n, off + len)], 0L)
     got <- if (nrow(m)) m$name[!is.na(m$name) & nchar(m$name) >= 3L] else character(0)
-    if (length(got)) return(got[1L])
+    if (length(got)) return(ivt_f2_02_name_clean(got[1L]))
   }
   NA_character_
 }
@@ -3209,9 +3330,22 @@ ivt_f2_02_name_marker <- function(raw, dir) {
         as.integer(raw[off + 5L]) != 0x56L) next
     m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(n, off + len)], 0L)
     got <- m$name[!is.na(m$name) & nchar(m$name) >= 3L]
-    if (length(got)) return(got[1L])
+    if (length(got)) return(ivt_f2_02_name_clean(got[1L]))
   }
   NA_character_
+}
+
+# Clean a survey-generation name-marker run whose doubled-name splitter did not
+# fire: the `56 00` marker stores `<name><'2'><name-or-format>` per language
+# (space-padded on some files -- 00060117's "ANNUAL    2ANNUAL    ANNUELLE
+# 2ANNUELLE", tb111996's "ANNUAL2yearANNUELLE2year", h2530002's
+# "Date2DateDate2"), so when the run still contains a '2' separator the name is
+# the trimmed text BEFORE the first '2'. Names without a '2' pass through
+# untouched ("SEX", "REGION", "Quantifier", "COUNT/RATE").
+ivt_f2_02_name_clean <- function(nm) {
+  if (is.na(nm) || !grepl("2", nm, fixed = TRUE)) return(nm)
+  pre <- trimws(sub("2.*$", "", nm))
+  if (nchar(pre) >= 3L) pre else nm
 }
 
 # The dimension name carried by a `02 00 20 00` survey dimension's FIELD-SCHEMA
@@ -3303,7 +3437,11 @@ ivt_f2_02_desc_reference_name <- function(raw, D) {
 # caller falls back to the generic descriptor walk). LOUD: a metadata-rebuilt
 # descriptor is not the file's own descriptor block.
 ivt_f2_descriptor_02 <- function(raw) {
-  D <- tryCatch(ivt_f2_descriptor_offset(raw), error = function(e) NA_integer_)
+  # the descriptor BLOCK is only an auxiliary NAME source in this gate (the
+  # dimensions come from the codebook), so its offset lookup is a quiet probe --
+  # a relocation scan (00060129's @32 does not resolve) is not a fallback here
+  D <- ivt_quietly(tryCatch(ivt_f2_descriptor_offset(raw),
+                            error = function(e) NA_integer_))
   slots <- ivt_f2_dim_slots(raw, m = 32L)
   ndim <- ivt_f2_slot_ndim(slots)
   if (ndim < 1L) return(NULL)
@@ -3317,6 +3455,13 @@ ivt_f2_descriptor_02 <- function(raw) {
     if (is.na(nm) && !is.na(D) && D >= 1L) nm <- ivt_f2_02_desc_reference_name(raw, D)
     if (is.na(cnt) || cnt < 1L) { cnt <- NA_integer_; unsized <- c(unsized, k) }
     dims[[k]] <- list(name = nm, count = as.integer(cnt), type = 0L, double01 = FALSE)
+    # a time-series member table can place its members at non-contiguous SLOTS
+    # (deleted holes); carry the slot positions so the layout addresses the
+    # bitmap by slot while member ids stay compact
+    tm <- ivt_f2_time_members(raw, dir)
+    if (!is.null(tm) && !is.na(cnt) && tm$count == cnt &&
+        !identical(tm$slots, seq_len(cnt)))
+      dims[[k]]$slots <- tm$slots
   }
   # A reference-period / time dimension sometimes carries NO member array in its
   # codebook (no code list, no labels -- just a field-schema block), so its count
@@ -3350,11 +3495,13 @@ ivt_f2_descriptor_02 <- function(raw) {
   } else if (length(unsized) > 1L) {
     return(NULL)
   }
-  ivt_fallback(paste(
-    "The 02-00-20-00 survey descriptor block is framed irregularly; the dimension",
-    "counts and names were read from each dimension's codebook (header slot",
-    "table)."), class = "canivt_descriptor_02")
-  list(n_dim = ndim, dims = dims, title = NA_character_)
+  # This is the DESIGNED read for the generation, not a fallback: the container
+  # byte gates it up front, and every count and name above came from the file's
+  # own slot table and codebook blocks -- so it is quiet. Only the value-layout
+  # count probe (above) is a heuristic and warns. `gen02` tags the descriptor so
+  # downstream metadata reads (the header-name geography identification) know
+  # they are on the survey generation's designed path too.
+  list(n_dim = ndim, dims = dims, title = NA_character_, gen02 = TRUE)
 }
 
 ivt_f2_descriptor <- function(raw)
@@ -3619,7 +3766,7 @@ ivt_f2_descriptor_impl <- function(raw) {
 # the wrong fixed-offset count, e.g. 16383 for 98-10-0241). The count's byte width
 # is still handled by `ivt_f2_descriptor()`.
 ivt_f2_geo_dim <- function(dims, gd = 1L)
-  if (length(dims) >= gd) dims[[gd]] else NULL
+  if (gd >= 1L && length(dims) >= gd) dims[[gd]] else NULL   # gd == 0: no geography
 
 # Geography member count, from the descriptor's geography record. Reliable for any
 # dimensionality; the fixed-offset u16 `ivt_f2_header_geo_count()` is only correct
@@ -3631,6 +3778,7 @@ ivt_f2_geo_count <- function(raw)
 
 ivt_f2_geo_count_impl <- function(raw) {
   d <- ivt_f2_descriptor(raw)
+  if (!is.null(d) && ivt_f2_geo_dim_index(raw, d) == 0L) return(0L)  # no geography
   geo <- if (is.null(d)) NULL
          else ivt_f2_geo_dim(d$dims, ivt_f2_geo_dim_index(raw, d))
   if (is.null(geo)) return(ivt_f2_header_geo_count(raw))

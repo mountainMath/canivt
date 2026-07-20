@@ -97,6 +97,19 @@ ivt_layout_impl <- function(raw, d = NULL) {
     cli::cli_abort("IVT descriptor has too few dimensions to decode.")
   cnt <- vapply(d$dims, `[[`, 1L, "count")
   m <- length(cnt)
+  # Per-dimension member SLOT positions (1-based), when the codebook declares
+  # them (the survey generations' time-series member table can carry deleted
+  # holes -- tb611996's periods occupy slots {1,2,4}). The bitmap and the
+  # directory address members by SLOT, so all GEOMETRY below (nesting widths,
+  # window counts, strides) uses the slot EXTENT, while member counts keep
+  # sizing the cell grid; `slot_pos` lets the decode map slot -> member id.
+  slot_pos <- lapply(d$dims, function(x) {
+    s <- x$slots
+    if (is.null(s) || !length(s) || identical(as.integer(s), seq_along(s)))
+      NULL else as.integer(s)
+  })
+  ext <- cnt
+  for (j in seq_len(m)) if (!is.null(slot_pos[[j]])) ext[j] <- max(slot_pos[[j]])
   # the geography dimension (dimension 1 outside the profile lineage) only
   # determines the "geo" slug and the geo_in_page provenance tag -- the nesting
   # below treats every dimension identically by position.
@@ -118,23 +131,34 @@ ivt_layout_impl <- function(raw, d = NULL) {
   # sized to the used bits, 64 bytes, misaligns the value run.)
   blk <- 1L; straddle <- NA_integer_; inner_block <- 1L
   for (j in m:1L) {
-    need <- ivt_f2_nextpow2(cnt[j] * blk)
+    need <- ivt_f2_nextpow2(ext[j] * blk)
     if (need > IVT_PRES_BITS || j == 1L) { straddle <- j; inner_block <- blk; break }
     blk <- need
   }
   ipc_straddle <- IVT_PRES_BITS %/% inner_block
-  win <- as.integer(ceiling(cnt[straddle] / ipc_straddle))
+  win <- as.integer(ceiling(ext[straddle] / ipc_straddle))
   inpage_idx <- straddle:m
   ipc <- cnt[inpage_idx]; ipc[1L] <- ipc_straddle   # cap the straddle dimension
-  lay  <- ivt_f2_bit_layout(ipc)
-  grid <- ivt_f2_cell_grid(ipc, lay$stride)
+  # bit strides span the slot EXTENTS; the grid enumerates real MEMBERS, each
+  # member's bit taken from its slot position (dense when no slot table)
+  ipc_ext <- ext[inpage_idx]; ipc_ext[1L] <- ipc_straddle
+  lay  <- ivt_f2_bit_layout(ipc_ext)
+  # per-in-page-dim 0-based bit positions; the straddle's in-page part stays
+  # window-dense (slot-aware straddles are mapped window-side in ivt_decode)
+  pos1 <- vector("list", length(inpage_idx))
+  if (length(inpage_idx) > 1L) for (t in 2:length(inpage_idx)) {
+    p <- slot_pos[[inpage_idx[t]]]
+    if (!is.null(p)) pos1[[t]] <- p - 1L
+  }
+  grid <- ivt_f2_cell_grid(ipc, lay$stride, pos = pos1)
 
   # Paged dimensions, innermost-first: the straddle window, then every dimension
   # outside the straddle toward geography. When geography straddles, this is just
-  # the geography window (a flat, contiguous directory).
+  # the geography window (a flat, contiguous directory). Entry spans and strides
+  # cover the slot EXTENT of each paged dimension.
   ent_idx <- straddle; ent_counts <- win
   if (straddle > 1L) for (j in (straddle - 1L):1L) {
-    ent_idx <- c(ent_idx, j); ent_counts <- c(ent_counts, cnt[j])
+    ent_idx <- c(ent_idx, j); ent_counts <- c(ent_counts, ext[j])
   }
   estride <- integer(length(ent_counts)); eb <- 1L
   for (t in seq_along(ent_counts)) { estride[t] <- eb; eb <- ivt_f2_nextpow2(ent_counts[t] * eb) }
@@ -143,6 +167,7 @@ ivt_layout_impl <- function(raw, d = NULL) {
        straddle = straddle, ipc = ipc, window_count = win,
        inpage_idx = inpage_idx, grid = grid, rec_bytes = lay$rec_bytes,
        ent_idx = ent_idx, ent_counts = ent_counts, estride = estride,
+       slot_pos = slot_pos,
        geo_in_page = straddle == gd)
 }
 
@@ -340,7 +365,7 @@ ivt_decode <- function(raw, lay = NULL) {
   inpage_dim   <- lay$inpage_idx
 
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
-  skipped <- 0L; skipped_ex <- character()
+  skipped <- 0L; skipped_ex <- character(); hole_vals <- 0L
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
@@ -366,8 +391,25 @@ ivt_decode <- function(raw, lay = NULL) {
     }
     if (length(paged_dim)) for (t in seq_along(paged_dim))
       md[, paged_dim[t]] <- paged_member[r, t] + 1L
-    # the straddle's windows over-cover its member count; drop the padding tail
-    keep <- md[, straddle] <= lay$counts[straddle]
+    # Straddle / paged coordinates are SLOT ids at this point (the in-page grid
+    # already maps slots to member ids through its bit positions). Map slot ->
+    # member id for slot-aware straddle/paged dimensions (deleted holes and
+    # padding fall out as NA), and drop the straddle's window-padding tail
+    # beyond its member count. A value at a deleted slot would be a format
+    # misunderstanding -- counted and reported loudly below.
+    keep <- rep(TRUE, np)
+    for (j in unique(c(straddle, paged_dim))) {
+      sp <- lay$slot_pos[[j]]
+      if (!is.null(sp)) {
+        mid <- match(md[, j], sp)
+        bad <- is.na(mid)
+        if (any(bad)) { hole_vals <- hole_vals + sum(pg$vals[bad] != 0) }
+        keep <- keep & !bad
+        md[, j] <- ifelse(bad, 1L, mid)               # placeholder; rows filtered by keep
+      } else if (j == straddle) {
+        keep <- keep & md[, j] <= lay$counts[j]
+      }
+    }
     if (!all(keep)) { md <- md[keep, , drop = FALSE]; pg$vals <- pg$vals[keep] }
     if (!nrow(md)) next
     ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- pg$vals
@@ -377,6 +419,12 @@ ivt_decode <- function(raw, lay = NULL) {
       "{skipped} page-directory entr{?y/ies} point{?s/} at unrecognised page",
       "markers ({.val {skipped_ex}}); the cells of {skipped} page{?s} are",
       "MISSING from the decode."), class = "canivt_skipped_pages")
+  }
+  if (hole_vals > 0L) {
+    ivt_fallback(paste(
+      "{hole_vals} non-zero value{?s} sat at DELETED member slots (the codebook",
+      "slot table marks those positions as holes); {?it was/they were} dropped."),
+      class = "canivt_slot_hole")
   }
 
   if (ci == 0L) {

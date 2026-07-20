@@ -49,10 +49,17 @@ Validated **cell-exact (byte-identical to the two former decoders)** on the six
 reference tables (0241/0077/0662 data-dim straddle; 0023/0129/1991 geography
 straddle), and viewer/CSV-validated across the wider corpus — 1996–2021 census
 tables, 1981/1991 profiles, 2001/2006 F-series, large 2016 `98-400-X` crosstabs,
-custom cro/ord extracts, and the **Canadian Business Patterns** Business-Register
+custom cro/ord extracts, the **Canadian Business Patterns** Business-Register
 lineage (establishment counts by DA × 6-digit NAICS × employment size; geography
 position varies year to year, bare-numeric-code geography, `80 ff` descriptor
-signature). Per-table validation records and the story of how
+signature), and the **`02 00 20 00` survey generation** (byte 0 == `0x02`:
+Health Statistics 1999, Agriculture/Small Area Business 1996, tb-series —
+all 23 corpus files **strict-clean** via the quiet early-gated
+`ivt_f2_descriptor_02()`, which rebuilds the descriptor from the header slot
+table + per-dimension codebook; these tables have **NO geography dimension** —
+their REGION/GEOGRAPHY dims carry no geographic identifiers and stay ordinary
+data dimensions, `ivt_f2_geo_dim_index()` returns 0, `metadata$geographies`
+empty, no `geo` cells column). Per-table validation records and the story of how
 each was cracked live in [`decode-history.md`](inst/notes/decode-history.md); the
 measured coverage lives in [`coverage.md`](inst/notes/coverage.md).
 
@@ -121,6 +128,17 @@ The *rules*; the measurements and original bugs behind them are in
   dimensions (descriptor order, outermost first; each level padded to the next
   power of two of count × inner-block; innermost in the low bits). Records are
   **byte-pair-swapped** then read **MSB-first**.
+- **The bitmap addresses members by SLOT, and slots can have holes.** The survey
+  generations' time dimensions store a `81 02 <alloc> 00 08 00` **time-series
+  member table** (`ivt_f2_time_members()`, markers.md §E.1): `alloc` one-byte
+  slot flags (**pair-swapped**; non-zero = populated; deleted members leave
+  holes — tb611996's periods sit at slots {1,2,4}) + one u24 LE date per member,
+  right-aligned, **days since 0000-03-01** (lands on Jan 1 for annual series;
+  labels are GENERATED from the dates). When slots ≠ 1..count, the descriptor
+  dim carries `$slots` and the layout is slot-aware: extents drive
+  nesting/window/stride geometry, `ivt_f2_cell_grid(pos=)` maps member bits to
+  slot positions, `ivt_decode()` maps straddle/paged slot coordinates back to
+  member ids (a value at a deleted slot warns `canivt_slot_hole`).
 - **Value run start** = `4 + presence_len + trailer(b2) + 32·(b3 − 8)`
   (`presence_len = rec_bytes × geos_per_page`); trailer and head come from the
   marker (`ivt_value_trailer(b0, b2, b3)`): trailer = `b2 == 0x00` → 0, else

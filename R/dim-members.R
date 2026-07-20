@@ -88,6 +88,25 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   named <- !is.null(nm) && !is.na(nm) && nzchar(nm)
   fields <- ivt_f2_dim_field_schema(raw, dir)
   mk <- if (named) ivt_f2_dir_marker_entry(raw, nm, dir) else 0L
+  # Member sources for a dimension with NO `[01 01]`/`[81 01]` label array --
+  # both the file's own member records, in member order (the survey
+  # generations' reference-period dimensions):
+  #  - the time-series member table (`81 02 <alloc> 00 08 00`: slot flags +
+  #    per-member dates) -- labels GENERATED from the dates (the year for an
+  #    annual series), exactly as B2020 renders them; language-neutral;
+  #  - the member CODE array (the embedded Pascal code run, e.g. the fiscal
+  #    years "1979-80" .. "1993-94").
+  alt_members <- function() {
+    tm <- ivt_f2_time_members(raw, dir)
+    if (!is.null(tm) && tm$count == cnt && !is.null(tm$labels))
+      return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
+                            label_en = tm$labels))
+    codes <- ivt_f2_code_array_members(raw, dir)
+    if (!is.null(codes) && length(codes) == cnt)
+      return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
+                            label_en = codes))
+    NULL
+  }
   # a named dimension whose doubled-name marker does not resolve yields NULL (the
   # caller falls back), exactly as the former label reader did -- the whole-directory
   # scan is reserved for the (future) nameless-geography case. EXCEPTION: when the
@@ -100,7 +119,7 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
     if (length(vb) == cnt)
       return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
                             label_en = vb))
-    return(NULL)
+    return(alt_members())
   }
   # A named dimension whose doubled-name marker does NOT resolve (mk == 0) is not
   # necessarily unreadable: the `02 00 20 00` survey reference-period dimension
@@ -112,7 +131,7 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
 
   # --- collect the clean member-value runs (length cnt) ---
   runs <- ivt_f2_dim_member_runs(raw, dir, cnt, mk)
-  if (!length(runs)) return(NULL)
+  if (!length(runs)) return(alt_members())
 
   # --- classify each run by role ---
   ord <- NULL; text_runs <- list()

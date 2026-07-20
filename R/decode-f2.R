@@ -38,14 +38,25 @@ ivt_f2_bit_layout <- function(counts) {
 # value order -- descriptor order, innermost dimension varying fastest -- and
 # precompute each cell's bit index in the presence record. Returns the 1-based
 # `tuples` matrix (one column per in-page dimension) and the integer `bit` vector.
-ivt_f2_cell_grid <- function(counts, stride) {
+#
+# `pos` (optional): per-dimension 0-based SLOT positions, for dimensions whose
+# members do not occupy contiguous bitmap slots. The survey generations address
+# the presence bitmap by member SLOT, and a slot table can carry deleted holes
+# (tb611996's reference periods sit at slots {0,1,3} -- slot 2 is a deleted
+# member): tuples stay 1..count member ids, but each member's BIT comes from its
+# slot position. NULL entries (or a NULL `pos`) mean the dense 0..count-1 default.
+ivt_f2_cell_grid <- function(counts, stride, pos = NULL) {
   k <- length(counts); N <- prod(counts)
-  tuples <- matrix(0L, N, k); rin <- 1L
+  tuples <- matrix(0L, N, k); bits <- matrix(0L, N, k); rin <- 1L
   for (i in k:1L) {
-    tuples[, i] <- rep(rep.int(0:(counts[i] - 1L), rep.int(rin, counts[i])), length.out = N)
+    idx <- rep(rep.int(0:(counts[i] - 1L), rep.int(rin, counts[i])), length.out = N)
+    tuples[, i] <- idx
+    p <- if (!is.null(pos) && length(pos) >= i && !is.null(pos[[i]])) pos[[i]]
+         else 0:(counts[i] - 1L)
+    bits[, i] <- p[idx + 1L]
     rin <- rin * counts[i]
   }
-  list(tuples = tuples + 1L, bit = as.integer(tuples %*% stride))
+  list(tuples = tuples + 1L, bit = as.integer(bits %*% stride))
 }
 
 # Read bit positions `bit` (0-based) from a byte-pair-swapped, MSB-first

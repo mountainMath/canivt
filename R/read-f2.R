@@ -464,11 +464,19 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   }
   dims <- ivt_f2_dimensions(raw)
   n_geo <- ivt_f2_geo_count(raw)
-  g <- ivt_f2_geo_light(raw, n_geo)
-  g <- ivt_f2_geo_fill_label(g)
-  g <- ivt_f2_flag_dqf_note_truncation(g)
-  ivt_f2_check_geo_count(raw, length(g$geo_uid))
-  ivt_f2_check_geo_names(g$geo_name)
+  # `n_geo == 0`: the table has NO geography dimension (the survey generations'
+  # regional dimensions carry no geographic identifiers and stay ordinary data
+  # dimensions -- ivt_f2_geo_dim_index() returned 0). Skip the geography read;
+  # `geographies` is left an empty member table.
+  if (!is.na(n_geo) && n_geo == 0L) {
+    g <- list()
+  } else {
+    g <- ivt_f2_geo_light(raw, n_geo)
+    g <- ivt_f2_geo_fill_label(g)
+    g <- ivt_f2_flag_dqf_note_truncation(g)
+    ivt_f2_check_geo_count(raw, length(g$geo_uid))
+    ivt_f2_check_geo_names(g$geo_name)
+  }
   # pack every decoded per-member geography column (bilingual labels/names, uid,
   # aggregation level, geography type / municipal status, quality flag + note,
   # non-response rate, ...), member_id first and all-NA columns dropped -- the
@@ -644,7 +652,9 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
       out[[side]] <- if (grepl("_uid$", side)) geo[[side]][cells$geo]
                      else fix(gval(side))[cells$geo]
   }
-  if (ncol(out) == 0L) out$geo <- cells$geo
+  # bare member-id fallback -- only when the table HAS a geography dimension
+  # (a survey table without one has no `geo` cells column at all)
+  if (ncol(out) == 0L && !is.null(cells[["geo"]])) out$geo <- cells$geo
   # the non-geography data columns of `cells` line up with the non-geography
   # dimensions in declaration order; label each from its dimension's member list.
   datacols <- setdiff(names(cells), c("geo", "value"))
