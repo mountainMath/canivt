@@ -64,9 +64,14 @@ member-ordinal; equals `member_id` when the file stores no ordinal
 block), `label` (the stored label, untrimmed), `level` (the label as it
 appears in the tidy output), `level_fr` (the French label, `NA` when the
 file carries none for that column), `depth` (hierarchy depth implied by
-the label indentation) and `parent_id` (the `member_id` of this member's
+the label indentation), `parent_id` (the `member_id` of this member's
 parent in that hierarchy – the nearest preceding member at a shallower
-depth, `NA` for top-level members).
+depth, `NA` for top-level members), and `description`/`description_fr`
+(the member's `_Description` prose – the indicator definition carried by
+the facet / quantity dimension of the older survey tables, e.g. a total
+fertility rate's "... the number of children born per 1,000 women ...",
+which states the value's units; `NA` for the many dimensions/tables that
+carry none).
 
 ## See also
 

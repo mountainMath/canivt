@@ -58,9 +58,9 @@ ivt_tidy(
   each data-dimension column giving that member's hierarchy depth (read
   from the label indentation, the same measure carried by
   [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)).
-  Opt-in, so the default output — and hence the Parquet written by
+  Opt-in, so the default output – and hence the Parquet written by
   [`ivt_write_parquet()`](https://mountainmath.github.io/canivt/reference/ivt_write_parquet.md)
-  — is unchanged.
+  – is unchanged.
 
 ## Value
 

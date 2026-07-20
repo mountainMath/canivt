@@ -20,7 +20,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -73,22 +73,29 @@
 <code>canivt</code>, and shows how the package’s functions map onto each
 part of the file. It is aimed at anyone who wants to understand,
 validate, or extend the parser. For day-to-day use see
-<code><a href="../reference/read_ivt.html">?read_ivt</a></code>. The authoritative, more detailed spec ships with
-the package:
-<code>system.file("notes/ivt-format.md", package = "canivt")</code>.</p>
+<code><a href="../reference/read_ivt.html">?read_ivt</a></code>. Two more detailed references ship with the
+package: the authoritative byte-format spec
+<code>system.file("notes/ivt-format.md", package = "canivt")</code>, and
+a terse catalog of every byte marker/signature the decoder keys on,
+<code>system.file("notes/markers.md", package = "canivt")</code>
+(self-checked by <code>tests/testthat/test-markers.R</code>).</p>
 <div class="section level2">
 <h2 id="one-layout-one-decoder">One layout, one decoder<a class="anchor" aria-label="anchor" href="#one-layout-one-decoder"></a>
 </h2>
-<p>Every <code>.ivt</code> starts with the signature
-<code>04 00 20 00</code> and is one contiguous binary. There is a
-single, descriptor-driven, name/type-agnostic decoder: it reads the
-dimension structure from the header, nests <strong>every</strong>
-dimension into a power-of-two positional bitmap (data dimensions
-innermost, geography outermost), and walks the value pages. What used to
-be documented as “family 1” and “family 2” are <strong>not two
-formats</strong> — they are two cases of this one layout, differing only
-in <em>which</em> dimension straddles the fixed <strong>2048-bit
-(256-byte) page boundary</strong>:</p>
+<p>Every <code>.ivt</code> starts with a 4-byte signature ending
+<code>00 20 00</code>; the modern census/custom lineage sets the leading
+byte to <code>04</code>. (A second, older container generation sets it
+to <code>02</code> instead — see “An older survey-generation container”
+near the end of this vignette; everything in this section applies to
+both.) The file is one contiguous binary, and there is a single,
+descriptor-driven, name/type-agnostic decoder: it reads the dimension
+structure from the header, nests <strong>every</strong> dimension into a
+power-of-two positional bitmap (data dimensions innermost, geography
+outermost), and walks the value pages. What used to be documented as
+“family 1” and “family 2” are <strong>not two formats</strong> — they
+are two cases of this one layout, differing only in <em>which</em>
+dimension straddles the fixed <strong>2048-bit (256-byte) page
+boundary</strong>:</p>
 <ul>
 <li>
 <strong>A data dimension straddles</strong> → geography is pushed
@@ -398,12 +405,26 @@ splits the array mid-stream.</p>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   0 to 4 years  Women+       8.92<span style="color: #949494;">e</span>5</span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Under 1 year  Total - Gen… 3.43<span style="color: #949494;">e</span>5</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># ℹ 14,492,229 more rows</span></span></span></code></pre></div>
-<p>Footnotes sit near the codebook. In the modern format each is framed
-and tagged by a leading <code>Footnote N</code> / <code>Renvoi N</code>
-marker; <code>canivt</code> recovers each as a maximal run of text bytes
-beginning with that marker. The legacy format instead stores them as
-<code>(N) text</code> lines under a <code>Footnotes</code> section
-header in one notes block.</p>
+<p>Footnotes are read <strong>from the header</strong>, not by scanning.
+Table-level (cube) notes come from the master directory; each
+dimension’s notes come from its per-dimension slot directory (the
+<code>@824 + 14·(k−1)</code> table above). Within a dimension each note
+carries a <strong>scope</strong> — a <em>member</em> note (annotating
+one geography or data member) or a whole-<em>dimension</em> note —
+resolved structurally: a <code>84 01</code> member bitmap opens the
+footnote region and lists, in member order, which members carry a note,
+so each note surfaces with its <code>scope</code>, owning
+<code>dimension</code> and
+<code>member_id</code>/<code>member_refs</code>. The text itself is
+tagged <code>Footnote N</code> (EN) / <code>Renvoi N</code> (FR); a
+bounded tail scan of those markers survives only as a loud fallback when
+the slot directories list none. (Those same <code>Renvoi N</code> texts
+also appear per-member in the geography directory’s tail as
+<code>[01 01][u16 len-4][01]</code> text blobs — told apart from member
+arrays by their NUL-free payload so they are not miscounted as
+attributes; see <code>markers.md</code> §F.) The legacy pre-DGUID files
+instead cite notes as <code>(N)</code> markers embedded in the member
+labels, linked back to the members that carry them.</p>
 <div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">meta</span><span class="op">$</span><span class="va">footnotes</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="co">#&gt; List of 7</span></span>
@@ -467,6 +488,55 @@ read it the same way:</p>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span> Canada    Canada   00      Under 1            Female        <span style="text-decoration: underline;">191</span>900</span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span> Canada    Canada   00      1                  Total - Sex   <span style="text-decoration: underline;">394</span>990</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># ℹ 8,671,234 more rows</span></span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="an-older-survey-generation-container-02-00-20-00">An older survey-generation container (<code>02 00 20 00</code>)<a class="anchor" aria-label="anchor" href="#an-older-survey-generation-container-02-00-20-00"></a>
+</h2>
+<p>A second, older Beyond 20/20 container generation shares the same
+page/value/ codebook model but starts with <code>02 00 20 00</code>
+instead of <code>04 00 20 00</code> — byte 0 is a container-generation
+tag, not part of a fixed constant, and
+<code>ivt_family()</code>/<code><a href="../reference/read_ivt.html">read_ivt()</a></code> handle both
+transparently. This generation covers older survey product lines rather
+than census geography tables: Health Statistics at a Glance (1999), the
+1996 Census of Agriculture, and the 1996 Small Area Business survey.</p>
+<p>Two things are structurally different, both confined to the
+descriptor and codebook:</p>
+<ul>
+<li>
+<strong>No geography dimension.</strong> These are single-area
+survey products — the <code>REGION</code>/<code>GEOGRAPHY</code>
+dimension carries no DGUID or geographic identifiers, so
+<code><a href="../reference/read_ivt.html">read_ivt()</a></code> treats it as an ordinary, fully-labelled data
+dimension: <code>metadata$geographies</code> is empty and
+<code>cells</code> has no <code>geo</code> column.</li>
+<li>
+<strong>Generated time-series labels.</strong> A reference/time
+dimension can be stored with no code or label array at all — only a
+per-member <strong>date table</strong> (one-byte populated-slot flags +
+a 3-byte date, days since <code>0000-03-01</code>). Member labels
+(typically a year) are <em>generated</em> from those dates. Because the
+presence bitmap addresses members by their <strong>slot</strong> rather
+than a dense <code>1..count</code> range, and deleted members leave
+holes in the slot numbering, the decoder’s layout is slot-aware
+here.</li>
+</ul>
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Health Statistics at a Glance 1999 is Borealis-hosted (see vignette("borealis")</span></span>
+<span><span class="co"># for browsing/downloading): Quantifier x Geography x Period, no geography</span></span>
+<span><span class="co"># dimension, year labels generated from the on-disk dates.</span></span>
+<span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/borealis_ivt_download.html">borealis_ivt_download</a></span><span class="op">(</span><span class="va">hits</span><span class="op">[</span><span class="fl">1</span>, <span class="op">]</span><span class="op">)</span>   <span class="co"># hits from borealis_ivt_catalogue()</span></span>
+<span><span class="va">hsg</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">hsg</span><span class="op">)</span></span></code></pre></div>
+<p>Values in this generation are complete integers in the indicator’s
+own unit — not a fixed-point encoding needing a decimal scale. The unit
+is stated in the relevant member’s description text, surfaced via
+<code><a href="../reference/ivt_members.html">ivt_members()</a></code>’s
+<code>description</code>/<code>description_fr</code> columns where it
+can be mapped unambiguously.</p>
+<p>See <code>inst/notes/ivt-format.md</code> (“The older
+<code>02 00 20 00</code> survey-generation container”) and
+<code>inst/notes/markers.md</code> §E.1 for the exact byte framings.</p>
 </div>
 <div class="section level2">
 <h2 id="how-canivt-maps-to-the-format">How <code>canivt</code> maps to the format<a class="anchor" aria-label="anchor" href="#how-canivt-maps-to-the-format"></a>
@@ -546,13 +616,14 @@ unified decoder is additionally <strong>byte-identical</strong> to the
 two former decoders on six reference tables, and viewer/CSV-validated
 across the wider corpus — 1996–2021 census tables, 1981/1991 profiles,
 2001/2006 F-series, large 2016 <code>98-400-X</code> crosstabs,
-commuting-flow tables and custom extracts. An opt-in regression ledger
-runs the whole local corpus through <code><a href="../reference/read_ivt.html">read_ivt()</a></code> and asserts
-the exact cell count per table. For older vintages the package scrapes
-the Beyond 20/20 web viewer for ground-truth data to validate against.
-See the <code>tests/</code> directory and the notes file
-(<code>inst/notes/coverage.md</code>, <code>decode-history.md</code>)
-for the exact figures.</p>
+commuting-flow tables, custom extracts, the Business Register lineage,
+and the older <code>02 00 20 00</code> survey generation. An opt-in
+regression ledger runs the whole local corpus through
+<code><a href="../reference/read_ivt.html">read_ivt()</a></code> and asserts the exact cell count per table. For
+older vintages the package scrapes the Beyond 20/20 web viewer for
+ground-truth data to validate against. See the <code>tests/</code>
+directory and the notes file (<code>inst/notes/coverage.md</code>,
+<code>decode-history.md</code>) for the exact figures.</p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

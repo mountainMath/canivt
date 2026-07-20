@@ -1,5 +1,33 @@
 # Changelog
 
+## canivt 0.2.0
+
+- Decodes the older `02 00 20 00` “split-definition survey” container
+  generation alongside the modern `04 00 20 00` census/custom lineage —
+  covers Health Statistics at a Glance (1999), the 1996 Census of
+  Agriculture, and the 1996 Small Area Business survey. These tables
+  have no geography dimension (a single area per file) and can carry a
+  time-series reference dimension whose member labels are generated from
+  an on-disk date table rather than a stored codebook.
+- Onboards the Canadian Business Patterns lineage (Business Register
+  establishment counts by dissemination area x NAICS x employment size).
+- Onboards the 2016 custom cross-tabulation extract lineage
+  (`CRO0163850` / `CRO0166131`), documented in a new “Onboarding custom
+  IVT files” vignette.
+- Geography for schema-less custom exports is now mapped through the
+  file’s own field dictionary rather than a content heuristic,
+  recovering two custom exports that previously fell back to verbatim
+  labels.
+- Added a byte-marker catalog (`inst/notes/markers.md`) and a
+  self-checking test suite that fails if a newly-onboarded `.ivt` uses
+  an undocumented marker.
+- Fixed
+  [`borealis_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/borealis_ivt_catalogue.md)
+  erroring on search result pages that carry nested (non-atomic)
+  columns.
+- Expanded the corpus regression ledger and the `ivt-format` vignette /
+  byte-format reference to document the new container generation.
+
 ## canivt 0.1.0
 
 - Initial release.

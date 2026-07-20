@@ -19,7 +19,7 @@ next to the cached Parquet by ivt_write_parquet() / get_statcan_ivt()
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -110,9 +110,13 @@ member-ordinal; equals <code>member_id</code> when the file stores no ordinal bl
 <code>label</code> (the stored label, untrimmed), <code>level</code> (the label as it appears in
 the tidy output), <code>level_fr</code> (the French label, <code>NA</code> when the file carries
 none for that column), <code>depth</code> (hierarchy depth implied by the label
-indentation) and <code>parent_id</code> (the <code>member_id</code> of this member's parent in
+indentation), <code>parent_id</code> (the <code>member_id</code> of this member's parent in
 that hierarchy – the nearest preceding member at a shallower depth, <code>NA</code>
-for top-level members).</p>
+for top-level members), and <code>description</code>/<code>description_fr</code> (the member's
+<code>_Description</code> prose – the indicator definition carried by the facet /
+quantity dimension of the older survey tables, e.g. a total fertility rate's
+"... the number of children born per 1,000 women ...", which states the
+value's units; <code>NA</code> for the many dimensions/tables that carry none).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

@@ -6,20 +6,27 @@ package’s functions map onto each part of the file. It is aimed at
 anyone who wants to understand, validate, or extend the parser. For
 day-to-day use see
 [`?read_ivt`](https://mountainmath.github.io/canivt/reference/read_ivt.md).
-The authoritative, more detailed spec ships with the package:
-`system.file("notes/ivt-format.md", package = "canivt")`.
+Two more detailed references ship with the package: the authoritative
+byte-format spec
+`system.file("notes/ivt-format.md", package = "canivt")`, and a terse
+catalog of every byte marker/signature the decoder keys on,
+`system.file("notes/markers.md", package = "canivt")` (self-checked by
+`tests/testthat/test-markers.R`).
 
 ## One layout, one decoder
 
-Every `.ivt` starts with the signature `04 00 20 00` and is one
-contiguous binary. There is a single, descriptor-driven,
-name/type-agnostic decoder: it reads the dimension structure from the
-header, nests **every** dimension into a power-of-two positional bitmap
-(data dimensions innermost, geography outermost), and walks the value
-pages. What used to be documented as “family 1” and “family 2” are **not
-two formats** — they are two cases of this one layout, differing only in
-*which* dimension straddles the fixed **2048-bit (256-byte) page
-boundary**:
+Every `.ivt` starts with a 4-byte signature ending `00 20 00`; the
+modern census/custom lineage sets the leading byte to `04`. (A second,
+older container generation sets it to `02` instead — see “An older
+survey-generation container” near the end of this vignette; everything
+in this section applies to both.) The file is one contiguous binary, and
+there is a single, descriptor-driven, name/type-agnostic decoder: it
+reads the dimension structure from the header, nests **every** dimension
+into a power-of-two positional bitmap (data dimensions innermost,
+geography outermost), and walks the value pages. What used to be
+documented as “family 1” and “family 2” are **not two formats** — they
+are two cases of this one layout, differing only in *which* dimension
+straddles the fixed **2048-bit (256-byte) page boundary**:
 
 - **A data dimension straddles** → geography is pushed fully into the
   page directory, one page per (geography, outer-data-coordinate). The
@@ -301,11 +308,23 @@ ivt_tidy(tab)
 #> # ℹ 14,492,229 more rows
 ```
 
-Footnotes sit near the codebook. In the modern format each is framed and
-tagged by a leading `Footnote N` / `Renvoi N` marker; `canivt` recovers
-each as a maximal run of text bytes beginning with that marker. The
-legacy format instead stores them as `(N) text` lines under a
-`Footnotes` section header in one notes block.
+Footnotes are read **from the header**, not by scanning. Table-level
+(cube) notes come from the master directory; each dimension’s notes come
+from its per-dimension slot directory (the `@824 + 14·(k−1)` table
+above). Within a dimension each note carries a **scope** — a *member*
+note (annotating one geography or data member) or a whole-*dimension*
+note — resolved structurally: a `84 01` member bitmap opens the footnote
+region and lists, in member order, which members carry a note, so each
+note surfaces with its `scope`, owning `dimension` and
+`member_id`/`member_refs`. The text itself is tagged `Footnote N` (EN) /
+`Renvoi N` (FR); a bounded tail scan of those markers survives only as a
+loud fallback when the slot directories list none. (Those same
+`Renvoi N` texts also appear per-member in the geography directory’s
+tail as `[01 01][u16 len-4][01]` text blobs — told apart from member
+arrays by their NUL-free payload so they are not miscounted as
+attributes; see `markers.md` §F.) The legacy pre-DGUID files instead
+cite notes as `(N)` markers embedded in the member labels, linked back
+to the members that carry them.
 
 ``` r
 
@@ -373,6 +392,57 @@ ivt_tidy(leg)
 #> # ℹ 8,671,234 more rows
 ```
 
+## An older survey-generation container (`02 00 20 00`)
+
+A second, older Beyond 20/20 container generation shares the same
+page/value/ codebook model but starts with `02 00 20 00` instead of
+`04 00 20 00` — byte 0 is a container-generation tag, not part of a
+fixed constant, and
+`ivt_family()`/[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+handle both transparently. This generation covers older survey product
+lines rather than census geography tables: Health Statistics at a Glance
+(1999), the 1996 Census of Agriculture, and the 1996 Small Area Business
+survey.
+
+Two things are structurally different, both confined to the descriptor
+and codebook:
+
+- **No geography dimension.** These are single-area survey products —
+  the `REGION`/`GEOGRAPHY` dimension carries no DGUID or geographic
+  identifiers, so
+  [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+  treats it as an ordinary, fully-labelled data dimension:
+  `metadata$geographies` is empty and `cells` has no `geo` column.
+- **Generated time-series labels.** A reference/time dimension can be
+  stored with no code or label array at all — only a per-member **date
+  table** (one-byte populated-slot flags + a 3-byte date, days since
+  `0000-03-01`). Member labels (typically a year) are *generated* from
+  those dates. Because the presence bitmap addresses members by their
+  **slot** rather than a dense `1..count` range, and deleted members
+  leave holes in the slot numbering, the decoder’s layout is slot-aware
+  here.
+
+``` r
+
+# Health Statistics at a Glance 1999 is Borealis-hosted (see vignette("borealis")
+# for browsing/downloading): Quantifier x Geography x Period, no geography
+# dimension, year labels generated from the on-disk dates.
+path <- borealis_ivt_download(hits[1, ])   # hits from borealis_ivt_catalogue()
+hsg  <- read_ivt(path)
+ivt_tidy(hsg)
+```
+
+Values in this generation are complete integers in the indicator’s own
+unit — not a fixed-point encoding needing a decimal scale. The unit is
+stated in the relevant member’s description text, surfaced via
+[`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)’s
+`description`/`description_fr` columns where it can be mapped
+unambiguously.
+
+See `inst/notes/ivt-format.md` (“The older `02 00 20 00`
+survey-generation container”) and `inst/notes/markers.md` §E.1 for the
+exact byte framings.
+
 ## How `canivt` maps to the format
 
 | Region | Function(s) | Source file(s) |
@@ -394,8 +464,10 @@ cell-exact for all scraped ground-truth geographies. The unified decoder
 is additionally **byte-identical** to the two former decoders on six
 reference tables, and viewer/CSV-validated across the wider corpus —
 1996–2021 census tables, 1981/1991 profiles, 2001/2006 F-series, large
-2016 `98-400-X` crosstabs, commuting-flow tables and custom extracts. An
-opt-in regression ledger runs the whole local corpus through
+2016 `98-400-X` crosstabs, commuting-flow tables, custom extracts, the
+Business Register lineage, and the older `02 00 20 00` survey
+generation. An opt-in regression ledger runs the whole local corpus
+through
 [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
 and asserts the exact cell count per table. For older vintages the
 package scrapes the Beyond 20/20 web viewer for ground-truth data to

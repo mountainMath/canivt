@@ -14,7 +14,7 @@ Useful links:
 
 - <https://github.com/mountainMath/canivt>
 
-- <https://mountainmath.github.io/canivt>
+- <https://mountainmath.github.io/canivt/>
 
 - Report bugs at <https://github.com/mountainMath/canivt/issues>
 

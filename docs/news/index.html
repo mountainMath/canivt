@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -40,6 +40,16 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.2.0" id="canivt-020">canivt 0.2.0<a class="anchor" aria-label="anchor" href="#canivt-020"></a></h2>
+<ul><li>Decodes the older <code>02 00 20 00</code> “split-definition survey” container generation alongside the modern <code>04 00 20 00</code> census/custom lineage — covers Health Statistics at a Glance (1999), the 1996 Census of Agriculture, and the 1996 Small Area Business survey. These tables have no geography dimension (a single area per file) and can carry a time-series reference dimension whose member labels are generated from an on-disk date table rather than a stored codebook.</li>
+<li>Onboards the Canadian Business Patterns lineage (Business Register establishment counts by dissemination area x NAICS x employment size).</li>
+<li>Onboards the 2016 custom cross-tabulation extract lineage (<code>CRO0163850</code> / <code>CRO0166131</code>), documented in a new “Onboarding custom IVT files” vignette.</li>
+<li>Geography for schema-less custom exports is now mapped through the file’s own field dictionary rather than a content heuristic, recovering two custom exports that previously fell back to verbatim labels.</li>
+<li>Added a byte-marker catalog (<code>inst/notes/markers.md</code>) and a self-checking test suite that fails if a newly-onboarded <code>.ivt</code> uses an undocumented marker.</li>
+<li>Fixed <code><a href="../reference/borealis_ivt_catalogue.html">borealis_ivt_catalogue()</a></code> erroring on search result pages that carry nested (non-atomic) columns.</li>
+<li>Expanded the corpus regression ledger and the <code>ivt-format</code> vignette / byte-format reference to document the new container generation.</li>
+</ul></div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.0" id="canivt-010">canivt 0.1.0<a class="anchor" aria-label="anchor" href="#canivt-010"></a></h2>
 <ul><li>Initial release.</li>
 <li>
@@ -52,7 +62,8 @@
 <code><a href="../reference/get_statcan_ivt.html">get_statcan_ivt()</a></code>, <code><a href="../reference/ivt_download.html">ivt_download()</a></code>, <code><a href="../reference/statcan_ivt_catalogue.html">statcan_ivt_catalogue()</a></code> and the Borealis Dataverse helpers download and cache tables from their public sources.</li>
 <li>A small sample table (<code>inst/extdata/98100044.ivt</code>, StatCan 98-10-0044-01) is bundled for examples and tests.</li>
 </ul></div>
-  </main></div>
+  </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
+    </nav></aside></div>
 
 
     <footer><div class="pkgdown-footer-left">

@@ -1,4 +1,4 @@
-# canivt
+# canivt <a href="https://mountainmath.github.io/canivt/"><img src="man/figures/logo.png" align="right" height="120" alt="canivt website" /></a>
 
 <!-- badges: start -->
 <!-- badges: end -->

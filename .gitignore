@@ -32,6 +32,12 @@ Meta/
 
 # Stray top-level figure dir from ad-hoc knitr::knit() runs (cwd = pkg root)
 /figure/
+# Stray top-level renders from ad-hoc plotting / hex_sticker.R runs (the real
+# logo lives at man/figures/logo.png)
+Rplots.pdf
+/canivt.png
 
 # session scratch (working artifacts, never committed)
 scratchpad/
+
+vignettes//figure/*.png
