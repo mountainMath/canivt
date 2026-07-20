@@ -3059,6 +3059,55 @@ ivt_f2_slot_member_count <- function(raw, dir) {
     nz <- flags[flags != 0L]
     if (length(nz) >= 1L && length(unique(nz)) <= 3L) return(length(nz))
   }
+  # Last resort: a member label array that the strict `[01 01]` reader misses
+  # because it sits EMBEDDED inside a block behind another marker -- the older
+  # `02 00 20 00` survey generation stores its reference-period members (a year
+  # list "1979-80" .. "1993-94") as a bare Pascal-string run AFTER a `81 02 <alloc>
+  # 00` member-selection bitmap in the same directory block, with no `01 01`
+  # entry framing of its own. Scan each block's byte extent for the largest run
+  # of consecutive short Pascal strings (a member array is many short labels;
+  # footnote prose does not form a clean u8-length-prefixed run). Bounded to the
+  # block so it cannot wander into the following dimension's footnotes.
+  # The `02 00 20 00` survey member CODE array: a `81 02 <alloc> 00 <b5> 00`
+  # block that is neither the field schema (b5 == 0x22) nor the bilingual name
+  # marker (b5 == 0x56). Its Pascal codes ARE the member list -- the only member
+  # source for the reference-period dimension, whose years ("1979-80") have no
+  # separate label array. The codes sit at the TAIL of the block after a short
+  # binary header, so read the Pascal run whose end is closest to the block end
+  # (a stray run inside the header ends earlier) and drop the trailing alloc
+  # padding (empty / whitespace slots -- SEX's `81 02 04 00` array holds "0" "1"
+  # "2" then one padding space; a 1-member dimension's array holds a single code
+  # like "NUMBER" or "1996-97"). Reached only when the strict `01 01`/`81 01`
+  # label reader above found nothing, so it never shrinks a dimension the (more
+  # complete) label arrays already sized.
+  drop_pad <- function(x) {                          # trim trailing empty/space slots
+    keep <- nzchar(trimws(x)); if (!any(keep)) return(character(0))
+    x[seq_len(max(which(keep)))]
+  }
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + 6L > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 4L]) != 0x00L) next
+    if (as.integer(raw[off + 5L]) %in% c(0x22L, 0x56L)) next   # schema / name marker
+    hi <- off + len; cnt <- 0L; end_best <- -1L
+    i <- off + 6L
+    while (i < hi) {
+      if (is.null(rd_pascal(raw, i))) { i <- i + 1L; next }
+      texts <- character(0); j <- i
+      repeat {
+        rec <- rd_pascal(raw, j)
+        if (is.null(rec) || rec$end > hi) break
+        texts <- c(texts, rec$text); j <- rec$end
+      }
+      t <- drop_pad(texts)
+      if (length(t) >= 1L && max(nchar(t)) <= 64L && j > end_best) {
+        cnt <- length(t); end_best <- j
+      }
+      i <- max(j, i + 1L)
+    }
+    if (cnt > 0L) return(cnt)
+  }
   NA_integer_
 }
 
@@ -3128,11 +3177,198 @@ ivt_f2_descriptor_from_slots <- function(raw) {
   list(n_dim = m, dims = dims, title = NA_character_)
 }
 
+# The number of populated header slot-directory entries (dimension 1 .. n): a
+# leading run of slots with a plausible pointer and entry count, stopping at the
+# first null / garbage slot (dims past the real dimensions carry random data).
+# Shared by the slot-table descriptor builders.
+ivt_f2_slot_ndim <- function(slots) {
+  if (is.null(slots)) return(0L)
+  ok <- vapply(slots, function(s) !is.na(s$ptr) && s$ptr > 0L &&
+                 !is.na(s$n_entries) && s$n_entries > 0L && s$n_entries < 1e6L,
+               logical(1))
+  if (!length(ok) || !ok[1L]) return(0L)
+  z <- which(!ok); if (length(z)) z[1L] - 1L else length(ok)
+}
+
+# The bilingual dimension NAME from a `02 00 20 00` survey dimension's codebook
+# name marker `81 02 02 00 56 00`. That generation's directory carries TWO
+# `81 02 02 00` blocks -- the member CODE array (`.. 16 00 <codes>`) and this
+# name marker (`.. 56 00 <EN><sep><desc><FR><sep><desc>`) -- so the generic
+# marker reader grabs the first (a code) as the name. The `56 00` sub-marker
+# uniquely tags the name block; return the first printable run after it (the EN
+# dimension name, e.g. "REGION", "Quantifier", "GEOGRAPHY"). NA when absent (the
+# reference-period dimension sometimes carries no name marker).
+ivt_f2_02_name_marker <- function(raw, dir) {
+  if (is.null(dir)) return(NA_character_)
+  n <- length(raw)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + 6L > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 3L]) != 0x02L || as.integer(raw[off + 4L]) != 0x00L ||
+        as.integer(raw[off + 5L]) != 0x56L) next
+    m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(n, off + len)], 0L)
+    got <- m$name[!is.na(m$name) & nchar(m$name) >= 3L]
+    if (length(got)) return(got[1L])
+  }
+  NA_character_
+}
+
+# The dimension name carried by a `02 00 20 00` survey dimension's FIELD-SCHEMA
+# block (`81 02 <nfields> 00 22 00 <field names>`). Every ordinary dimension's
+# first field is literally "Code"; the reference-period / time dimension carries
+# no name marker and instead names its single field after the dimension itself
+# ("Timeseries"). Return that field name when it is NOT the generic "Code"
+# placeholder, else NA.
+ivt_f2_02_schema_name <- function(raw, dir) {
+  if (is.null(dir)) return(NA_character_)
+  n <- length(raw)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + 6L > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 4L]) != 0x00L || as.integer(raw[off + 5L]) != 0x22L) next
+    # the first field name follows a short binary header; scan for it. Skip the
+    # generic column vocabulary ("Code" is always field 1 on an ordinary dimension);
+    # only the reference-period dimension names its sole field after itself.
+    generic <- c("Code", "Label", "Etiquette")
+    hi <- off + len
+    for (p in (off + 6L):(hi - 1L)) {
+      rec <- rd_pascal(raw, p)
+      if (is.null(rec) || rec$end > hi) next
+      nm <- trimws(rec$text)
+      if (nchar(nm) >= 3L && !grepl("^_", nm)) {
+        if (!nm %in% generic) return(nm)
+        break                                        # "Code" first -> ordinary dim
+      }
+    }
+  }
+  NA_character_
+}
+
+# The reference-period dimension name from the `02 00 20 00` survey DESCRIPTOR
+# block, for the case where the codebook carries neither a name marker nor a
+# named field (e.g. the Health Statistics "ANNUAL" year dimension). The
+# descriptor stores each dimension name doubled or space-padded ("ANNUAL
+# ANNUAL", "PeriodserPeriodser"); the reference dimension is the LAST such record
+# before the value directory. Scan the descriptor region for printable runs that
+# are an exact double or a space-separated repeat and return the trailing one's
+# unit. Best-effort (NA on no match) -- names only, never counts.
+ivt_f2_02_desc_reference_name <- function(raw, D) {
+  n <- length(raw)
+  vb <- tryCatch({
+    a <- ivt_f2_dir_anchor_header(raw)
+    if (is.null(a)) NA_integer_ else rd_u32(raw, a)
+  }, error = function(e) NA_integer_)
+  hi <- if (!is.na(vb) && vb > D + 32L && vb <= n) vb else min(D + 2000L, n)
+  v <- as.integer(raw[(D + 1L):hi])
+  pr <- v >= 32L & v <= 126L
+  r <- rle(pr); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
+  unit <- function(s) {
+    s <- trimws(s)
+    if (grepl("\\s", s)) {                           # "ANNUAL    ANNUAL" -> first token
+      tok <- strsplit(s, "\\s+")[[1]]
+      if (length(tok) >= 2L && tok[1L] == tok[2L]) return(tok[1L])
+      return(NA_character_)
+    }
+    L <- nchar(s)                                    # exact double "PeriodserPeriodser"
+    if (L >= 6L && L %% 2L == 0L &&
+        substr(s, 1L, L / 2L) == substr(s, L / 2L + 1L, L)) return(substr(s, 1L, L / 2L))
+    NA_character_
+  }
+  best <- NA_character_
+  for (k in which(r$values)) {
+    if (r$lengths[k] < 6L) next
+    u <- unit(intToUtf8(v[starts[k]:ends[k]]))
+    if (!is.na(u) && nchar(u) >= 3L) best <- u       # keep the last match
+  }
+  best
+}
+
+# Dedicated dimension descriptor for the older `02 00 20 00` survey generation
+# (file byte 0 == 0x02: Health Statistics at a Glance 1999, Census of Agriculture
+# / Small Area Business 1996, provincial employment/training extracts). Its
+# descriptor BLOCK is framed irregularly -- <display><description> name pairs and
+# a reference-period record with no 0x01 name anchor and a garbage count byte --
+# so the generic byte-walk misreads counts and drops dimensions. The per-dimension
+# CODEBOOK, by contrast, is perfectly regular: the header slot table (@824) lists
+# every dimension in order and each dimension's block directory carries a member
+# CODE / label array (count = its entries) and a `81 02 02 00 56 00` bilingual
+# name marker. Build the descriptor straight from that metadata: count from the
+# codebook member array (`ivt_f2_slot_member_count()`), name from the name marker
+# (falling back to a named schema field, then the descriptor's doubled reference
+# name). Geography stays structural (`ivt_f2_geo_dim_index()`, whose header-name
+# rule matches "REGION"/"GEOGRAPHY"). Returns the usual list(n_dim, dims, title),
+# or NULL when the slot table does not resolve a usable dimension set (then the
+# caller falls back to the generic descriptor walk). LOUD: a metadata-rebuilt
+# descriptor is not the file's own descriptor block.
+ivt_f2_descriptor_02 <- function(raw) {
+  D <- tryCatch(ivt_f2_descriptor_offset(raw), error = function(e) NA_integer_)
+  slots <- ivt_f2_dim_slots(raw, m = 32L)
+  ndim <- ivt_f2_slot_ndim(slots)
+  if (ndim < 1L) return(NULL)
+  dims <- vector("list", ndim); unsized <- integer(0)
+  for (k in seq_len(ndim)) {
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (is.null(dir)) return(NULL)
+    cnt <- ivt_f2_slot_member_count(raw, dir)
+    nm <- ivt_f2_02_name_marker(raw, dir)
+    if (is.na(nm)) nm <- ivt_f2_02_schema_name(raw, dir)
+    if (is.na(nm) && !is.na(D) && D >= 1L) nm <- ivt_f2_02_desc_reference_name(raw, D)
+    if (is.na(cnt) || cnt < 1L) { cnt <- NA_integer_; unsized <- c(unsized, k) }
+    dims[[k]] <- list(name = nm, count = as.integer(cnt), type = 0L, double01 = FALSE)
+  }
+  # A reference-period / time dimension sometimes carries NO member array in its
+  # codebook (no code list, no labels -- just a field-schema block), so its count
+  # is absent from the metadata. It is recoverable from the VALUE DATA: the count
+  # that makes the stored value pages self-consistent (extent- and capacity-exact
+  # against the page directory, `ivt_page_preflight()`). Probe the plausible small
+  # counts and adopt the one that uniquely validates; decline (return NULL, fall
+  # back to the generic walk) when none or several do, or when more than one
+  # dimension is unsized (two unknowns cannot be separated). LOUD -- the count
+  # came from the value layout, not the codebook.
+  if (length(unsized) == 1L) {
+    k <- unsized; ok <- integer(0)
+    for (c in 1:48L) {
+      cand <- dims; cand[[k]]$count <- c
+      # speculative: most candidate counts are wrong, so muffle any fallback the
+      # trial layout fires (e.g. geo-by-name) -- the adopted count re-reads loud.
+      lay <- ivt_quietly(tryCatch(ivt_layout_impl(raw, list(n_dim = ndim, dims = cand)),
+                                  error = function(e) NULL))
+      if (is.null(lay)) next
+      if (isTRUE(tryCatch(ivt_page_preflight(raw, lay), error = function(e) FALSE)))
+        ok <- c(ok, c)
+    }
+    if (length(ok) != 1L) return(NULL)
+    dims[[k]]$count <- ok
+    ivt_fallback(sprintf(paste(
+      "Dimension %d (\"%s\") carries no member array in its codebook; its member",
+      "count (%d) was recovered from the value-page layout (the unique count that",
+      "the stored pages validate against)."), k,
+      if (is.na(dims[[k]]$name)) "?" else dims[[k]]$name, ok),
+      class = "canivt_descriptor_02_probe")
+  } else if (length(unsized) > 1L) {
+    return(NULL)
+  }
+  ivt_fallback(paste(
+    "The 02-00-20-00 survey descriptor block is framed irregularly; the dimension",
+    "counts and names were read from each dimension's codebook (header slot",
+    "table)."), class = "canivt_descriptor_02")
+  list(n_dim = ndim, dims = dims, title = NA_character_)
+}
+
 ivt_f2_descriptor <- function(raw)
   ivt_memo(raw, "descriptor", function() ivt_f2_descriptor_impl(raw))
 
 ivt_f2_descriptor_impl <- function(raw) {
   n <- length(raw)
+  # The older `02 00 20 00` survey generation (file byte 0 == 0x02) frames its
+  # descriptor block irregularly; read its dimensions from the (regular) codebook
+  # instead. Falls through to the byte-walk when the slot table does not resolve.
+  if (length(raw) >= 1L && as.integer(raw[1L]) == 0x02L) {
+    d02 <- tryCatch(ivt_f2_descriptor_02(raw), error = function(e) NULL)
+    if (!is.null(d02) && length(d02$dims) >= 1L) return(d02)
+  }
   D <- ivt_f2_descriptor_offset(raw)
   # No descriptor BLOCK anywhere (no signature, @32 == 0, no master-dir / scan hit):
   # the older single-area survey lineage. Rebuild the descriptor from the header slot

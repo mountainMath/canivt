@@ -103,6 +103,25 @@ a **name** block — the only ones the decoder keys on here.
 | `81 02 03 00` | before-descriptor **retry anchor** for the INVERTED descriptor layout | `ivt_f2_descriptor()` |
 | `81 02 <alloc> 00` | **per-member FLAG block** (`alloc` = a power of two ≥ 8 = `nextpow2(member count)`): one flag byte per member (near-uniform, e.g. `e0`), the rest of `alloc` zero-padded. The reference-period / "Timeseries" dimension of the no-descriptor survey lineage stores its members this way (no label array); member count = the non-zero flag bytes. Distinct from the field dictionary `81 02 <nfields> 00` (small `nfields`, `[02][len][name]` payload) | `ivt_f2_slot_member_count()` |
 
+### E.1 The `02 00 20 00` survey generation's sub-kind byte
+
+On the **older `02 00 20 00` survey lineage** (file **byte 0 == `0x02`** — Health
+Statistics at a Glance 1999, Census of Agriculture / Small Area Business 1996,
+provincial employment/training extracts) each `81 02 <alloc> 00` codebook block
+carries a **sub-kind byte at offset +5** (`b5`) that selects the record type. A
+single dimension's block directory carries several of these, told apart by `b5`:
+
+| bytes | `b5` | meaning | recognizer |
+|-------|------|---------|-----------|
+| `81 02 <n> 00 22 00 <field names>` | `0x22` | **field-schema dictionary** — the dimension's column vocabulary (`Code`, `Label`/`Etiquette`, …); the reference/time dimension names its sole field after itself ("Timeseries"), the naming fallback | `ivt_f2_02_schema_name()` |
+| `81 02 02 00 56 00 <EN><sep><desc><FR><sep><desc>` | `0x56` | **bilingual dimension-name marker** — the primary dimension-name source (a directory also holds a `.. 02 00 16 00` code array, so the generic doubled-name reader grabs a code; the `56` sub-byte uniquely tags the name) | `ivt_f2_02_name_marker()` |
+| `81 02 <alloc> 00 16 00 …<tail Pascal codes>` | `0x16` | **member CODE array** — `alloc = nextpow2(count)` Pascal codes at the block tail after a short binary header; the only member source for a reference dimension with no label array (years "1979-80", SEX "0"/"1"/"2"). Trailing pad slots (empty/whitespace) dropped | `ivt_f2_slot_member_count()` |
+
+The whole descriptor for this generation is rebuilt from the slot table
+(`ivt_f2_descriptor_02()`, LOUD `canivt_descriptor_02`) because its descriptor
+BLOCK is framed irregularly; a lone unsized reference dimension is recovered from
+the value-page layout (`canivt_descriptor_02_probe`). See decode-history.md.
+
 ## F. Directory value-entry framings (block-directory entries)
 
 A codebook block directory entry `[u32 off][u16 len][u16 len]` (§I) points at a

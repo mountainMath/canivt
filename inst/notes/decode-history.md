@@ -231,6 +231,40 @@ tables, and viewer/CSV-validated on the wider corpus:
   so modern doubled-EN markers are untouched). Remaining un-decoded Health variants: a
   `04`-separator time dimension (`00060101`/`00060102`) and large-count time dims failing
   the page pre-flight (`ANNUAL(120)`).
+- **`02 00 20 00` generation completed — codebook-driven descriptor** (2026-07-19).
+  The bound-the-record-region walk still misread counts on the irregular descriptor
+  block (the `04`-separated "ANNUAL" time dimension, the `<display><description>`
+  doubled/space-padded name pairs). The fix retires the descriptor block entirely for
+  `byte 0 == 0x02` files: `ivt_f2_descriptor_02()` rebuilds the descriptor from the
+  **per-dimension codebook** the header slot table (`@824`) locates — the same idea as
+  `ivt_f2_descriptor_from_slots()` but keyed on the `02`-generation sub-markers. Each
+  dimension's count comes from its member CODE array (`81 02 <alloc> 00 16 00`,
+  `alloc = nextpow2(count)` Pascal codes at the block tail, trailing pad slots dropped
+  by `drop_pad` — SEX's `04`-alloc array holds "0"/"1"/"2" + one padding space) or its
+  label array; its name from the `81 02 02 00 56 00` bilingual name marker
+  (`ivt_f2_02_name_marker`; a directory also carries a `.. 02 00 16 00` code array, so
+  the `56` sub-byte disambiguates), falling back to a named schema field
+  (`81 02 <n> 00 22 00`, e.g. "Timeseries", `ivt_f2_02_schema_name`) then the
+  descriptor's doubled reference name (`ivt_f2_02_desc_reference_name`). A lone unsized
+  reference/time dimension — one with NO member array in its codebook (Health's ANNUAL
+  years) — is recovered from the value layout: the unique count `1:48` for which
+  `ivt_layout_impl()` + `ivt_page_preflight()` validates (`canivt_descriptor_02_probe`;
+  declines if zero or several counts pass, or >1 dimension is unsized). To probe safely
+  `ivt_layout_impl(raw, d)` now takes an explicit descriptor and inlines the geo-dim and
+  data-dim-slug lookups from it, avoiding descriptor-memo recursion. Also relaxed
+  `ivt_dir_entry()` to admit `used ≤ allocated` page-directory entries (this generation
+  writes `used < allocated`; modern files write them equal) — the fix that unblocked
+  `tb111996` (`used = 1508` exact-fit, `allocated = 1716`). One more label fix:
+  `ivt_f2_dim_member_labels()` no longer bails a named dimension that lacks a
+  `81 02 02 00` marker, so a code-only reference dimension (ANNUAL years) gets its
+  labels from the whole-directory Pascal run (run-count self-check guards it).
+  Result: **21 of 23 sampled `byte 0 == 0x02` files decode**, all Total-consistency
+  validated where a Total exists; ledger rows added for all 21 (plus the two known
+  gaps as `supported = FALSE`). Two gaps stay open: `00060117` (mixed-width quantifier
+  — int32 counts + float64 rates in one table would need per-width page splitting the
+  single-presence-record layout doesn't model) and `tb611996` (multi-page sparse whose
+  `prod(entry counts)` matches none of its 8 directory entries → ambiguous probe; true
+  count 3 stated only in the title "1995 to 1997").
 
 ## Completed work log
 

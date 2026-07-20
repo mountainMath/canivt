@@ -1042,14 +1042,35 @@ Files formerly unsupported, now all DECODED and SUPPORTED:
   `[01 01][u16 len][01]<prose>` block, NUL-padding trimmed, footnote-prefixed notes
   excluded, mapped positionally only when unambiguous — a singleton facet or a dense
   one-per-member set; `NA` for the many dimensions/tables carrying none, so modern files
-  and existing Parquet are unchanged). **Remaining un-decoded Health variants** (future work): a time
-  dimension framed with a `04` separator instead of `01` (`00060101`/`00060102`,
-  "Standard Dimension"/"ANNUAL" statistical tables), and large-count time dimensions
-  (`ANNUAL(120)`) that pass the descriptor but fail the page pre-flight.
-  The two siblings (Census of Agriculture 1996
-  `EDDTAB39`, float64; Small Area Business 1996 `EMPLOY1`, int32) share the generation
-  but arrange their descriptors differently (inverted / nested codebooks) and are the
-  next onboarding step.
+  and existing Parquet are unchanged).
+  **COMPLETED — the whole `02 00 20 00` generation now decodes from the codebook, not
+  the descriptor block** (2026-07-19). The earlier bound-the-record-region approach
+  still misread counts on the irregular descriptor block (the `04`-separated "ANNUAL"
+  time dimension, the doubled/space-padded `<display><description>` name pairs). Replaced
+  it, for `byte 0 == 0x02` files only, with `ivt_f2_descriptor_02()`: a dedicated
+  descriptor rebuilt **entirely from the per-dimension codebook** the header slot table
+  (`@824`) locates. Each dimension's count comes from its member CODE array
+  (`81 02 <alloc> 00 16 00`, `alloc = nextpow2(count)` Pascal codes at the block tail,
+  trailing pad dropped) or label array; its name from the `81 02 02 00 56 00` bilingual
+  name marker, falling back to a named schema field (`81 02 <n> 00 22 00`, e.g.
+  "Timeseries") then the descriptor's doubled reference name. A lone unsized
+  reference/time dimension (no member array in its codebook) is recovered from the
+  value-page layout — the unique small count for which `ivt_page_preflight()` validates
+  (`canivt_descriptor_02_probe`). Also relaxed `ivt_dir_entry()` to admit the
+  generation's `used ≤ allocated` directory entries (modern files write `used == allocated`).
+  Result: **21 of 23 sampled `byte 0 == 0x02` files decode** (Health Statistics at a
+  Glance 1999 `00060101/102/103/104/108/112/118/123/129/141/153/210/216/221/229/234/239`,
+  Census of Agriculture 1996 `EDDTAB39` float64, Small Area Business / employment
+  `EMPLOY1` int32, `tb111996`), all internal-consistency-validated where a Total row
+  exists (Canada = Σprovinces + territories on `00060101`; `EMPLOY1`, `00060129`,
+  `00060141`). All decode through the loud `canivt_descriptor_02` fallback
+  (`strict_clean = FALSE` in the ledger).
+  **Two known gaps remain** (ledger `supported = FALSE`): `00060117` — a **mixed-width
+  quantifier** (int32 counts + float64 rates in one table) that would force per-width
+  page splitting the unified single-presence-record layout does not model; and
+  `tb611996` — a **multi-page sparse** table whose `prod(entry counts)` matches none of
+  its 8 directory entries for any candidate count, leaving the reference-dimension probe
+  ambiguous (its true count, 3, is only stated in the title "1995 to 1997").
 - [x] **No-descriptor-block survey lineage — LFHR `Table-051` + criminal-justice
   `h2530002` DECODED, SUPPORTED** (2026-07-19). The UCR siblings: same `04 00 20 00`
   header but **no dimension-descriptor block at all** — no `81 01 20 00 f0` signature,

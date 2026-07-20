@@ -86,8 +86,13 @@ ivt_value_trailer <- function(b0, b2, b3 = 0x08L) {
 ivt_layout <- function(raw)
   ivt_memo(raw, "layout", function() ivt_layout_impl(raw))
 
-ivt_layout_impl <- function(raw) {
-  d <- ivt_f2_descriptor(raw)
+# `d` overrides the file's descriptor -- used by the `02 00 20 00` count probe
+# (`ivt_f2_descriptor_02()`), which builds a candidate descriptor and tests its
+# layout against the value pages without going through the memoized descriptor
+# (which would recurse). Data-dimension slugs are derived straight from `d` here
+# (not via the descriptor-fetching `ivt_f2_data_dims()`) for the same reason.
+ivt_layout_impl <- function(raw, d = NULL) {
+  if (is.null(d)) d <- ivt_f2_descriptor(raw)
   if (is.null(d) || length(d$dims) < 2L)
     cli::cli_abort("IVT descriptor has too few dimensions to decode.")
   cnt <- vapply(d$dims, `[[`, 1L, "count")
@@ -96,8 +101,11 @@ ivt_layout_impl <- function(raw) {
   # determines the "geo" slug and the geo_in_page provenance tag -- the nesting
   # below treats every dimension identically by position.
   gd <- ivt_f2_geo_dim_index(raw, d)
-  dd <- ivt_f2_data_dims(raw)
-  slugs <- character(m); slugs[gd] <- "geo"; slugs[-gd] <- dd$slugs
+  didx <- setdiff(seq_along(d$dims), gd)
+  dnms <- vapply(d$dims[didx], function(x)
+    if (is.null(x$name) || is.na(x$name)) NA_character_ else as.character(x$name), "")
+  slugs <- character(m); slugs[gd] <- "geo"
+  if (length(didx)) slugs[didx] <- ivt_dim_slugs(dnms, didx)
 
   # Nest innermost (dim m) outward; find the dimension that overflows the record.
   # Dimension 1 (geography) ALWAYS takes the straddle role when nothing inner

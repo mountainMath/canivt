@@ -83,8 +83,16 @@ ivt_dir_entry <- function(raw, o, n = length(raw)) {
   if (o + 8L > n) return(NULL)
   off <- rd_u32(raw, o)
   s1 <- rd_u16(raw, o + 4L); s2 <- rd_u16(raw, o + 6L)
-  if (is.na(off) || s1 != s2 || s1 <= 0L || off < 1L || off + 4L > n) return(NULL)
-  list(off = off, size = s1, marker = ivt_f2_is_marker(raw, off))
+  if (is.na(off) || s1 <= 0L || s2 <= 0L || off < 1L || off + 4L > n) return(NULL)
+  # The two u16 sizes normally AGREE (used == allocated). The older `02 00 20 00`
+  # survey generation (file byte 0 == 0x02) writes them as [used][allocated] with
+  # used <= allocated (e.g. tb111996's single dense page: 1508 used, 1716
+  # allocated), so accept the pair there and take the USED size (the smaller --
+  # the exact-fit extent the decoder checks against). Every other family still
+  # requires strict equality, so this cannot loosen a directory scan elsewhere.
+  is02 <- as.integer(raw[1L]) == 0x02L
+  if (!is02 && s1 != s2) return(NULL)
+  list(off = off, size = min(s1, s2), marker = ivt_f2_is_marker(raw, off))
 }
 
 # A directory record is valid when both size fields agree, the size is positive,

@@ -102,7 +102,13 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
                             label_en = vb))
     return(NULL)
   }
-  if (named && mk == 0L) return(NULL)
+  # A named dimension whose doubled-name marker does NOT resolve (mk == 0) is not
+  # necessarily unreadable: the `02 00 20 00` survey reference-period dimension
+  # (Health Statistics "ANNUAL" years) carries no `81 02 02 00` name marker at all,
+  # only a member CODE array (the years). Fall through to the whole-directory run
+  # scan (mk == 0 already scans every entry) rather than bailing -- the run-count
+  # self-check (exactly `cnt` clean records) rejects a spurious match, so a
+  # genuinely unreadable dimension still returns NULL below.
 
   # --- collect the clean member-value runs (length cnt) ---
   runs <- ivt_f2_dim_member_runs(raw, dir, cnt, mk)
