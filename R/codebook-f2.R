@@ -479,7 +479,7 @@ ivt_f2_geo_block_dir <- function(raw) {
   NULL
 }
 
-# Stage 1 of the geography read (refactor-plan.md §7): locate the geography
+# Stage 1 of the geography read (refactor-plan.md section 7): locate the geography
 # dimension's block directory ONCE (`ivt_f2_geo_block_dir()`, exactly how the data
 # dimensions are located) and expose a LAZY, memoized per-entry reader so every
 # geography specializer recovers member arrays through the same walk rather than
@@ -490,7 +490,7 @@ ivt_f2_geo_block_dir <- function(raw) {
 #   $n            entry count;  $dir  the block-directory matrix (off/len columns)
 #   $off(r) / $len(r)   the r-th entry's byte offset / length
 #   $records(r)   run-scanner texts (`ivt_f2_dir_entry_records()`) -- how attrs_dir
-#                 and inline_dir CLASSIFY entries (kept per §4/§7 risk register)
+#                 and inline_dir CLASSIFY entries (kept per section 4/section 7 risk register)
 #   $strict(r)    strict header-driven parse (`ivt_f2_dir_entry_members()`):
 #                 list(values, dense) or NULL
 #   $values(r)    strict-first member array (`strict$values`, else `records`) --
@@ -499,7 +499,7 @@ ivt_f2_geo_block_dir <- function(raw) {
 # records() and strict() are computed on first touch and cached, so a reader that
 # never needs the run-scanner (dguids_dir's O(1) probe over the 6,244-entry
 # 98-10-0023 geography directory) never pays for it -- eagerly scanning every entry
-# measured ~17 s, the regression the memo work in §3 exists to avoid.
+# measured ~17 s, the regression the memo work in section 3 exists to avoid.
 ivt_f2_geo_entries <- function(raw) {
   d <- ivt_f2_geo_block_dir(raw)
   if (is.null(d)) return(NULL)
@@ -574,7 +574,7 @@ ivt_f2_dir_entry_records <- function(raw, off, len) {
 #       popcount == the records-region byte length + 1, i.e. it is a per-BYTE map
 #       of the packed records region, not a per-member one -- so it cannot supply
 #       member positions and the sibling NA pattern is the right alignment (see
-#       refactor-plan.md §6.1). The one-byte marker before the records is 0x80 or
+#       refactor-plan.md section 6.1). The one-byte marker before the records is 0x80 or
 #       0x01 (semantics unknown; both observed).
 #
 # Returns list(values, dense) -- `values` with NA holes for a plain array, the
@@ -781,9 +781,9 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
 # packed downstream into `metadata$geographies` with all-NA columns dropped; the
 # full path keeps every column (incl. all-NA) as a tibble. `full` also selects the
 # CHEAP readers (uid-only for the big chunked tables) over the ~30 s complete
-# attribute scan. Not a merge candidate -- see refactor-plan.md §5.1.
+# attribute scan. Not a merge candidate -- see refactor-plan.md section 5.1.
 #
-# The single geography DISPATCHER (refactor-plan.md §7.3): one ordered specializer
+# The single geography DISPATCHER (refactor-plan.md section 7.3): one ordered specializer
 # chain that both entry points share, run once. `full` selects only the SCHEMA
 # step -- the cheap light readers (single-chunk `attrs_dir`, the schema-named
 # single block, the uid-only DGUID scan) vs the comprehensive full attribute scan
@@ -796,7 +796,7 @@ ivt_f2_geo_simple <- function(raw, n_geo, tail_bytes = 200000L) {
 #
 # Returns the winning specializer's NATIVE object (a tibble for inline/flow/attr
 # readers, a list for the custom/bare/uid readers), with the uid column already
-# renamed to `geo_uid`; the two wrappers apply their distinct contracts (§5.1:
+# renamed to `geo_uid`; the two wrappers apply their distinct contracts (section 5.1:
 # light = list with all-NA columns dropped; full = tibble keeping every column).
 # The geography ENCODING family, classified from the file's OWN geography field
 # dictionary -- metadata-driven, no member content. The `81 02` field-name vocabulary
@@ -909,7 +909,7 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   #     chunk assembler skips the <3-member blocks these single-geography tables use.
   dd <- ivt_f2_geo_datadim(raw, n_geo)
   if (!is.null(dd)) return(dd)
-  # 6. Stage 3 safety net (refactor-plan.md §7.4): nothing above claimed the
+  # 6. Stage 3 safety net (refactor-plan.md section 7.4): nothing above claimed the
   #    layout AND the uid scan came up short -- rather than emit nameless
   #    geography, surface the codebook's own member strings VERBATIM (loud).
   combined <- ivt_f2_geo_combined(raw, ivt_f2_geo_entries(raw), n_geo)
@@ -1010,7 +1010,7 @@ ivt_f2_geo_field_role <- function(field) {
   }, character(1), USE.NAMES = FALSE)
 }
 
-# Stage 3 of the geography read (refactor-plan.md §7.4): the last-resort catch-all,
+# Stage 3 of the geography read (refactor-plan.md section 7.4): the last-resort catch-all,
 # reached only when no specializer recognized the layout and the uid scan did not
 # deliver a complete array. It follows the owner's directive -- locate the geography
 # metadata like any other dimension (Stage 1 `ents`), recover each item positionally
@@ -1608,7 +1608,7 @@ ivt_f2_frscore <- function(v) {
 # one shared implementation of the idiom formerly inlined at every
 # language-pair site. Returns list(en, fr, en_first).
 #
-# LOUDNESS PHILOSOPHY (refactor-plan.md §5.3). Content scoring is the PRIMARY,
+# LOUDNESS PHILOSOPHY (refactor-plan.md section 5.3). Content scoring is the PRIMARY,
 # correct language decider for the geography per-group paths (`geo_attrs_dir`,
 # `geo_names`, `geo_root_dir`, `dqf_legend`) and is SILENT there by design: the
 # physical block language order is not fixed per file -- most groups are EN-first
@@ -1766,7 +1766,7 @@ ivt_f2_is_ordinal <- function(t) {
 # Is a directory entry a single free-text blob (a footnote/note record) rather than
 # a member value array?  A footnote stored in a block directory reuses the plain-
 # array header `[01 01][u16 len-4]` but its payload is a lone un-terminated latin1
-# text `[01]<text>` (e.g. "Renvoi 1 / Ne comprend pas les données du recensement
+# text `[01]<text>` (e.g. "Renvoi 1 / Ne comprend pas les donn\u00e9es du recensement
 # pour ...") -- no per-member records, no NUL terminators. These sit in the
 # geography directory's TAIL, one per member that cites a note (98-10-0010 carries
 # 37, 98-10-0019 one), and the run-scanner fragments each into a few text pieces
@@ -2783,7 +2783,7 @@ ivt_f2_check_geo_names <- function(geo_name) {
 #'
 #' The FULL attribute table (the `read_ivt(geo_attributes = TRUE)` path): a tibble
 #' keeping every column, including all-NA ones (a tested contract). Intentionally
-#' distinct from the lean `ivt_f2_geo_light()` default -- see refactor-plan.md §5.1.
+#' distinct from the lean `ivt_f2_geo_light()` default -- see refactor-plan.md section 5.1.
 #'
 #' @keywords internal
 #' @noRd
@@ -2955,7 +2955,7 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer
   #     boundary falls on an internal word space rather than the copy boundary.
   if (namelike && name1 != name2 && endsWith(name2, name1)) return(name2)
   # (c) a single clean Title-case name followed by inline member text -- only the
-  #     opening geography record ("Geography" then "ORD 08588 (…)").
+  #     opening geography record ("Geography" then "ORD 08588 (...)").
   if (!namelike && first_record &&
       grepl("^[A-Z][A-Za-z]+( [A-Z][A-Za-z]+)*$", name1)) return(name1)
   # (d) prose-bleed data dim with the copies NON-adjacent (2001 F-series

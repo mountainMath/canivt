@@ -28,6 +28,10 @@ Meta/
 # Knitted vignette output (source is vignettes/*.Rmd)
 /vignettes/*.html
 /vignettes/*.R
+/vignettes/figure/
+
+# Stray top-level figure dir from ad-hoc knitr::knit() runs (cwd = pkg root)
+/figure/
 
 # session scratch (working artifacts, never committed)
 scratchpad/

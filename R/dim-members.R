@@ -1,4 +1,4 @@
-# Unified per-dimension member reader (PROTOTYPE, refactor-plan.md §8 exploration).
+# Unified per-dimension member reader (PROTOTYPE, refactor-plan.md section 8 exploration).
 #
 # The insight behind this file: EVERY dimension -- geography AND data -- stores its
 # codebook the same way (dimdir.R): a `81 02 <nfields> 00` field dictionary naming

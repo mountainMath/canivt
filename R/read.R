@@ -198,8 +198,8 @@ ivt_metadata <- function(path) {
 #' @param depth If `TRUE` (default `FALSE`) add a `<col>_depth` integer column
 #'   after each data-dimension column giving that member's hierarchy depth (read
 #'   from the label indentation, the same measure carried by [ivt_members()]).
-#'   Opt-in, so the default output — and hence the Parquet written by
-#'   [ivt_write_parquet()] — is unchanged.
+#'   Opt-in, so the default output -- and hence the Parquet written by
+#'   [ivt_write_parquet()] -- is unchanged.
 #' @return A tibble.
 #' @examples
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")

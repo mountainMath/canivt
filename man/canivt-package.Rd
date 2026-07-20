@@ -12,7 +12,7 @@ Downloads and parses Statistics Canada Beyond 20/20 .ivt data tables into tidy d
 Useful links:
 \itemize{
   \item \url{https://github.com/mountainMath/canivt}
-  \item \url{https://mountainmath.github.io/canivt}
+  \item \url{https://mountainmath.github.io/canivt/}
   \item Report bugs at \url{https://github.com/mountainMath/canivt/issues}
 }
 

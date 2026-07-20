@@ -465,6 +465,75 @@ exports out-of-line title blocks at header `@40`/`@48`. The 1981 profile has
 up empty — this also fills the previously-NA identity on the 1996 and 2016
 `98-400-X` tables.
 
+## The older `02 00 20 00` survey-generation container
+
+Every table discussed so far starts with the 4-byte signature `04 00 20 00`. A
+second, older Beyond 20/20 container generation shares the last three bytes but
+starts with `02 00 20 00` — byte 0 is a **container-generation tag** (`04`
+modern census/custom, `02` an older split-definition survey product line), not
+part of a fixed 4-byte constant. `ivt_family()` accepts byte 0 ∈ `{2, 4}`.
+Corpus examples: Health Statistics at a Glance 1999 (the `00060xxx` series), the
+1996 Census of Agriculture (`EDDTAB39`), and the 1996 Small Area Business survey
+(`EMPLOY1`).
+
+Everything **downstream of the signature is the same model** — page directory at
+`@558` (low 16 bits, unwrapped the same way), pages framed as
+`marker(4) + 256-byte presence + sparse values` with the same width nibble
+(`2/4/8` = int16/int32/float64), and the same codebook region at the tail. Three
+things differ, all confined to how the **descriptor** and **codebook** are read:
+
+1. **No `FACET04` title block**, so the modern descriptor walk (which bounds
+   itself on that title) cannot locate the end of the dimension records, and the
+   generation's own quirks — a `04`-byte-separated "ANNUAL" time dimension, and
+   `<display><description>` name pairs that are doubled and space-padded rather
+   than exactly repeated — defeat the doubled-name walk outright. `byte 0 ==
+   0x02` files therefore skip the descriptor block entirely: `ivt_f2_descriptor_02()`
+   **rebuilds the descriptor from the per-dimension codebook** located by the
+   header's own slot table (`@824 + 14·(k−1)`, the same slot table every
+   generation uses). Each dimension's count comes from its member CODE array
+   (`81 02 <alloc> 00 16 00`, `alloc = nextpow2(count)`) or label array; its name
+   from the `81 02 02 00 56 00` bilingual name marker, falling back to a named
+   schema field (`81 02 <n> 00 22 00`) then the descriptor's doubled reference
+   name. A reference/time dimension with **no member array at all** (see below)
+   is sized by probing which small candidate count makes the value-page layout
+   validate (`ivt_page_preflight()`); this probe is the one part of the
+   generation's read that still warns loudly (`canivt_descriptor_02_probe`) if
+   it cannot disambiguate.
+2. **No geography dimension.** By design, this generation's `REGION`/`GEOGRAPHY`
+   dimension carries no geographic identifiers (no DGUID/GEOUID schema field, no
+   inline `"name (code)"` pattern) — it is province/territory-level prose, not a
+   StatCan geography. `ivt_f2_geo_dim_index()` structurally returns `0` for these
+   files, so the dimension stays an ordinary, fully-labelled data dimension:
+   `metadata$geographies` is empty and `cells` carries no `geo` column.
+3. **The time-series member table** (`markers.md` §E.1) is how a reference
+   dimension can exist with **neither a code array nor a label array**: a block
+   framed `81 02 <alloc> 00 08 00` holding `alloc` one-byte member-**slot** flags
+   (byte-pair-swapped, like every presence bitmap in this format — non-zero =
+   populated slot) followed by one 3-byte little-endian **date** per populated
+   slot, right-aligned at the block end. The epoch is **days since 0000-03-01**
+   (the classic proleptic-Gregorian computational epoch); every observed date
+   lands on 1 January of its year for an annual series, so member labels are
+   *generated* from the dates rather than read as text. Deleted members leave
+   **holes** in the slot numbering (one corpus table's three surviving periods
+   sit at slots 1, 2 and 4) — the presence bitmap and page directory address
+   members **by slot**, not by a dense 1..count range, so the layout carries a
+   `dims[[k]]$slots` vector and `ivt_layout()`/`ivt_f2_cell_grid()`/`ivt_decode()`
+   map slot positions back to member ids wherever it is present (a value landing
+   on a hole warns `canivt_slot_hole` — it would indicate a mis-derived slot
+   map, not a data-quality issue).
+
+One more property of this generation is worth stating because it looks at first
+like a missing decimal scale: **the stored values are complete integers, not a
+fixed-point encoding**. The `b2` marker byte that looked like a candidate
+"decimals" tag is (as everywhere else) only the value-width/trailer code, and a
+byte-diff of same-shaped facet codebooks turns up nothing but member-count
+bytes — there is no decimals byte anywhere in the container. Each facet member's
+own `_Description` text states the unit the integer is already in (e.g. a total
+fertility rate is stored as "children per 1,000 women", so `3840` means 3.84 per
+woman) — `ivt_members()` surfaces that text as `description`/`description_fr`
+when it can be mapped to a member unambiguously. No scale warning is emitted;
+`read_ivt()` returns the raw integers unchanged.
+
 ## Validation
 
 `tests/testthat/test-decode.R` checks (against the StatCan CSV/known values):

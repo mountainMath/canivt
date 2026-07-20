@@ -1,6 +1,6 @@
 Package: canivt
 Title: Download and Parse StatCan Beyond 20/20 IVT Tables
-Version: 0.1.0
+Version: 0.2.0
 Authors@R:
     person("Jens", "von Bergmann", , "jens@mountainmath.ca", role = c("aut", "cre", "cph"))
 Description: Downloads and parses Statistics Canada Beyond 20/20 .ivt data
@@ -14,6 +14,8 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
+Depends:
+    R (>= 4.2.0)
 Imports:
     cli,
     stats,
@@ -27,6 +29,7 @@ Suggests:
     httr2,
     knitr,
     readr,
+    rlang,
     rmarkdown,
     rvest,
     testthat (>= 3.0.0),
@@ -34,5 +37,5 @@ Suggests:
     xml2
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-URL: https://github.com/mountainMath/canivt, https://mountainmath.github.io/canivt
+URL: https://github.com/mountainMath/canivt, https://mountainmath.github.io/canivt/
 BugReports: https://github.com/mountainMath/canivt/issues

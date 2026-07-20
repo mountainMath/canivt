@@ -566,7 +566,7 @@ ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   # (a schema-less chunked geography codebook -- e.g. EO3278/EO2654, whose members
   # are attribute-major name/code runs with no GEO_NAME schema and no inline
   # pattern). The descriptor still NAMES the dimension, so when exactly one is
-  # called "Geography" / "Geographie" / "Géographie" (the header's own label, like
+  # called "Geography" / "Geographie" / "G\u00e9ographie" (the header's own label, like
   # any other dimension name), trust it. Gated to exactly one match so an ordinary
   # table -- where this never fires, dimension 1 having matched above -- is
   # untouched.
@@ -577,7 +577,7 @@ ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   # GEO_NAME schema and no inline pattern, so no dimension matches a geography
   # SIGNATURE -- the header name is the only geography evidence the file gives.
   geo_named <- which(vapply(d$dims, function(x)
-    grepl("^\\s*(geograph|géograph|region|région|province)",
+    grepl("^\\s*(geograph|g\u00e9ograph|region|r\u00e9gion|province)",
           dim_name(x), ignore.case = TRUE), logical(1)))
   # The `02 00 20 00` survey generation has NO geography dimension in the
   # package's sense: its regional dimensions ("REGION", "GEOGRAPHY", "Provinces")
@@ -621,7 +621,7 @@ ivt_f2_dir_has_bare_codes <- function(raw, dir, min_codes = 100L, max_blocks = 8
 }
 
 # Does this dimension slot directory hold a GEOGRAPHY codebook? Identified from the
-# dimension's own FIELD DICTIONARY first (metadata-driven, §8.4) -- a `81 02` block
+# dimension's own FIELD DICTIONARY first (metadata-driven, section 8.4) -- a `81 02` block
 # is geography when it names (a) the modern DGUID attribute `GEO_NAME`, (b) the
 # origin-destination flow schema (`POR/POW` / `LDR/LDT`, Place Of Residence/Work), or
 # (c) a `UID/IDU` uid column TOGETHER with a `Level/Niveau` or `Geo Code` column --

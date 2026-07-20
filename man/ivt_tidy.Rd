@@ -38,8 +38,8 @@ French name).}
 \item{depth}{If \code{TRUE} (default \code{FALSE}) add a \verb{<col>_depth} integer column
 after each data-dimension column giving that member's hierarchy depth (read
 from the label indentation, the same measure carried by \code{\link[=ivt_members]{ivt_members()}}).
-Opt-in, so the default output — and hence the Parquet written by
-\code{\link[=ivt_write_parquet]{ivt_write_parquet()}} — is unchanged.}
+Opt-in, so the default output -- and hence the Parquet written by
+\code{\link[=ivt_write_parquet]{ivt_write_parquet()}} -- is unchanged.}
 }
 \value{
 A tibble.

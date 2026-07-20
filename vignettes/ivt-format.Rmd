@@ -9,8 +9,9 @@ vignette: >
 
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
-  collapse = TRUE, 
+  collapse = TRUE,
   comment = "#>",
+  fig.path = "vignettes/figure/ivt-format-",
   eval = nzchar(Sys.getenv("COMPILE_VIG")))
 ```
 
@@ -26,8 +27,12 @@ every byte marker/signature the decoder keys on,
 
 ## One layout, one decoder
 
-Every `.ivt` starts with the signature `04 00 20 00` and is one contiguous
-binary. There is a single, descriptor-driven, name/type-agnostic decoder: it
+Every `.ivt` starts with a 4-byte signature ending `00 20 00`; the modern
+census/custom lineage sets the leading byte to `04`. (A second, older container
+generation sets it to `02` instead — see "An older survey-generation container"
+near the end of this vignette; everything in this section applies to both.) The
+file is one contiguous binary, and there is a single, descriptor-driven,
+name/type-agnostic decoder: it
 reads the dimension structure from the header, nests **every** dimension into a
 power-of-two positional bitmap (data dimensions innermost, geography outermost),
 and walks the value pages. What used to be documented as "family 1" and
@@ -317,6 +322,48 @@ leg <- read_ivt(statcan_ivt_download(row))   # 41,859 geographies, Age(110) × S
 ivt_tidy(leg)
 ```
 
+## An older survey-generation container (`02 00 20 00`)
+
+A second, older Beyond 20/20 container generation shares the same page/value/
+codebook model but starts with `02 00 20 00` instead of `04 00 20 00` — byte 0
+is a container-generation tag, not part of a fixed constant, and
+`ivt_family()`/`read_ivt()` handle both transparently. This generation covers
+older survey product lines rather than census geography tables: Health
+Statistics at a Glance (1999), the 1996 Census of Agriculture, and the 1996
+Small Area Business survey.
+
+Two things are structurally different, both confined to the descriptor and
+codebook:
+
+* **No geography dimension.** These are single-area survey products — the
+  `REGION`/`GEOGRAPHY` dimension carries no DGUID or geographic identifiers, so
+  `read_ivt()` treats it as an ordinary, fully-labelled data dimension:
+  `metadata$geographies` is empty and `cells` has no `geo` column.
+* **Generated time-series labels.** A reference/time dimension can be stored
+  with no code or label array at all — only a per-member **date table**
+  (one-byte populated-slot flags + a 3-byte date, days since `0000-03-01`).
+  Member labels (typically a year) are *generated* from those dates. Because
+  the presence bitmap addresses members by their **slot** rather than a dense
+  `1..count` range, and deleted members leave holes in the slot numbering, the
+  decoder's layout is slot-aware here.
+
+```{r, eval = FALSE}
+# Health Statistics at a Glance 1999 is Borealis-hosted (see vignette("borealis")
+# for browsing/downloading): Quantifier x Geography x Period, no geography
+# dimension, year labels generated from the on-disk dates.
+path <- borealis_ivt_download(hits[1, ])   # hits from borealis_ivt_catalogue()
+hsg  <- read_ivt(path)
+ivt_tidy(hsg)
+```
+
+Values in this generation are complete integers in the indicator's own unit —
+not a fixed-point encoding needing a decimal scale. The unit is stated in the
+relevant member's description text, surfaced via `ivt_members()`'s
+`description`/`description_fr` columns where it can be mapped unambiguously.
+
+See `inst/notes/ivt-format.md` ("The older `02 00 20 00` survey-generation
+container") and `inst/notes/markers.md` §E.1 for the exact byte framings.
+
 ## How `canivt` maps to the format
 
 | Region | Function(s) | Source file(s) |
@@ -337,7 +384,8 @@ and the 1991 table (1003011) cell-exact for all scraped ground-truth geographies
 The unified decoder is additionally **byte-identical** to the two former decoders
 on six reference tables, and viewer/CSV-validated across the wider corpus —
 1996–2021 census tables, 1981/1991 profiles, 2001/2006 F-series, large 2016
-`98-400-X` crosstabs, commuting-flow tables and custom extracts. An opt-in
+`98-400-X` crosstabs, commuting-flow tables, custom extracts, the Business
+Register lineage, and the older `02 00 20 00` survey generation. An opt-in
 regression ledger runs the whole local corpus through `read_ivt()` and asserts
 the exact cell count per table. For older vintages the package scrapes the
 Beyond 20/20 web viewer for ground-truth data to validate against. See the
