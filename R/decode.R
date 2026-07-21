@@ -300,11 +300,15 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     if (nv == 0L) next
     end <- 4L + lay$rec_bytes + tr + nv * w
     if (end > s1 || off + end > n || nv > cap) return(FALSE)
-    # trailer-less pages fit exactly -- except the b3 >= 0x0a suppression-tail
-    # pages (2006 vintage), which append per-(geo, outer-dim) missing-cell mask
-    # records after the value run (with occasional writer slack/truncation), so
-    # only the <= extent bound applies there.
-    if (b2 == 0x00L && b3 <= 0x09L && end != s1) return(FALSE)
+    # Exact fit is required ONLY for pages that carry no auxiliary head and no
+    # suppression tail: b2 == 0 (no trailer) AND b3 == 0x08 (head = 0). Pages
+    # with a head block (b3 >= 0x09) may append a per-(geo, outer-dim) missing-
+    # cell mask / allocation slack after the dense value run, so only the <=
+    # extent bound applies -- the 2006 census vintage (97-563) does this on its
+    # b3 >= 0x0a pages, and the 2001 profile lineage (95F0490) already on its
+    # b3 == 0x09 pages (8-80 byte tails). Decoding stays presence-authoritative
+    # (exactly popcount values read from vstart), so the tail never affects it.
+    if (b2 == 0x00L && b3 <= 0x08L && end != s1) return(FALSE)
     seen <- seen + 1L
     if (seen >= max_pages) break
   }

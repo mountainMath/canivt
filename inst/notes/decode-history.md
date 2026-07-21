@@ -657,6 +657,53 @@ cleanliness, FAIL 0 / PASS 120):
   (verified on 98-10-0241), demoting the `ivt_f2_descriptor_name()` recovery stack
   from load-bearing to a cross-check.
 
+### Onboarding backlog — Stage 1 pass (2026-07-21) — DONE
+
+A random re-sample of 20 previously-unseen catalogue tables (10 StatCan + 10
+Borealis) surfaced 7 that did not read strict-clean (see
+[`onboarding-backlog.md`](onboarding-backlog.md)). One Stage-1 fix, two small
+general changes, cleared **4 of them**; corpus ledger FAIL 0 / PASS 257.
+
+- **Geography-LAST prose-bleed name recovery.** The 2001 profile lineage
+  `95F0490XCB01006` (Borealis SP3/NIQKF5) read as *unsupported*. Its byte-walk
+  already computed the right member counts from the framing — Profile
+  `6d 02 0a 01` → `0x6d + 0x02·256 = 621` (the name even says "Profile of Census
+  Subdivisions **(621)**"), Geography `11 04 0b 01` → `0x11 + 0x04·256 = 1041`
+  (matching the `nv ≈ 1041` on the value pages) — both chunked >256-member
+  codebooks (Geography: NL/QC/ON/AB 256-chunks + a 17-member BC tail; Profile:
+  256+256+109). But `ivt_f2_descriptor_name()` returned NA for the Geography
+  record ("Geograph**yens (pGeography**tut de r": two "Geography" copies
+  interleaved with French prose), because its reoccurring-prefix fallback (case e)
+  was gated to `first_record` — and the profile lineage stores geography **last**.
+  The record was dropped, the descriptor rebuilt from the slot table, and the slot
+  rebuild caps each dimension at its **first 256-member chunk** → Profile(256),
+  Geography(256) → wrong layout → gate reject. Fix: `descriptor_name()` gained a
+  `type` argument and case (e) now fires for any u16-count **geotype** record, not
+  only the first. Recovered "Geography"/"Profile of Census Subdivisions (621)",
+  the framing counts stand, and the table decodes **538,064 cells strict-clean**.
+  Validated by the 2001 labour-force accounting identities (In LF = Employed +
+  Unemployed; Total 15+ = In LF + Not in LF) holding across all 1041 geographies
+  to ±10 (base-5 random rounding).
+- **Exact-fit pre-flight only for `b2 == 0 && b3 == 08`.** The gate demanded an
+  exact page/entry-size fit for `b2 == 0 && b3 <= 09`. But `b3 == 09` pages carry
+  a 32-byte auxiliary head **and**, on some vintages, an allocation/suppression
+  tail after the dense value run: 95F0490's `b3 == 09` pages leave 8–80 byte tails
+  (a denormal-≈0 pad or a sparse absent-cell mask — never a value). Decoding is
+  presence-authoritative (exactly `popcount` values from the run start), so the
+  tail is inert; only the pre-flight over-rejected. Relaxing exact→`<=` for
+  `b3 == 09` cannot break a table that was exact (exact satisfies `<=`), so the
+  2006 vintage (which exact-fits its `b3 == 09` pages) is unaffected.
+- **Cascade.** The two changes cleared three more backlog tables with no further
+  work: `97-555-XCB2006058` (2006 census, twin lineage of the supported 97-563;
+  the exact-fit relaxation cleared its `b3 == 09` tails → **4,166,909 cells
+  strict-clean**; Sex Total=M+F within ±11 on 96.7% of count cells, the residual
+  being exactly the non-additive income medians/averages/SEs, members 795–830),
+  `95F0378XCB01004` (**859,903 cells**, still on the `canivt_descriptor_from_slots`
+  fallback because a footnote bleeds into its descriptor; Sex identity 99.6% within
+  ±11), and `95F0489XCB01007` (the geotype name fix removed its
+  `canivt_descriptor_lenient` fallback with the cell count unchanged at 86,696 →
+  now strict-clean).
+
 ## Invariant derivations & historical bugs
 
 Why the "Key invariants" in `CLAUDE.md` are what they are — the measurements and the

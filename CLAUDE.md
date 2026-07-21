@@ -31,10 +31,15 @@ This folder is self-contained. Companion docs under `inst/notes/`:
 - [`refactor-plan.md`](inst/notes/refactor-plan.md) — the **consolidation /
   harmonization backlog** from the 2026-07 parser review (dedup targets, the
   per-read `ctx` refactor, fallback paths to retire). Check items off as they land.
+- [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) — the **active
+  onboarding queue**: 7 newly-sampled tables that don't yet read strict-clean,
+  grouped into stages, plus the repeatable per-table onboarding recipe. Work here
+  when adding format coverage.
 
 ## What works today
 
-**Every `.ivt` in the local corpus decodes — there are no unsupported files.**
+**Every `.ivt` in the established corpus decodes; the 7 tables in
+[`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) are the known gaps.**
 A single, descriptor-driven, name/type-agnostic decoder (`decode.R`:
 `ivt_layout()` + `ivt_decode()`) handles all of them, plus one shared metadata
 path (`ivt_f2_metadata()`). The historical "family 1 / family 2" split is **not
@@ -145,8 +150,12 @@ The *rules*; the measurements and original bugs behind them are in
   `2·(b2 >> 4) + 2·(low nibble(b2) > 0)`; head = `32·(b3 − 8)`, `b3 ∈ {08,09,0a,0c}`.
   Unknown markers **abort** (`canivt_unknown_marker`). Every page is extent-checked
   against its directory entry's u16 size (`4 + presence + trailer + head + nv·width
-  ≤ size`, **equality when `b2 == 0` and `b3 ≤ 09`** — `b3 ≥ 0a` pages append
-  absent-cell mask tails; `canivt_page_overrun`). Valid entries pointing at unknown
+  ≤ size`, **equality only when `b2 == 0` and `b3 == 08`** (no head, no tail) —
+  pages with a head block (`b3 ≥ 09`) may append an absent-cell mask / allocation
+  slack after the dense value run, so only the `≤` bound applies (the 2006 vintage
+  97-563/97-555 on `b3 ≥ 0a`, the 2001 profile lineage 95F0490 already on `b3 == 09`,
+  8–80 byte tails); `canivt_page_overrun`). Decoding stays presence-authoritative
+  (exactly `popcount` values from the run start), so a tail never affects it. Valid entries pointing at unknown
   markers are skipped **loudly** (`canivt_skipped_pages`). The store keeps only
   **non-zero** cells, so a missing cell = 0; entirely empty geographies (zero
   presence record) are normal. A **ZERO high nibble in b0 is the DENSE page
@@ -292,11 +301,18 @@ When a gap is closed or a table is onboarded, update the ledger row (and
 
 The decoder, unified metadata, uniform geography parsing, the family-2 attribute
 table, commuting-flow decoding (all vintages), footnote scope and geo-name
-completeness are all **done** — the corpus is fully supported. The completed work
-log (and how each table was cracked) lives in
-[`decode-history.md`](inst/notes/decode-history.md); measured coverage in
-[`coverage.md`](inst/notes/coverage.md). What remains is optional:
+completeness are all **done**. The completed work log (and how each table was
+cracked) lives in [`decode-history.md`](inst/notes/decode-history.md); measured
+coverage in [`coverage.md`](inst/notes/coverage.md).
 
+- **Onboarding backlog** — a 2026-07-21 random re-sample of the StatCan + Borealis
+  catalogues (20 previously-unseen tables) surfaced **7 that do not read
+  strict-clean** (5 fail the family gate, 2 read only via loud fallbacks). Their
+  raws are now in the ivt cache and tracked as ledger rows; the staged plan and
+  the repeatable per-table onboarding recipe live in
+  [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md). **This is the
+  active work queue** — work them one stage at a time, landing each table's fix +
+  validation + ledger/coverage/history update in a single commit.
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck
   (it is fine at ~5 s for the 7.5M-cell reference table).
 

@@ -2905,9 +2905,19 @@ ivt_f2_scan_descriptor <- function(raw) {
 # separator. The name is stored TWICE back-to-back; `first_record` allows the
 # opening (geography) record to store its name once, followed by inline member
 # text instead of a second copy (the ord-08035 custom export). `count` is the
-# framing member count, used only by the last (prose-bleed) fallback. Returns
-# the name or NA when the run is not a dimension name.
-ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer_) {
+# framing member count, used only by the last (prose-bleed) fallback. `type` is
+# the framing type byte: a u16-count "geotype" tags a large geography /
+# detailed-classification dimension (the ones whose name framing bleeds), and
+# enables the prose-bleed geography recovery even when the record is NOT first --
+# the profile lineage stores its (large) geography dimension LAST (95F0490's
+# "Geography" (1041), whose two name copies are interleaved with French prose:
+# "Geographyens (pGeographytut de r"). Returns the name or NA when the run is
+# not a dimension name.
+ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer_,
+                                   type = NA_integer_) {
+  # the u16-member-count storage types (see the descriptor walk): large
+  # geography / detailed-classification dimensions, whose framing can bleed.
+  geotype <- !is.na(type) && type %in% c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L, 0x0fL, 0x0bL)
   rl <- length(run)
   if (rl < 2L) return(NA_character_)
   # Standard layout: two identical copies. Largest p with run[1:p]==run[(p+1):2p];
@@ -2981,8 +2991,10 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer
   # (e) prose-bleed geography record (no "(count)" to anchor on): French prose
   #     bleeds BETWEEN the two "Geography" copies ("Geographyle nomGeography
   #     connexes ..."). Recover it as the longest prefix that reoccurs later in
-  #     the run, when that prefix is a clean title-case token. First record only.
-  if (first_record) {
+  #     the run, when that prefix is a clean title-case token. Fires for the
+  #     opening record (geography-first, the usual layout) OR any u16-count
+  #     geotype record (the profile lineage's geography-LAST, 95F0490).
+  if (first_record || geotype) {
     rep <- ""
     for (kk in seq_len(nchar(s) %/% 2L)) {
       pfx <- substr(s, 1L, kk)
@@ -3614,7 +3626,7 @@ ivt_f2_descriptor_impl <- function(raw) {
                    else v[k - 2L]
         }
         nm <- ivt_f2_descriptor_name(run, first_record = length(dims) == 0L,
-                                     count = count)
+                                     count = count, type = type)
         if (is.na(nm) && lenient) {
           # the accept-all pass keeps every framed record even when the two name
           # copies do not relate (a <display><description> pair, e.g.
