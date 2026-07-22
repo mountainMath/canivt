@@ -29,17 +29,19 @@ variant of the inverted retry) and `SP3_Q2JJJO_table_5_c-ivt-2008` (UCR crime:
 `04`-gen doubled-window survey directory (LFHR multi-dim).** A later sweep drew
 `SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009, 6 dims incl. a
 276-month Timeseries) — the first *multi-dimensional, long-series* member of the
-survey lineage (LFHR `Table-051`/UCR/justice). Onboarded (**4,986,342 cells**,
+survey lineage (LFHR `Table-051`/UCR/justice). Onboarded (**5,771,932 cells**,
 LFS-validated: sex & geo additivity exact, 11 provinces in order) via two loud
 `strict_clean = FALSE` fallbacks: (1) `ivt_f2_time_members()` reads `alloc` as a
 full u16 (Table-023's alloc = 512 tripped the `alloc < 256` guard); (2)
 `ivt_survey_double()` (decode.R) detects STRUCTURALLY that this lineage *appears*
 to pad the innermost paged (straddle-window) dimension to **double** its nextpow2
-→ strides `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`. **The geometry is
-NOT understood** — the doubling wastes half the directory (suspicious; likely an
-un-modelled nested level, cf. the sibling `Table-024`'s `ipc` mismatch) and has no
-metadata marker (if real, a header/descriptor field must declare it, and the
-parser should key off that, not a content probe). Full "Open concerns" +
+→ strides `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`, read off the
+page-directory **size signature** (padding pages are the minimal allocation —
+container metadata, no presence decode). **The geometry is NOT understood** — the
+doubling wastes half the directory (suspicious; likely an un-modelled nested level,
+cf. the sibling `Table-024`'s `ipc` mismatch) and has no DECLARED metadata marker
+(if real, a header/descriptor field must declare it, and the parser should key off
+that, not an inferred directory-structure probe). Full "Open concerns" +
 marker-hunt candidates in [`coverage.md`](coverage.md). Table-024 is not in the
 corpus and the extent guard in `ivt_page_preflight()` honest-rejects that shape.
 

@@ -872,15 +872,25 @@ window) dimension padded to DOUBLE its nextpow2** (3 hours-windows in 8 slots, n
 base-100 rounding), all 11 provinces named in order, 276 months.
 
 The detector `ivt_survey_double()` (decode.R) is purely structural (no name/type
-branch). An early weak version (accept a valid *marker* at the doubled corner)
+branch) and reads only the page-directory **size signature** — container metadata
+(the 8-byte entries' u16 size fields), never the cell presence bitmaps. This is
+what makes it robust: it does NOT depend on the very layout hypothesis it is
+testing. A window-padding page carries no values, so it is the **minimal page
+allocation** (Table-023: 392 bytes, marker `88 01 20 08`, `size − vstart = 128`
+fixed slack) — strictly smaller than any page that stores cells (4744..9092).
+`minsize` is self-calibrated per table from block 0's floor (no hard-coded size).
+An early weak version (accept a valid *marker* at the doubled corner)
 false-positived on six large pow2 profile/crosstab corpus tables; the final gate
-requires ALL of: the doubled corners carry **real data** (non-empty presence
-record, not a coincidental marker byte on a big file); the **pow2 position** of
-paged-dim-2's member 1 is EMPTY while its **doubled position** carries data; and
-the window-padding slots `[win, 2·win_slots)` of block 0 are empty (so a table
-whose true window count is larger — a different record packing — is not silently
-halved). Corpus stays `survey_double = FALSE` throughout (FAIL 0, PASS 267 before
-adding the row). An extent guard in `ivt_page_preflight()` honest-rejects any
+requires ALL of: the doubled corners hold a **data page** (larger than `minsize`,
+not merely a valid marker byte a big file can hit by coincidence); the **pow2
+position** of paged-dim-2's member 1 is EMPTY (minimal) while its **doubled
+position** is a data page; and the window-padding slots `[win, 2·win_slots)` of
+block 0 hold no data page (so a table whose true window count is larger — a
+different record packing — is not silently halved). The earlier version probed
+`ivt_f2_record_present()` popcounts at the same slots; the size read is equivalent
+on the corpus but cheaper and independent of the presence interpretation. Corpus
+stays `survey_double = FALSE` throughout (FAIL 0, PASS 270). An extent guard in
+`ivt_page_preflight()` honest-rejects any
 long-series directory that overshoots the pow2 model but fails the window check, so
 an unmodelled shape can never silently mis-decode. Reads **5,771,932 cells** via
 `canivt_descriptor_from_slots` + `canivt_survey_directory` (both `canivt_fallback`,
@@ -919,12 +929,15 @@ for these tightly pow2-packed containers, and a strong hint that an un-modelled
 nested level (or value/flag pair, or derived-member sub-axis) actually occupies
 the "wasted" slots and I am collapsing it into a phantom ×2 stride; the
 `Table-024` `ipc` mismatch is probably the same misunderstanding from the
-multi-in-page side. (2) `ivt_survey_double()` is a CONTENT/structural probe, not a
-metadata read — if the doubling is real there must be a marker for it in the
-header/descriptor/slot table, and the parser should key off that (retiring the
-probe to a loud fallback at most). Until then it stays `canivt_survey_directory`
-(`strict_clean = FALSE`), not a validated primary path. Full write-up +
-marker-hunt candidates in coverage.md "Open concerns".
+multi-in-page side. (2) `ivt_survey_double()` now reads the directory **size
+signature** (container metadata — the padding pages are the minimal allocation),
+not the cell presence bitmaps, which is more robust; but it still infers the
+doubling from the directory *structure* rather than a **declared** marker. If the
+doubling is real there should be a field in the header/descriptor/slot table that
+DECLARES it, and the parser should key off that. Until such a declaration is
+found it stays `canivt_survey_directory` (`strict_clean = FALSE`), not a validated
+primary path. Full write-up + marker-hunt candidates in coverage.md "Open
+concerns".
 
 ## Invariant derivations & historical bugs
 

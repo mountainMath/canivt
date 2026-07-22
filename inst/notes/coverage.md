@@ -1632,14 +1632,22 @@ via two documented loud fallbacks (`canivt_descriptor_from_slots` +
    (Both 453,700.2 = M 278,980 + F 174,720), geography additivity
    (Canada = Σ 10 provinces, to base-100 rounding), all 11 provinces named in
    order, 276 months 1987-01…2009-12. `ivt_survey_double()` (decode.R) detects the
-   variant STRUCTURALLY, never by name/type: it requires the doubled corners to
-   carry REAL DATA (non-empty presence, not a coincidental marker byte), the pow2
-   position of paged-dim-2 to be EMPTY while the doubled position carries data,
-   and the window-padding slots to be empty — so the census/profile corpus stays
-   pow2 (`survey_double = FALSE`) and a table whose true window count is larger (a
-   different record packing) is NOT silently halved. An extent guard in
-   `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
-   the pow2 model but fails the window check, so it can never silently mis-decode.
+   variant STRUCTURALLY, never by name/type, from the page-directory **size
+   signature** (container metadata — the 8-byte entries' u16 size fields, no cell
+   presence decode). A window-padding page holds no values, so it is the MINIMAL
+   page allocation (Table-023: 392 bytes vs 4744..9092 for data pages), strictly
+   smaller than any page that stores cells; `minsize` is self-calibrated per table
+   from block 0's floor. It requires the doubled corners to hold a DATA page
+   (larger than `minsize`), the pow2 position of paged-dim-2 to be EMPTY (minimal)
+   while the doubled position is a data page, and the window-padding slots to be
+   minimal — so the census/profile corpus stays pow2 (`survey_double = FALSE`) and
+   a table whose true window count is larger (a different record packing) is NOT
+   silently halved. (This replaced an earlier `ivt_f2_record_present()` popcount
+   probe at the same slots — equivalent on the corpus, but the size read is cheaper
+   and, crucially, independent of the layout hypothesis under test.) An extent
+   guard in `ivt_page_preflight()` honest-rejects any long-series directory that
+   overshoots the pow2 model but fails the window check, so it can never silently
+   mis-decode.
 
 3. **Hours = 10, not 9 — the codebook member-count fix (2026-07-22).** The first
    read shipped Hours with 9 members / **4,986,342** cells, dropping the 10th
@@ -1688,14 +1696,20 @@ updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).
    should crack both. Re-examine the record/page packing of this whole lineage
    before trusting `ivt_survey_double()`.
 
-2. **There is no metadata marker — the detection is a heuristic.** Per this
-   package's rule (drive parsing off markers/metadata, not content heuristics),
-   if the doubled-window layout survives further validation there MUST be a
-   declaration of it somewhere in the header / slot-directory / descriptor that
-   distinguishes this lineage from the pow2 census tables — and the parser should
-   read that, retiring the structural directory-extent probe to a loud fallback
-   at most. Candidates to look for: a byte in the descriptor record or the header
-   `@824` slot table for the straddle dimension, a container-generation/version
-   field, or a page-marker nibble that differs from the census pages. Until such
-   a marker is found, `ivt_survey_double()` stays a `canivt_survey_directory`
-   loud fallback (`strict_clean = FALSE`), NOT a validated primary path.
+2. **There is no DECLARED metadata marker — the detection reads the directory
+   structure, not a declared field.** `ivt_survey_double()` now keys off the
+   page-directory **size signature** (the padding pages are the minimal
+   allocation) — container metadata, not the cell presence bitmaps, and
+   independent of the layout hypothesis under test — which is more robust than the
+   former presence-popcount probe. But it still *infers* the doubling from the
+   directory's shape rather than reading a field that DECLARES it. Per this
+   package's rule (drive parsing off declared markers/metadata, not inferred
+   structure), if the doubled-window layout survives further validation there
+   should be a declaration of it somewhere in the header / slot-directory /
+   descriptor that distinguishes this lineage from the pow2 census tables — and
+   the parser should read that, retiring the structural size probe. Candidates to
+   look for: a byte in the descriptor record or the header `@824` slot table for
+   the straddle dimension, a container-generation/version field, or a page-marker
+   nibble that differs from the census pages. Until such a declaration is found,
+   `ivt_survey_double()` stays a `canivt_survey_directory` loud fallback
+   (`strict_clean = FALSE`), NOT a validated primary path.

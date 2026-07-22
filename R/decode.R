@@ -176,19 +176,19 @@ ivt_layout_impl <- function(raw, d = NULL) {
   # over-allocation wastes half the directory, out of character for these tightly
   # pow2-packed containers, and more likely means an un-modelled nested level (or
   # value/flag pair) occupies the "wasted" slots (cf. Table-024's `ipc` mismatch).
-  # And it is found by a CONTENT probe, not a metadata marker; if the layout is
-  # real there must be a declaration for it in the header/descriptor, and this
-  # should key off that instead. So it stays a LOUD `canivt_survey_directory`
-  # fallback (strict_clean = FALSE), never a validated primary path. Detected
-  # structurally, never by name/type: `ivt_survey_double()` probes the doubled
-  # corner (real data beyond the pow2 extent) and verifies the window-padding
-  # (slots past the real window count empty). A directory that overshoots the pow2
-  # model but fails the window check keeps the pow2 strides and is honest-rejected
-  # by the extent guard in `ivt_page_preflight()`.
+  # And it is found from the directory structure, not a declared metadata marker;
+  # if the layout is real there must be a declaration for it in the
+  # header/descriptor, and this should key off that instead. So it stays a LOUD
+  # `canivt_survey_directory` fallback (strict_clean = FALSE), never a validated
+  # primary path. Detected structurally, never by name/type: `ivt_survey_double()`
+  # reads the page-directory SIZE signature (the doubled corner holds a data page
+  # beyond the pow2 extent; the window-padding slots hold minimal empty pages) --
+  # container metadata only, no cell presence decode. A directory that overshoots
+  # the pow2 model but fails the window check keeps the pow2 strides and is
+  # honest-rejected by the extent guard in `ivt_page_preflight()`.
   survey_double <- FALSE
   if (length(ent_counts) >= 2L)
-    survey_double <- ivt_survey_double(raw, ent_counts, estride, win,
-                                       lay$rec_bytes, grid$bit)
+    survey_double <- ivt_survey_double(raw, ent_counts, estride, win)
   if (survey_double) estride <- c(estride[1L], estride[-1L] * 2L)
 
   list(counts = cnt, slugs = slugs, n_dim = m, geo_dim = gd,
@@ -200,48 +200,60 @@ ivt_layout_impl <- function(raw, d = NULL) {
 }
 
 # Structural detector for the doubled-window directory variant (see `ivt_layout`).
-# Returns TRUE only when BOTH hold, so a normal (pow2) directory always returns
-# FALSE cheaply (the first probe misses):
-#   1. the outer paged dimensions' last members are present at their DOUBLED
-#      positions (k = (count-1) * 2*estride), which lie beyond the pow2 cartesian
-#      -- on a pow2 directory those offsets are padding/past-EOF and invalid;
-#   2. within block 0 the slots past the real window count are empty (no data
-#      page), i.e. the window really has `win` members in 2*win_slots slots -- a
-#      table whose true window count is larger (a different record packing) fails
-#      here and is left on the pow2 strides.
-ivt_survey_double <- function(raw, ent_counts, estride, win, rec_bytes, bit) {
+# Keyed off the page DIRECTORY SIZE SIGNATURE -- pure container metadata (the
+# 8-byte entries' u16 size fields), never the cell presence bitmaps. This is
+# robust precisely because it does not depend on the layout hypothesis under test:
+# a window-padding page carries no values, so it is the MINIMAL page allocation,
+# strictly smaller than any page that stores cells. (On Table-023 every padding
+# page is 392 bytes vs 4744..9092 for data pages.) `minsize` is self-calibrated
+# per table from block 0's floor -- no hard-coded size, no marker/type branch.
+# Returns TRUE only when all three hold, so a normal (pow2) directory returns
+# FALSE cheaply:
+#   1. the outer paged dimensions' last members occupy a DATA (larger-than-minimal)
+#      page at their DOUBLED positions (k = (count-1) * 2*estride), which lie
+#      beyond the pow2 cartesian -- on a pow2 directory those offsets are
+#      padding/past-EOF, so no data page there;
+#   2. the pow2 model is INSUFFICIENT: member 1 of the second paged dimension sits
+#      at k = win_slots (= nextpow2(win)) under the pow2 model, but under the
+#      doubled model that slot is WINDOW PADDING (minimal page) while the real
+#      member 1 moves to 2*win_slots -- confirmed only when the pow2 position is
+#      empty and the doubled position is a data page (the reverse of a pow2 dir);
+#   3. every window-padding slot [win, 2*win_slots) of block 0 is a minimal
+#      (empty) page -- a table whose true window count exceeds `win` (a different
+#      record packing) carries data there and is left on the pow2 strides.
+ivt_survey_double <- function(raw, ent_counts, estride, win) {
   ne <- length(ent_counts); n <- length(raw)
   idx0 <- tryCatch(ivt_idx0(raw), error = function(e) NA_integer_)
   if (is.na(idx0)) return(FALSE)
   estride_dbl <- c(estride[1L], estride[-1L] * 2L)
   win_slots <- estride[2L]
-  data_page <- function(kp) {
+  page_size <- function(kp) {
     en <- ivt_dir_entry(raw, idx0 + 8L * kp, n)
-    if (is.null(en) || !en$marker) return(FALSE)
-    sum(ivt_f2_record_present(raw, en$off + 4L, rec_bytes, bit)) > 0L
+    if (is.null(en) || !en$marker) return(NA_integer_)
+    en$size
   }
-  # (1) every outer paged dimension's last member must carry REAL DATA at its
-  # DOUBLED corner (k = (count-1) * 2*estride, inner coords 0). These offsets lie
-  # beyond the pow2 cartesian: on a normal pow2 directory they are padding entries
-  # (empty presence record) or past the directory end, so requiring a non-empty
-  # presence record -- not merely a valid marker byte, which a large file can hit
-  # by coincidence -- keeps the pow2 profile/crosstab tables (95F0490 &c.) FALSE.
+  # Minimal (empty) page size: the floor across block 0's 2*win_slots slots. A
+  # padding page holds no values so it is the smallest allocation; a page that
+  # stores cells is strictly larger. `has_data` = "this slot's page exceeds the
+  # empty floor" -- an entirely-metadata read (no presence decode).
+  block0 <- vapply(0:(2L * win_slots - 1L), page_size, integer(1))
+  if (all(is.na(block0))) return(FALSE)
+  minsize <- min(block0, na.rm = TRUE)
+  has_data <- function(kp) { s <- page_size(kp); !is.na(s) && s > minsize }
+  # (1) every outer paged dimension's last member must occupy a DATA page at its
+  # DOUBLED corner. On a pow2 directory these offsets are past the real cartesian
+  # (padding/EOF), so requiring a larger-than-minimal page -- not merely a valid
+  # marker byte, which a large file can hit by coincidence -- keeps the pow2
+  # profile/crosstab tables (95F0490 &c.) FALSE.
   for (t in 2:ne) {
     if (ent_counts[t] < 2L) next
-    if (!data_page((ent_counts[t] - 1L) * estride_dbl[t])) return(FALSE)
+    if (!has_data((ent_counts[t] - 1L) * estride_dbl[t])) return(FALSE)
   }
-  # (2) the pow2 model must be INSUFFICIENT: the second paged dimension's member 1
-  # sits at k = win_slots (= nextpow2(win)) under the pow2 model, but under the
-  # doubled model that offset is a WINDOW-PADDING slot (win_slots >= win) carrying
-  # no data, while the real member 1 moves to 2*win_slots. So the doubled variant
-  # is confirmed only when the pow2 position is EMPTY and the doubled position
-  # carries data -- exactly the reverse of a genuine pow2 directory.
-  if (data_page(win_slots) || !data_page(2L * win_slots)) return(FALSE)
-  # (3) window-padding: slots [win, 2*win_slots) of block 0 carry no data page
-  # (rules out a table whose true window count exceeds `win` -- a different record
-  # packing that must NOT be silently halved).
+  # (2) pow2 position empty, doubled position a data page.
+  if (has_data(win_slots) || !has_data(2L * win_slots)) return(FALSE)
+  # (3) window padding: slots [win, 2*win_slots) of block 0 carry no data page.
   hi <- 2L * win_slots - 1L
-  if (win <= hi) for (s in win:hi) if (data_page(s)) return(FALSE)
+  if (win <= hi) for (s in win:hi) if (has_data(s)) return(FALSE)
   TRUE
 }
 

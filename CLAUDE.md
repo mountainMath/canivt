@@ -258,11 +258,15 @@ The *rules*; the measurements and original bugs behind them are in
   (Table-023: `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`) — but this is a
   **PROVISIONAL model under open investigation**: the doubling wastes half the
   directory (suspicious — probably an un-modelled nested level, not a real 2× pad)
-  and has no metadata marker. `ivt_survey_double()` (decode.R) detects it
-  STRUCTURALLY — never by name/type — requiring the doubled corners to carry real
-  data (non-empty presence, not a coincidental marker byte), the pow2 position of
-  paged-dim-2 to be EMPTY while its doubled position carries data, and the
-  window-padding slots empty; it is a loud `canivt_survey_directory` fallback
+  and has no declared metadata marker. `ivt_survey_double()` (decode.R) detects it
+  STRUCTURALLY — never by name/type — from the page-directory **size signature**
+  (container metadata only, no presence-bitmap decode): a window-padding page holds
+  no values so it is the **minimal page allocation**, strictly smaller than any
+  data page (`minsize` self-calibrated per table from block 0's floor). It requires
+  the doubled corners to carry a DATA page (larger than `minsize`), the pow2
+  position of paged-dim-2 to be EMPTY (minimal) while its doubled position is a data
+  page, and the window-padding slots minimal; it is a loud `canivt_survey_directory`
+  fallback
   (`strict_clean = FALSE`), never a validated primary path. An extent guard in
   `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
   the pow2 cartesian but fails the window check, so an unmodelled record packing
