@@ -143,6 +143,26 @@ ivt_f2_dim_dir_impl <- function(raw, k, slots = NULL) {
       sl$alloc != ivt_f2_nextpow2(sl$n_entries)) return(NULL)
   want <- as.integer(sl$n_entries)
   ok <- function(d) !is.null(d) && nrow(d) <= want && nrow(d) >= max(1L, want - 4L)
+  # A directory can be COMPLETE yet shorter than the 4-null tolerance: the earlier
+  # `02 00 20 00` survey generation (PRSIC1dec1999's "Employment size ranges") lays
+  # out its `want` slots with several INTERIOR null holes (14 real entries across 19
+  # slots -> 5 holes). Accept such a read when EVERY one of the `want` declared slots
+  # is either a well-formed entry we captured or an explicit `(0,0)` null -- the
+  # directory is then fully accounted for (a wrong pointer would show garbage slots,
+  # so this cannot admit a misread). `n` bounds the scan.
+  n <- length(raw)
+  complete_with_holes <- function(d, p) {
+    if (is.null(d) || nrow(d) > want) return(FALSE)
+    holes <- 0L
+    for (i in seq_len(want)) {
+      base <- as.integer(p) + (i - 1L) * 8L
+      if (base + 8L > n) return(FALSE)
+      off <- rd_u32(raw, base); a <- rd_u16(raw, base + 4L)
+      if (is.na(off) || is.na(a)) return(FALSE)
+      if (off == 0L && a == 0L) holes <- holes + 1L
+    }
+    nrow(d) + holes == want
+  }
   # The two indirection depths: DIRECT (slot -> directory) and INDIRECT (slot ->
   # one-u32 struct -> directory). The slot's `flag` (@+12) is METADATA that says
   # which layout this is: flag != 0 is the double-indirection chunked-geography
@@ -173,8 +193,9 @@ ivt_f2_dim_dir_impl <- function(raw, k, slots = NULL) {
     for (p in ptrs) {
       if (is.na(p) || p < 1L) next
       d <- ivt_f2_read_dir_at(raw, p, max_entries = cap, relaxed = relaxed)
+      if (is.null(d) || nrow(d) > want) next
+      if (nrow(d) >= want || complete_with_holes(d, p)) return(d)
       if (!ok(d)) next
-      if (nrow(d) >= want) return(d)
       if (is.null(best) || nrow(d) > nrow(best)) best <- d
     }
   }
@@ -214,6 +235,13 @@ ivt_f2_dim_dict_en_first <- function(raw, dir) {
     win <- raw[(off + 1L):(off + ln)]
     txt <- raw_to_latin1(win)
     ie <- regexpr("\\bLabel\\b", txt)
+    ifr <- regexpr("\\bEtiquette\\b", txt, ignore.case = TRUE)
+    if (ie > 0L && ifr > 0L) return(ie < ifr)
+    # PRSIC1dec1999's "English Label" / "Etiquette" pair: the EN field name is
+    # immediately followed by binary bytes that decode to word chars ("English
+    # Labelco", "...nd"), breaking the `\bLabel\b` trailing boundary above, so
+    # anchor on the "English Label" phrase (leading boundary only).
+    ie <- regexpr("English Label", txt)
     ifr <- regexpr("\\bEtiquette\\b", txt, ignore.case = TRUE)
     if (ie > 0L && ifr > 0L) return(ie < ifr)
     ie <- regexpr("Description_E", txt)                # 00060208-style field pair
@@ -439,7 +467,17 @@ ivt_f2_dim_marker_name <- function(raw, k, slots) {
   off <- dir[mk, "off"]; len <- dir[mk, "len"]
   m <- ivt_f2_codebook_dim_markers(raw[(off + 1L):min(length(raw), off + len)], 0L)
   got <- m$name[!is.na(m$name) & nchar(m$name) >= 3L]
-  if (length(got)) return(got[1L])
+  if (length(got)) {
+    nm <- got[1L]
+    # the survey-generation `81 02 02 00 56 00` name marker doubles the name with
+    # a '2' separator per language ("Year2YearAnnées2Années"); the doubled-name
+    # splitter does not fire on it, so clean it to the leading name here (the same
+    # `ivt_f2_02_name_clean()` the `02`-gen name reader applies). Gated on the
+    # `56 00` sub-marker so ordinary names carrying a '2' are untouched.
+    if (off + 5L <= length(raw) && as.integer(raw[off + 5L]) == 0x56L)
+      nm <- ivt_f2_02_name_clean(nm)
+    return(nm)
+  }
   m01 <- ivt_f2_dir_name_marker01(raw, dir[mk, , drop = FALSE])
   if (!is.null(m01)) m01$name else NA_character_
 }

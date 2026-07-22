@@ -704,6 +704,93 @@ general changes, cleared **4 of them**; corpus ledger FAIL 0 / PASS 257.
   `canivt_descriptor_lenient` fallback with the cell count unchanged at 86,696 →
   now strict-clean).
 
+### Onboarding backlog — Stage 3: `97-563-XCB2006058` (2026-07-21) — DONE
+
+The Borealis 8-dim single-area extract `SP3_AAV9RM_97-563-XCB2006058`
+(Geography(1)×Age(7)×…×Year(2), 75,913 cells) read via **two** loud fallbacks: a
+`canivt_fallback` DGUID byte-scan **then** `canivt_geo_datadim`. The backlog
+hypothesis ("the geo block directory must resolve the DGUID member blocks") was
+wrong — the geography's `81 02` field dictionary declares only **name** columns
+(`English Desc / Desc française / short name`) and **no UID**, so there is no
+DGUID in the file to resolve (this custom extract's single area is "Canada (01)
+20000", uid genuinely NA). The double warning was purely the dispatch order: the
+uid-only reader (`ivt_f2_geo_read()` step 5, `ivt_f2_geo_uids()`) ran its byte
+scan — and fired its loud "did not resolve the DGUID member blocks" fallback —
+before the data-style reader (step 5b, `ivt_f2_geo_datadim()`) picked the table
+up. Fix: gate step 5 on `enc != "custom" || ivt_f2_geo_field_has_uid()`, so a
+`custom`-encoding geography whose field dictionary declares no `UID/IDU` column
+skips the DGUID scan entirely and routes straight to the data-style reader. The
+uid-bearing custom exports (EO3278 `UID/IDU`, EO2654) keep step 5 via
+`has_uid == TRUE`; the chunked DGUID tables (98-10-0023/0013) are `enc == "dguid"`
+and unaffected. Now a single documented `canivt_geo_datadim` fallback (geography
+read metadata-driven from the file's own field dictionary + label blocks, no UID);
+`strict_clean = FALSE`, cells unchanged at 75,913.
+
+### Onboarding backlog — Stage 4: `table_6_c-ivt-2007` (2026-07-21) — DONE
+
+The Borealis UCR crosstab `SP3_HHP4CZ_table_6_c-ivt-2007` (byte 0 `0x04`,
+"Clearance status for all incidents, Selected police services, 2007") read as
+*unsupported* — the descriptor walk recovered **0 dimensions**. It is the UCR
+survey lineage (sibling of the onboarded `ucr2.2_3-2006`), and its descriptor
+block is present but **inverted**: the four doubled-name records
+(`Geography`/`Clearance Type`/`Offences`/`Year`) sit BEFORE a signature ending
+`81 01 20 00 f0 .. .. 80 01` (not `80 03`/`80 ff`), framed off an `81 02 04 00`
+sub-header. The forward walk from `D` finds nothing (records precede it); the
+inverted-retry anchors only on `81 02 03 00` (misses `81 02 04 00`); and
+`ivt_f2_dims_from_slots()` (the "footnote-bleed" rebuild) declines because its
+name-keyed member counter cannot size the 1-member `Year` reference-period
+dimension (whose `56 00` name marker is the doubled `Year2YearAnnées2Années`).
+The header slot table, though, lists all four dimensions cleanly. Fix:
+`ivt_f2_descriptor_impl()` now falls back to `ivt_f2_descriptor_from_slots()` (the
+NAME-INDEPENDENT slot member counter, which sizes each dimension from its codebook
+member array directly) when the walks recover fewer than the authoritative count;
+adopted only at an exact count match, so it cannot fire on a table the walk
+already read. Plus `ivt_f2_dim_marker_name()` now applies the `56 00`
+survey-name-marker cleaner (`ivt_f2_02_name_clean()`, gated on the `56 00`
+sub-marker) so `Year` comes out clean. Reads Geo(1)×ClearanceType(19)×
+Offences(187)×Year(1) → **1,952 non-zero cells** (`canivt_descriptor_from_slots`,
+`strict_clean = FALSE`, as with the other survey-lineage tables). Validated: the
+clearance-status accounting identities (Total = Not cleared + Cleared by charge +
+Total Cleared Otherwise; the nested Cleared-Otherwise = Σ(5..9) and
+Other-Clearances = Σ(10..19) subtotals) hold EXACTLY across all 177 offences;
+national total 2,192,656 incidents.
+
+### Onboarding backlog — Stage 5: `PRSIC1dec1999` (2026-07-21) — DONE, strict-clean
+
+The Borealis `SP_XWJR2W_PRSIC1dec1999` (byte 0 `0x02`, provincial SIC
+establishment counts by employment size, December 1999) is an EARLIER `02 00 20 00`
+container generation than the onboarded survey gen — `ivt_f2_descriptor_02()`
+found nothing. Root cause was NOT a bespoke descriptor framing but three small
+general gaps, each of which alone blocked the read:
+
+1. **Directory with interior null holes.** The "Employment size ranges" dimension's
+   block directory declares 19 slots but stores only 14 well-formed entries with
+   **5 interior `(0,0)` null holes** — beyond the fixed 4-null tolerance
+   `ivt_f2_dim_dir()` allowed, so its directory (and hence the whole descriptor)
+   would not resolve. Fix: accept a short read when EVERY one of the `want`
+   declared slots is either a well-formed entry we captured or an explicit `(0,0)`
+   null (`complete_with_holes()`) — the directory is then fully accounted for (a
+   wrong pointer shows garbage slots, so this cannot admit a misread).
+2. **`0x10` dense-array marker.** That dimension's 11-member array is a bit-headed
+   dense `[81 01][u16][bitstream][marker]<records>` array whose pre-records marker
+   byte is `0x10` (the modern chunked tables use `0x80`/`0x01`), so
+   `ivt_f2_dir_entry_members()` returned NULL and the count read as 2. Added `0x10`
+   to the accepted marker set (records parse self-validatingly) → 11 members
+   (Total(A), Indeterminate(B), Subtotal(A−B), 1-4 … 500+). Catalogued in
+   `markers.md`.
+3. **`English Label` schema vocabulary.** This generation names its label columns
+   `English Label` / `Etiquette` (not `English Desc` / `Desc Français`), and on two
+   of three dimensions binary bleed immediately follows the field name
+   (`English Labelco`, `…nd`), breaking the `\bLabel\b` trailing boundary in
+   `ivt_f2_dim_dict_en_first()` → the loud content-score language fallback. Anchor
+   on the `English Label` phrase (leading boundary only) instead.
+
+Reads PROV/CAN(14)×DIVISIONS(19)×EMP.SIZE(11) → **2,652 non-zero cells,
+strict-clean** (no fallbacks). Validated: Canada = Σ provinces, DIVISIONS Total =
+Σ divisions, and the employment-size hierarchy (Total(A) = Indeterminate(B) +
+Subtotal(A−B); Subtotal = Σ 8 size ranges) all hold EXACTLY; Canada/Total/Total(A)
+= 1,996,322 establishments. **The onboarding backlog is fully cleared.**
+
 ## Invariant derivations & historical bugs
 
 Why the "Key invariants" in `CLAUDE.md` are what they are — the measurements and the

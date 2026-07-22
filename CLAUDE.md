@@ -38,8 +38,10 @@ This folder is self-contained. Companion docs under `inst/notes/`:
 
 ## What works today
 
-**Every `.ivt` in the established corpus decodes; the 7 tables in
-[`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) are the known gaps.**
+**Every `.ivt` in the corpus decodes** — the 2026-07-21 onboarding backlog (7
+newly-sampled tables) is fully cleared (see
+[`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) /
+[`decode-history.md`](inst/notes/decode-history.md)).
 A single, descriptor-driven, name/type-agnostic decoder (`decode.R`:
 `ivt_layout()` + `ivt_decode()`) handles all of them, plus one shared metadata
 path (`ivt_f2_metadata()`). The historical "family 1 / family 2" split is **not
@@ -305,14 +307,12 @@ completeness are all **done**. The completed work log (and how each table was
 cracked) lives in [`decode-history.md`](inst/notes/decode-history.md); measured
 coverage in [`coverage.md`](inst/notes/coverage.md).
 
-- **Onboarding backlog** — a 2026-07-21 random re-sample of the StatCan + Borealis
-  catalogues (20 previously-unseen tables) surfaced **7 that do not read
-  strict-clean** (5 fail the family gate, 2 read only via loud fallbacks). Their
-  raws are now in the ivt cache and tracked as ledger rows; the staged plan and
-  the repeatable per-table onboarding recipe live in
-  [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md). **This is the
-  active work queue** — work them one stage at a time, landing each table's fix +
-  validation + ledger/coverage/history update in a single commit.
+- **Onboarding backlog — CLEARED (2026-07-21).** The 2026-07-21 re-sample's 7
+  tables that did not read strict-clean are all onboarded now (Stage 1 pass landed
+  4; Stages 3–5 landed the last 3). The narrative + the repeatable per-table
+  onboarding recipe are retained in
+  [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) for the next sweep.
+  No open decoding gaps remain.
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck
   (it is fine at ~5 s for the 7.5M-cell reference table).
 

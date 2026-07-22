@@ -1,3 +1,23 @@
+# canivt 0.3.0
+
+* Cleared the 2026-07 onboarding backlog: a fresh random re-sample of the
+  StatCan and Borealis catalogues surfaced 7 previously-unseen tables that did
+  not read strict-clean; all 7 now decode, validated against external ground
+  truth (accounting identities / published counts). Every `.ivt` in the corpus
+  now decodes.
+* Onboarded an earlier `02 00 20 00` container generation (provincial SIC
+  establishment counts, `PRSIC1dec1999`): tolerates block directories with
+  interior null holes, a `0x10`-marked dense member array, and the
+  `English Label` / `Etiquette` schema vocabulary.
+* Onboarded the UCR survey cross-tabulation lineage (`table_6_c-ivt-2007`),
+  whose descriptor is stored inverted before a `…80 01` signature — rebuilt
+  from the header slot table when the forward walk finds nothing.
+* Geography of uid-less custom single-area extracts is now read directly from
+  the file's field dictionary instead of triggering a spurious DGUID byte-scan.
+* Recovered several profile / F-series / 2006 census tables that previously
+  failed the family gate (geography-last prose-bleed dimension names; page
+  pre-flight relaxed for `b3 >= 9` pages carrying an allocation/mask tail).
+
 # canivt 0.2.0
 
 * Decodes the older `02 00 20 00` "split-definition survey" container

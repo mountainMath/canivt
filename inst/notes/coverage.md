@@ -5,13 +5,18 @@ format. **Update this when a gap is closed or a new one is found.** Status keys:
 `[x]` decoded & exposed · `[~]` read but not surfaced (recoverable) · `[?]` read
 but semantics unproven · `[ ]` not parsed / unknown.
 
-> **Open gaps (2026-07-21):** a fresh catalogue re-sample found 7 tables that did
-> not read strict-clean. **4 landed** in the Stage 1 pass (95F0490 profile lineage
-> + cascaded 97-555-XCB2006058, 95F0378, 95F0489 — the geography-last prose-bleed
-> name recovery + the `b3 == 08`-only exact-fit gate). **3 remain:**
-> `table_6_c-ivt-2007` (descriptor recovers 0 dims), `PRSIC1dec1999` (the earlier
-> `02 00 20 00` generation), and `97-563-XCB2006058` (parses via a geo fallback).
-> Tracked with the staged plan in [`onboarding-backlog.md`](onboarding-backlog.md).
+> **Onboarding backlog CLEARED (2026-07-21):** a fresh catalogue re-sample found 7
+> tables that did not read strict-clean; **all 7 are now onboarded**. The Stage 1
+> pass landed 4 (95F0490 profile lineage + cascaded 97-555-XCB2006058, 95F0378,
+> 95F0489 — geography-last prose-bleed name recovery + the `b3 == 08`-only
+> exact-fit gate). Stages 3–5 landed the last 3: `97-563-XCB2006058` (uid-less
+> custom geography routed to the data-style reader, `canivt_geo_datadim`),
+> `table_6_c-ivt-2007` (UCR inverted descriptor rebuilt from the header slot table,
+> `canivt_descriptor_from_slots`), and `PRSIC1dec1999` (the earlier `02 00 20 00`
+> generation — directory null-hole tolerance + `0x10` dense-array marker +
+> `English Label` schema vocabulary, **strict-clean**). Every `.ivt` in the corpus
+> now decodes. The narrative is in
+> [`onboarding-backlog.md`](onboarding-backlog.md) / [`decode-history.md`](decode-history.md).
 
 Byte-coverage figures below are measured on the family-2 reference table
 **98-10-0023** (142,016,485 bytes); cross-checked against family-1 (98-10-0241)

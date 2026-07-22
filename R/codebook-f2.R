@@ -613,7 +613,11 @@ ivt_f2_dir_entry_members <- function(raw, off, len) {
   # 0x81: bit-headed dense array
   if (is.na(u16) || u16 < 1L || u16 > 8L * len) return(NULL)
   i <- off + 4L + 2L * as.integer(ceiling(u16 / 16))   # skip the u16-padded bitstream
-  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L)))
+  # the one-byte marker before the records: 0x80 / 0x01 on the modern chunked
+  # tables, 0x10 on the earlier `02 00 20 00` survey generation's dense member
+  # arrays (PRSIC1dec1999's "Employment size ranges": 11 members after a `10`
+  # marker). Semantics unknown; the records parse self-validatingly regardless.
+  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L, 0x10L)))
     return(NULL)
   i <- i + 1L; end <- off + len
   while (i < end) {
@@ -900,9 +904,16 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
   }
   # 5. chunked DGUID tables (0023/0129/0013/...): the uid-only read is the primary
   #    for these (their names come from the read_ivt(geo_attributes = TRUE) path).
-  #    A COMPLETE uid array is the expected outcome here, so it wins.
-  uid <- ivt_f2_geo_uids(raw)
-  if (length(uid) == n_geo) return(list(geo_name = NULL, geo_uid = uid))
+  #    A COMPLETE uid array is the expected outcome here, so it wins. SKIP it for a
+  #    "custom" field dictionary that declares NO uid column: such a table has no
+  #    DGUIDs to resolve, so the byte scan can only fire a spurious fallback before
+  #    the data-style reader (5b) picks it up -- route straight there instead.
+  if (enc != "custom" || ivt_f2_geo_field_has_uid(raw)) {
+    uid <- ivt_f2_geo_uids(raw)
+    if (length(uid) == n_geo) return(list(geo_name = NULL, geo_uid = uid))
+  } else {
+    uid <- character(0)
+  }
   # 5b. data-dimension-style geography (field dictionary + per-member label blocks,
   #     no uid): the older `04 00 20 00` survey tables' single-area geography. Read
   #     with the generic dimension label machinery before the combined net, whose
@@ -1008,6 +1019,17 @@ ivt_f2_geo_field_role <- function(field) {
     else if (grepl("GNR|TGN|TNR", u)) "tnr_short_form"
     else NA_character_
   }, character(1), USE.NAMES = FALSE)
+}
+
+# TRUE when the geography's `81 02` field dictionary declares a UID column
+# (`UID/IDU`). Distinguishes the uid-bearing custom exports (EO3278) -- which keep
+# the DGUID/combined path that maps their uid run -- from the uid-less custom
+# single-area tabulations (e.g. the Borealis 97-563 8-dim extract), which have no
+# DGUIDs to resolve and read via the data-style dimension reader.
+ivt_f2_geo_field_has_uid <- function(raw) {
+  ents <- ivt_f2_geo_entries(raw); if (is.null(ents)) return(FALSE)
+  schema <- ivt_f2_geo_field_schema(raw, ents)
+  length(schema) > 0L && any(ivt_f2_geo_field_role(schema) == "geo_uid", na.rm = TRUE)
 }
 
 # Stage 3 of the geography read (refactor-plan.md section 7.4): the last-resort catch-all,
@@ -3750,6 +3772,21 @@ ivt_f2_descriptor_impl <- function(raw) {
         "canivt_descriptor_from_slots")
       dims <- built
     }
+  }
+  # Final resort: the descriptor BLOCK is present but its records sit INVERTED
+  # before a signature the walker cannot use (the UCR survey crosstab lineage,
+  # e.g. table_6_c-ivt-2007: signature `81 01 20 00 f0 .. .. 80 01`, records
+  # before it framed off an `81 02 04 00` sub-header the `81 02 03 00` inverted
+  # retry misses; its reference-period `Year` dimension the name-keyed member
+  # counter -- and hence `ivt_f2_dims_from_slots()` -- cannot size). The header
+  # slot table still lists every dimension, so rebuild the whole descriptor from
+  # it with the NAME-INDEPENDENT slot member counter (`ivt_f2_descriptor_from_slots`
+  # counts each dimension's codebook member array directly). Adopted only when it
+  # resolves EXACTLY the authoritative count, so it cannot fire on a table the
+  # walk already read; loud (`canivt_descriptor_from_slots`, raised inside).
+  if (length(dims) < ndim_auth && ndim_auth >= 2L && ndim_auth <= 32L) {
+    fs <- tryCatch(ivt_f2_descriptor_from_slots(raw), error = function(e) NULL)
+    if (!is.null(fs) && length(fs$dims) == ndim_auth) dims <- fs$dims
   }
 
   title <- regmatches(txt, regexpr("FACET04[^.]*", txt))

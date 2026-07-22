@@ -7,11 +7,13 @@ family gate) and 2 that read only via loud fallbacks. All 7 raw `.ivt`s are now
 in the ivt cache (`CANIVT_IVT_CACHE`, one folder per table) so they can be worked
 systematically. This doc is the backlog + the repeatable onboarding workflow.
 
-**Progress (2026-07-21): 4 of 7 landed in the Stage 1 pass** — see the Done
-section at the bottom. The one Stage-1 fix (descriptor-name geotype recovery +
-the `b3 == 08`-only exact-fit gate) cascaded through two Stage-2 tables and one
-Stage-3 table. **3 remain: `table_6_c-ivt-2007`, `PRSIC1dec1999`** (and the
-already-parsing `97-563-XCB2006058`, Stage 3).
+**Progress (2026-07-21): ALL 7 landed.** The Stage-1 pass cleared 4 (one fix +
+cascade); Stages 3–5 then landed the remaining 3 — `97-563-XCB2006058` (uid-less
+custom geography routed to the data-style reader), `table_6_c-ivt-2007` (UCR
+inverted descriptor rebuilt from the slot table), and `PRSIC1dec1999` (earlier
+`02`-gen, now **strict-clean**). See the Done section at the bottom. The backlog
+is cleared — fold the residue back into `coverage.md`'s "fully supported"
+statement and retire this doc.
 
 Companion docs: format ref [`ivt-format.md`](ivt-format.md); marker catalog
 [`markers.md`](markers.md); coverage [`coverage.md`](coverage.md); the narrative
@@ -29,9 +31,9 @@ fallback `read_ivt()` where one exists.
 | `SP3_BJFWAP_95f0378xcb01004` | Borealis | `04` | unsupported | Geography(164)×Sex(3)×Age(5)×Marital(7)×PresenceOfChildren(11)×LabourForce(8) | descriptor looks complete → preflight rejects on layout/page-extent, not counts | 2 |
 | `97-555-XCB2006058` | StatCan | `04` | unsupported | Geography(166)×Age(8)×Sex(3)×Selected-demographic(830, type `0x0a`)×MotherTongue(4) | descriptor plausible → preflight rejects; suspect the 830-member straddle / page width. Twin lineage `97-563-XCB2006072` is supported | 2 |
 | `SP3_NIQKF5_95f0489xcb01007` | Borealis | `04` | **WARN** (86,696 cells) | Values(1)×Profile(336)×Geography(315) | reads via `canivt_descriptor_lenient` accept-all walk → make the primary doubled-name walk recover all 3 dims (strict-clean) | 3 |
-| `SP3_AAV9RM_97-563-XCB2006058` | Borealis | `04` | **WARN** (75,913 cells) | 8 dims (Geo(1)×Age(7)×…×Year(2)) | reads via `canivt_fallback`+`canivt_geo_datadim` (geo block dir didn't resolve DGUIDs → byte-scan) → resolve the geo block directory | 3 |
-| `SP3_HHP4CZ_table_6_c-ivt-2007` | Borealis | `04` | unsupported | **0 dims** — descriptor walk finds nothing | unrecognised descriptor structure within the modern generation; a new variant/lineage | 4 |
-| `SP_XWJR2W_PRSIC1dec1999` | Borealis | `02` | unsupported | 0 dims | **earlier container generation** (`02 00 20 00`); an as-yet-unhandled gen02 variant (not the onboarded survey gen) | 5 |
+| `SP3_AAV9RM_97-563-XCB2006058` | Borealis | `04` | ✅ **DONE** (75,913 cells, `canivt_geo_datadim`) | 8 dims (Geo(1)×Age(7)×…×Year(2)) | ~~geo block dir didn't resolve DGUIDs~~ — no DGUID exists (uid-less custom field dict); routed to data-style geo reader | 3 |
+| `SP3_HHP4CZ_table_6_c-ivt-2007` | Borealis | `04` | ✅ **DONE** (1,952 cells, `canivt_descriptor_from_slots`) | Geo(1)×ClearanceType(19)×Offences(187)×Year(1) | UCR survey lineage: INVERTED descriptor (records before an `80 01` signature) rebuilt from the header slot table | 4 |
+| `SP_XWJR2W_PRSIC1dec1999` | Borealis | `02` | ✅ **DONE** (2,652 cells, **strict-clean**) | PROV/CAN(14)×DIVISIONS(19)×EMP.SIZE(11) | earlier `02`-gen: dir with interior null holes + `81 01` dense member array (`0x10` marker) + `English Label` schema vocabulary | 5 |
 
 ## Staged plan
 
@@ -52,15 +54,45 @@ independent — a later stage does not depend on an earlier one landing.
   allocation/mask tail; relaxing exact-fit to `b3 == 08`-only cleared both.
 - **Stage 3 — promote fallback reads to strict-clean.** `95f0489xcb01007`
   ✅ **DONE (2026-07-21, cascaded)** — the descriptor-name geotype fix removed
-  its lenient fallback (cell count unchanged). **`97-563-XCB2006058` REMAINS**
-  (geo block directory must resolve the DGUID member blocks; still reads via
-  `canivt_fallback`+`canivt_geo_datadim`).
-- **Stage 4 — new modern descriptor variant.** `table_6_c-ivt-2007`. Descriptor
-  walk recovers nothing → decode the descriptor framing this file uses; expect a
-  new marker to catalog in `markers.md`.
-- **Stage 5 — earlier container generation.** `PRSIC1dec1999` (`02 00 20 00`).
-  Extend the gen02 path (`ivt_f2_descriptor_02` / container) to this variant.
-  Largest unknown; do last.
+  its lenient fallback (cell count unchanged). `97-563-XCB2006058`
+  ✅ **DONE (2026-07-21)** — the "geo block dir didn't resolve DGUIDs" hypothesis
+  was wrong: this single-area custom extract's geography field dictionary declares
+  only name columns (`English Desc / Desc française / short name`), **no UID**, so
+  there is no DGUID to resolve. The double warning was the dispatcher running the
+  DGUID byte-scan (step 5) before the data-style reader (step 5b). Gated step 5 on
+  `enc != "custom" || ivt_f2_geo_field_has_uid()`, so a uid-less custom dictionary
+  routes straight to `ivt_f2_geo_datadim`. Now a single documented
+  `canivt_geo_datadim` fallback (`strict_clean = FALSE`, cells unchanged 75,913).
+- **Stage 4 — new modern descriptor variant.** `table_6_c-ivt-2007`
+  ✅ **DONE (2026-07-21)**. Not a new framing — the UCR survey lineage (sibling of
+  the onboarded `ucr2.2_3-2006`) stores its descriptor records INVERTED before a
+  signature ending `80 01` (not `80 03`/`80 ff`), off an `81 02 04 00` sub-header
+  the `81 02 03 00` inverted-retry misses; its 1-member `Year` reference-period
+  dimension the name-keyed member counter cannot size, so both the forward walk
+  and `ivt_f2_dims_from_slots()` come up empty. Fix: `ivt_f2_descriptor_impl()`
+  now falls back to `ivt_f2_descriptor_from_slots()` (name-independent slot member
+  counter) when the walks come up short, plus a `56 00` survey-name-marker cleaner
+  in `ivt_f2_dim_marker_name()`. Reads Geo(1)×ClearanceType(19)×Offences(187)×
+  Year(1) → **1,952 cells** (`canivt_descriptor_from_slots`, `strict_clean = FALSE`,
+  as with the other survey-lineage tables). Validated: the clearance-status
+  accounting identities (Total = Not cleared + Cleared by charge + Cleared
+  Otherwise; the nested Cleared-Otherwise / Other-Clearances subtotals) hold
+  EXACTLY across all 177 offences.
+- **Stage 5 — earlier container generation.** `PRSIC1dec1999` (`02 00 20 00`)
+  ✅ **DONE (2026-07-21, strict-clean)**. Three small, general fixes — NOT a
+  bespoke gen02 path: (1) `ivt_f2_dim_dir()` now accepts a directory that is
+  complete but sparse (its `want` declared slots are all either well-formed
+  entries or explicit `(0,0)` null holes) — the "Employment size ranges" dimension
+  has 5 interior holes across 19 slots, beyond the old 4-null tolerance, which
+  blocked BOTH `ivt_f2_descriptor_02()` and the slot rebuild; (2) the `81 01`
+  dense member-array reader (`ivt_f2_dir_entry_members()`) accepts a `0x10`
+  pre-records marker byte (this generation's dense arrays; was `0x80`/`0x01`),
+  recovering the 11-member size-range array; (3) `ivt_f2_dim_dict_en_first()`
+  anchors on the `English Label` phrase (the EN field name is followed by binary
+  bleed that broke `\bLabel\b`). Reads PROV/CAN(14)×DIVISIONS(19)×EMP.SIZE(11) →
+  **2,652 cells strict-clean**. Validated: Canada = Σ provinces, DIVISIONS Total =
+  Σ divisions, and the employment-size hierarchy (Total(A) = Indeterminate(B) +
+  Subtotal(A−B); Subtotal = Σ 8 ranges) all hold EXACTLY.
 
 ## The per-table onboarding workflow (repeatable recipe)
 
