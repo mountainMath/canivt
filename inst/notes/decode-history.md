@@ -843,7 +843,7 @@ records against **215** codes/members, so the reader keeps the stable numeric co
 labels rather than risk a mis-aligned name mapping (the geography name is junk HTML
 in this single-area viewer export — the same accepted quirk as table_6_c).
 
-### LFHR `Table-023` — the doubled-window survey directory (2026-07-22) — DONE
+### LFHR `Table-023` — the doubled-window survey directory (2026-07-22) — CELLS VALIDATED, GEOMETRY OPEN
 
 `SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009) is the first
 *multi-dimensional, long-time-series* survey table: Geography(11) × Sex(3) ×
@@ -890,6 +890,20 @@ codebook ordinal offset, not a geometry error. The sibling `Table-024` (Occupati
 straddles, Hours+Timeseries both in-page) packs its record with a different `ipc`
 than `ivt_layout()` computes (in-page occ = 2, 17 windows) — a separate puzzle, not
 in the corpus, honest-rejected by the extent guard.
+
+**NOT CLOSED — the geometry is provisional (requires further investigation).**
+The cells are right, but two things keep the *model* open: (1) the doubled window
+WASTES half the directory (3 windows in 8 slots, cascading ×2) — out of character
+for these tightly pow2-packed containers, and a strong hint that an un-modelled
+nested level (or value/flag pair, or derived-member sub-axis) actually occupies
+the "wasted" slots and I am collapsing it into a phantom ×2 stride; the
+`Table-024` `ipc` mismatch is probably the same misunderstanding from the
+multi-in-page side. (2) `ivt_survey_double()` is a CONTENT/structural probe, not a
+metadata read — if the doubling is real there must be a marker for it in the
+header/descriptor/slot table, and the parser should key off that (retiring the
+probe to a loud fallback at most). Until then it stays `canivt_survey_directory`
+(`strict_clean = FALSE`), not a validated primary path. Full write-up +
+marker-hunt candidates in coverage.md "Open concerns".
 
 ## Invariant derivations & historical bugs
 

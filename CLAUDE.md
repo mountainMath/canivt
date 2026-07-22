@@ -252,18 +252,22 @@ The *rules*; the measurements and original bugs behind them are in
   profile (geography = dim 3, LAST) the same walk puts geography in the presence
   record (3 windows), Profile at directory stride 4, Values as the trivial outermost
   entry dimension. **Directory strides pad each paged dimension to `nextpow2` of its
-  slot count EXCEPT the `04`-gen long-time-series survey lineage** (LFHR, e.g.
-  `NAZQV2/Table-023`), which pads the **innermost paged (straddle-window) dimension
-  to DOUBLE its `nextpow2`**, cascading ×2 to every stride above it (Table-023:
-  `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`). `ivt_survey_double()`
-  (decode.R) detects this STRUCTURALLY — never by name/type — requiring the doubled
-  corners to carry real data (non-empty presence, not a coincidental marker byte),
-  the pow2 position of paged-dim-2 to be EMPTY while its doubled position carries
-  data, and the window-padding slots empty; it is a loud `canivt_survey_directory`
-  fallback. An extent guard in `ivt_page_preflight()` honest-rejects any long-series
-  directory that overshoots the pow2 cartesian but fails the window check, so an
-  unmodelled record packing (e.g. `Table-024`, where a multi-in-page-dim straddle
-  changes `ipc`) can never silently mis-decode.
+  slot count.** The `04`-gen long-time-series survey lineage (LFHR, e.g.
+  `NAZQV2/Table-023`) *appears* to pad the **innermost paged (straddle-window)
+  dimension to DOUBLE its `nextpow2`**, cascading ×2 to every stride above it
+  (Table-023: `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`) — but this is a
+  **PROVISIONAL model under open investigation**: the doubling wastes half the
+  directory (suspicious — probably an un-modelled nested level, not a real 2× pad)
+  and has no metadata marker. `ivt_survey_double()` (decode.R) detects it
+  STRUCTURALLY — never by name/type — requiring the doubled corners to carry real
+  data (non-empty presence, not a coincidental marker byte), the pow2 position of
+  paged-dim-2 to be EMPTY while its doubled position carries data, and the
+  window-padding slots empty; it is a loud `canivt_survey_directory` fallback
+  (`strict_clean = FALSE`), never a validated primary path. An extent guard in
+  `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
+  the pow2 cartesian but fails the window check, so an unmodelled record packing
+  (e.g. `Table-024`, where a multi-in-page-dim straddle changes `ipc` — likely the
+  same misunderstanding) can never silently mis-decode.
 - A **reference-period / facet** dimension (type `0x0e`, e.g. "Year (2)") is **not**
   geography-folded: in 98-10-0077 *Year* is the **innermost in-page dimension** (the
   value run carries the 2020 then 2015 value consecutively). `ivt_f2_geo_count()`
@@ -326,20 +330,25 @@ coverage in [`coverage.md`](inst/notes/coverage.md).
   4; Stages 3–5 landed the last 3). The narrative + the repeatable per-table
   onboarding recipe are retained in
   [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) for the next sweep.
-- **`04`-gen doubled-window survey directory (LFHR multi-dim) — DONE (2026-07-22).**
-  `SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009, 6 dims incl. a
-  276-month Timeseries) is onboarded (**4,986,342 cells**, LFS-validated). Two
-  fixes: (1) `ivt_f2_time_members()` reads `alloc` as a full u16 (Table-023's
-  `alloc = 512` tripped the `alloc < 256` guard); (2) `ivt_survey_double()`
-  (decode.R) detects STRUCTURALLY that this lineage pads the innermost paged
-  (straddle-window) dimension to **double** its nextpow2 → strides
-  `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`, a loud
-  `canivt_survey_directory` fallback (`strict_clean = FALSE`). An extent guard in
-  `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
-  the pow2 model but fails the window check. STILL OPEN: the sibling `Table-024`
-  (Occupation straddles, Hours+Timeseries both in-page) uses a different record
-  `ipc` — a separate packing puzzle, not in the corpus, honest-rejected. See
-  [`decode-history.md`](inst/notes/decode-history.md) + [`coverage.md`](inst/notes/coverage.md).
+- **`04`-gen doubled-window survey directory (LFHR multi-dim) — CELLS VALIDATED,
+  GEOMETRY OPEN (2026-07-22).** `SP3/NAZQV2/Table-023` (Labour Force Historical
+  Review 2009, 6 dims incl. a 276-month Timeseries) is onboarded (**4,986,342
+  cells**, LFS-validated) via two loud fallbacks: (1) `ivt_f2_time_members()`
+  reads `alloc` as a full u16 (Table-023's `alloc = 512` tripped the `alloc < 256`
+  guard); (2) `ivt_survey_double()` (decode.R) detects STRUCTURALLY that this
+  lineage *appears* to pad the innermost paged (straddle-window) dimension to
+  **double** its nextpow2 → strides `[1,8,512,2048,8192]` not pow2
+  `[1,4,256,1024,4096]`, a loud `canivt_survey_directory` fallback
+  (`strict_clean = FALSE`). **Two open concerns keep the GEOMETRY unresolved**
+  (the cells are right regardless): the doubling **wastes half the directory**
+  (suspicious — likely an un-modelled nested level, cf. `Table-024`'s `ipc`
+  mismatch, not a real 2× pad), and it is found by a CONTENT probe with **no
+  metadata marker** (if real, a header/descriptor field must declare it and the
+  parser should key off that). Do NOT treat `ivt_survey_double()` as understood.
+  An extent guard in `ivt_page_preflight()` honest-rejects any long-series
+  directory that overshoots the pow2 model but fails the window check. See
+  [`coverage.md`](inst/notes/coverage.md) "Open concerns" +
+  [`decode-history.md`](inst/notes/decode-history.md).
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck
   (it is fine at ~5 s for the 7.5M-cell reference table).
 

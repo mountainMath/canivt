@@ -1590,13 +1590,24 @@ long-series `Table-023`, see below) and **Uniform Crime Reporting** as well
 (`table_5_c`/`table_6_c`). These are the highest-value remaining targets for the
 next parser-coverage pass.
 
-### The `04`-gen doubled-window survey directory (LFHR multi-dim) — SOLVED (2026-07-22)
+### The `04`-gen doubled-window survey directory (LFHR multi-dim) — cells validated, GEOMETRY STILL OPEN (2026-07-22)
 
-**Status: SUPPORTED, LFS-validated.** **`SP3/NAZQV2/Table-023`** (Labour Force
+**Status: decodes (LFS-validated cells) via a loud `strict_clean = FALSE`
+fallback, but the directory MODEL is provisional and REQUIRES FURTHER
+INVESTIGATION.** Two red flags keep this open (see "Open concerns" at the end of
+this section): the doubled-window layout **wastes half the directory** (a
+suspicious signal that the structure is misread, not merely padded), and the
+variant is detected by a **content/structural probe, not a metadata marker** —
+if the doubling is real there must be a declaration for it in the file's
+metadata, and the parser should key off that, not a heuristic. The cells are
+correct (additivity is exact regardless of *why* the strides are what they are),
+so the table is onboarded, but do not treat the geometry as understood.
+
+**`SP3/NAZQV2/Table-023`** (Labour Force
 Historical Review 2009: Geography(11) × Sex(3) × Class of worker(3) ×
 Occupation(33) × Hours(9) × **Timeseries(276 monthly, 1987-01…2009-12)**) — the
 first *multi-dimensional, long-time-series* member of the survey lineage (siblings
-LFHR `Table-051`, UCR, justice are single-area) — now reads **4,986,342 cells**
+LFHR `Table-051`, UCR, justice are single-area) — reads **4,986,342 cells**
 via two documented loud fallbacks (`canivt_descriptor_from_slots` +
 `canivt_survey_directory`, `strict_clean = FALSE`). Two things had to be cracked:
 
@@ -1632,7 +1643,8 @@ via two documented loud fallbacks (`canivt_descriptor_from_slots` +
 
 **Not fully general yet — the multi-in-page-dim straddle.** Triangulation across
 siblings (Table-024 Occ-straddle, Table-005 Students-straddle, Table-100) showed
-the doubling is real and structural, but the sibling `Table-024` (Timeseries only
+the doubled strides reproduce Table-023's cells exactly while the census/profile
+corpus stays pow2 — but the sibling `Table-024` (Timeseries only
 23, so **Occupation** straddles with Hours+Timeseries *both* in-page) packs its
 record with a different `ipc` than `ivt_layout()` computes (in-page occ = 2, 17
 windows, not the modelled 4/9) — a distinct record-packing puzzle. Table-024 is
@@ -1642,3 +1654,34 @@ extent guard rejects it honestly rather than mis-decoding. Known minor label gap
 the employment total but is labelled "01 - 14 hours" — a codebook ordinal offset,
 not a geometry error (additivity + the LFS level confirm the cells). Sampling row
 updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).
+
+**Open concerns (why this is NOT closed):**
+
+1. **The doubled window wastes space — the structure is suspicious.** The window
+   holds 3 real values in 8 directory slots; a pow2 layout would use 4 (3 + 1
+   pad), so the doubling wastes an *extra* 4 slots per window-block and cascades
+   ×2 to every stride above it — half the directory points at empty pages. B2020
+   containers are otherwise tightly power-of-two packed, so a deliberate 2×
+   over-allocation is out of character and more likely means the model is WRONG:
+   e.g. an un-modelled dimension (or a value/flag pair, or a derived-member
+   sub-axis) really occupies those "wasted" slots, and what looks like "double
+   the window stride" is actually "one more nested level". The empty padding
+   pages ARE physically present in the file (392-byte, all-zero presence +
+   `f0/ff/80` allocation mask), so the waste is real — the question is whether
+   they are padding or a level we are collapsing. The `Table-024` `ipc` mismatch
+   (in-page occ = 2 with 17 windows, not the modelled 4/9) is very likely the
+   SAME misunderstanding seen from the multi-in-page-dim side, and cracking one
+   should crack both. Re-examine the record/page packing of this whole lineage
+   before trusting `ivt_survey_double()`.
+
+2. **There is no metadata marker — the detection is a heuristic.** Per this
+   package's rule (drive parsing off markers/metadata, not content heuristics),
+   if the doubled-window layout survives further validation there MUST be a
+   declaration of it somewhere in the header / slot-directory / descriptor that
+   distinguishes this lineage from the pow2 census tables — and the parser should
+   read that, retiring the structural directory-extent probe to a loud fallback
+   at most. Candidates to look for: a byte in the descriptor record or the header
+   `@824` slot table for the straddle dimension, a container-generation/version
+   field, or a page-marker nibble that differs from the census pages. Until such
+   a marker is found, `ivt_survey_double()` stays a `canivt_survey_directory`
+   loud fallback (`strict_clean = FALSE`), NOT a validated primary path.

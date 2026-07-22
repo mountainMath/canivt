@@ -165,16 +165,26 @@ ivt_layout_impl <- function(raw, d = NULL) {
 
   # Directory-paging variant probe. The census tables pad every paged dimension to
   # nextpow2 of its slot count (the strides above). The `04`-gen long-time-series
-  # survey lineage (Labour Force Historical Review, e.g. NAZQV2/Table-023) pads the
-  # INNERMOST paged dimension -- the straddle window -- to DOUBLE its nextpow2, so
-  # every stride above the window is 2x the census model and the directory extends
-  # to ~2x the pow2 cartesian. This is detected structurally, never by name/type:
-  # `ivt_survey_double()` probes the doubled corner (valid entries live beyond the
-  # pow2 extent) and verifies the window-padding (the slots past the real window
-  # count are empty). Only then are the strides doubled -- a loud fallback raised
-  # at decode. A directory that overshoots the pow2 model but fails the window
-  # check (a different record packing) keeps the pow2 strides and is honest-
-  # rejected by the extent guard in `ivt_page_preflight()`.
+  # survey lineage (Labour Force Historical Review, e.g. NAZQV2/Table-023) appears
+  # to pad the INNERMOST paged dimension -- the straddle window -- to DOUBLE its
+  # nextpow2, so every stride above the window is 2x the census model and the
+  # directory extends to ~2x the pow2 cartesian.
+  #
+  # PROVISIONAL / OPEN INVESTIGATION (see coverage.md "Open concerns"): the
+  # doubled strides reproduce Table-023's cells EXACTLY (sex/geo additivity, LFS
+  # levels), so the decode is right, but the MODEL is suspect -- a 2x
+  # over-allocation wastes half the directory, out of character for these tightly
+  # pow2-packed containers, and more likely means an un-modelled nested level (or
+  # value/flag pair) occupies the "wasted" slots (cf. Table-024's `ipc` mismatch).
+  # And it is found by a CONTENT probe, not a metadata marker; if the layout is
+  # real there must be a declaration for it in the header/descriptor, and this
+  # should key off that instead. So it stays a LOUD `canivt_survey_directory`
+  # fallback (strict_clean = FALSE), never a validated primary path. Detected
+  # structurally, never by name/type: `ivt_survey_double()` probes the doubled
+  # corner (real data beyond the pow2 extent) and verifies the window-padding
+  # (slots past the real window count empty). A directory that overshoots the pow2
+  # model but fails the window check keeps the pow2 strides and is honest-rejected
+  # by the extent guard in `ivt_page_preflight()`.
   survey_double <- FALSE
   if (length(ent_counts) >= 2L)
     survey_double <- ivt_survey_double(raw, ent_counts, estride, win,
