@@ -44,7 +44,7 @@ p <- ggplot(lit, aes(col, -row)) +
 s <- sticker(
   p,
   package  = "canivt",
-  s_x = 1, s_y = 0.95, s_width = 1.3, s_height = 1.3,
+  s_x = 1, s_y = 0.95, s_width = 1.17, s_height = 1.17,
   p_y = 0.48, p_size = 42, p_color = "#F2C200",
   h_color = "#E60013", h_fill = "#333333", h_size = 3
 ) +
