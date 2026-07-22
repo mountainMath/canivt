@@ -1583,46 +1583,62 @@ sibling `00060104` is now SUPPORTED, see above; these two share the container bu
 arrange their descriptors differently and still need onboarding), the **2006
 Profile Series**
 (94-575-/94-576-XCB2006*, valid `04`-family + 3-dim descriptor but
-pre-flight-rejected), the **Labour Force Historical Review** (descriptor does
-not parse), **Uniform Crime Reporting** and the **2016 Census of Agriculture**
-(both `04`-family, descriptor parses, pre-flight-rejected). These are the
-highest-value targets for the next parser-coverage pass.
+pre-flight-rejected) and the **2016 Census of Agriculture**
+(`04`-family, descriptor parses, pre-flight-rejected). The **Labour Force
+Historical Review** is now onboarded (single-area `Table-051` + the multi-dim
+long-series `Table-023`, see below) and **Uniform Crime Reporting** as well
+(`table_5_c`/`table_6_c`). These are the highest-value remaining targets for the
+next parser-coverage pass.
 
-### Future focused investigation — the `04`-gen survey directory geometry (LFHR multi-dim)
+### The `04`-gen doubled-window survey directory (LFHR multi-dim) — SOLVED (2026-07-22)
 
-**Status: not decodable; needs dedicated reverse-engineering, not an in-family fix
-(2026-07-22).** The single-area survey tables of this lineage (LFHR `Table-051`,
-UCR, justice) are onboarded via `ivt_f2_descriptor_from_slots()`, but the first
-*multi-dimensional, long-time-series* member of the lineage —
-**`SP3/NAZQV2/Table-023`** (Labour Force Historical Review 2009: Geography(11) ×
-Sex(3) × Class of worker(3) × Occupation(33) × Hours(9) × **Timeseries(276
-monthly, 1987-01…2009-12)**) — exposes two things:
+**Status: SUPPORTED, LFS-validated.** **`SP3/NAZQV2/Table-023`** (Labour Force
+Historical Review 2009: Geography(11) × Sex(3) × Class of worker(3) ×
+Occupation(33) × Hours(9) × **Timeseries(276 monthly, 1987-01…2009-12)**) — the
+first *multi-dimensional, long-time-series* member of the survey lineage (siblings
+LFHR `Table-051`, UCR, justice are single-area) — now reads **4,986,342 cells**
+via two documented loud fallbacks (`canivt_descriptor_from_slots` +
+`canivt_survey_directory`, `strict_clean = FALSE`). Two things had to be cracked:
 
-1. **A one-line, real generalization** (worth landing on its own): its Timeseries
-   member table is `81 02 <alloc-u16> 08 00` with **alloc = 512 ≥ 256**, so the
-   `alloc`-high byte is non-zero (`00 02`). `ivt_f2_time_members()` currently
-   guards `raw[off+4] == 0x00`, assuming `alloc < 256`, and skips the block →
-   member count `NA` → `descriptor_from_slots` declines → *unsupported*. Reading
-   `alloc` as a full u16 (drop the `off+4` guard; keep the `08 00` sub-marker +
-   pow2 + date-range checks) recovers the correct 6-dim descriptor. Update
-   `markers.md` §E.1 in the same commit (the `81 02 <alloc> 00 08 00` notation
-   treats the alloc-high byte as a fixed `00`).
+1. **The u16 `alloc` (the descriptor unblock).** Its Timeseries member table is
+   `81 02 <alloc-u16> 08 00` with **alloc = 512 ≥ 256**, so the alloc-high byte is
+   non-zero (`00 02`). `ivt_f2_time_members()` had guarded `raw[off+4] == 0x00`
+   (assuming `alloc < 256`) and skipped the block → member count `NA` → unsupported.
+   Reading `alloc` as a full u16 (the `08 00` sub-marker at `off+5/off+6` still
+   identifies the block) recovers the correct 6-dim descriptor. `markers.md` §E.1
+   updated (the notation was `81 02 <alloc> 00 08 00`, baking in the `00`).
 
-2. **The actual blocker (why the fix above is NOT enough).** With the descriptor
-   fixed the table decodes, but the **directory-paged dimensions scramble**.
-   Validated against published LFS: the Canada total-employed monthly series
-   decodes byte-exact (11,714 → 16,826 thousand across 1987→2009, i.e. the
-   *in-page* dimension timeseries is right), but geography and sex do **not** add
-   up (geo 2 = 8,127, impossible for NL ~230; provinces sum to 13,588 ≠ Canada
-   16,826; Both ≠ Male+Female). The total series only ever varies the in-page
-   dimension, so it never exercises the directory strides. Tested both stride
-   models in `ivt_layout()`: power-of-two-padded (`estride 1,4,256,1024,4096` —
-   all 11 geos present but wrong values) and fully-dense (`1,3,99,297,891` —
-   collapses to 2 geos). **Neither is correct**, so the `04`-gen survey directory
-   uses a geometry the current `ivt_layout()` does not model. Cracking it needs
-   the real directory layout reverse-engineered against ground truth; this is a
-   custom Borealis tabulation, so likely NOT in the B2020 web viewer —
-   validation would come from matching the full cross-tab to published LFS
-   series. The sibling `Table-051` did not catch this because it is a single-area
-   800-cell table that never stresses multi-dim paging. Diagnosis recorded on the
-   `SP3/NAZQV2/Table-023` row of [`sampled-tables.csv`](sampled-tables.csv).
+2. **The doubled-window directory (the real RE).** With the descriptor fixed the
+   pow2 `ivt_layout()` decodes plausible-looking but WRONG cells (the in-page
+   Timeseries is right — Canada total employed 11,714→16,826k across 1987→2009
+   matches published LFS — but the directory-paged dims scramble). The directory
+   was reverse-engineered from the actual page positions + 3-way additivity: this
+   lineage pads the **innermost paged dimension (the straddle window) to DOUBLE
+   its nextpow2** (Table-023: 3 hours-windows in 8 slots, not 4), so every stride
+   above the window is 2× the census model and the directory extends to ~2× the
+   pow2 cartesian. Derived strides `[win 1, occ 8, class 512, sex 2048, geo 8192]`
+   (vs pow2 `[1,4,256,1024,4096]`) decode **exactly**: sex additivity
+   (Both 453,700.2 = M 278,980 + F 174,720), geography additivity
+   (Canada = Σ 10 provinces, to base-100 rounding), all 11 provinces named in
+   order, 276 months 1987-01…2009-12. `ivt_survey_double()` (decode.R) detects the
+   variant STRUCTURALLY, never by name/type: it requires the doubled corners to
+   carry REAL DATA (non-empty presence, not a coincidental marker byte), the pow2
+   position of paged-dim-2 to be EMPTY while the doubled position carries data,
+   and the window-padding slots to be empty — so the census/profile corpus stays
+   pow2 (`survey_double = FALSE`) and a table whose true window count is larger (a
+   different record packing) is NOT silently halved. An extent guard in
+   `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
+   the pow2 model but fails the window check, so it can never silently mis-decode.
+
+**Not fully general yet — the multi-in-page-dim straddle.** Triangulation across
+siblings (Table-024 Occ-straddle, Table-005 Students-straddle, Table-100) showed
+the doubling is real and structural, but the sibling `Table-024` (Timeseries only
+23, so **Occupation** straddles with Hours+Timeseries *both* in-page) packs its
+record with a different `ipc` than `ivt_layout()` computes (in-page occ = 2, 17
+windows, not the modelled 4/9) — a distinct record-packing puzzle. Table-024 is
+NOT in the corpus; if a long-series table of that shape is ever sampled, the
+extent guard rejects it honestly rather than mis-decoding. Known minor label gap
+(as with the lineage's other imperfect labels): Table-023's Hours member 1 carries
+the employment total but is labelled "01 - 14 hours" — a codebook ordinal offset,
+not a geometry error (additivity + the LFS level confirm the cells). Sampling row
+updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).

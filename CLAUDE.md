@@ -136,12 +136,14 @@ The *rules*; the measurements and original bugs behind them are in
   power of two of count × inner-block; innermost in the low bits). Records are
   **byte-pair-swapped** then read **MSB-first**.
 - **The bitmap addresses members by SLOT, and slots can have holes.** The survey
-  generations' time dimensions store a `81 02 <alloc> 00 08 00` **time-series
-  member table** (`ivt_f2_time_members()`, markers.md §E.1): `alloc` one-byte
-  slot flags (**pair-swapped**; non-zero = populated; deleted members leave
-  holes — tb611996's periods sit at slots {1,2,4}) + one u24 LE date per member,
-  right-aligned, **days since 0000-03-01** (lands on Jan 1 for annual series;
-  labels are GENERATED from the dates). When slots ≠ 1..count, the descriptor
+  generations' time dimensions store a `81 02 <alloc-u16> 08 00` **time-series
+  member table** (`ivt_f2_time_members()`, markers.md §E.1): `alloc` is a full
+  **u16** slot capacity (long monthly series exceed 255 — LFHR `Table-023`'s
+  276-month Timeseries allocates 512) + `alloc` one-byte slot flags
+  (**pair-swapped**; non-zero = populated; deleted members leave holes —
+  tb611996's periods sit at slots {1,2,4}) + one u24 LE date per member,
+  right-aligned, **days since 0000-03-01** (lands on Jan 1 for annual series, the
+  ISO month-start for monthly; labels are GENERATED from the dates). When slots ≠ 1..count, the descriptor
   dim carries `$slots` and the layout is slot-aware: extents drive
   nesting/window/stride geometry, `ivt_f2_cell_grid(pos=)` maps member bits to
   slot positions, `ivt_decode()` maps straddle/paged slot coordinates back to
@@ -249,7 +251,19 @@ The *rules*; the measurements and original bugs behind them are in
   is purely POSITIONAL and never asks which dimension is geography — on the 1981
   profile (geography = dim 3, LAST) the same walk puts geography in the presence
   record (3 windows), Profile at directory stride 4, Values as the trivial outermost
-  entry dimension.
+  entry dimension. **Directory strides pad each paged dimension to `nextpow2` of its
+  slot count EXCEPT the `04`-gen long-time-series survey lineage** (LFHR, e.g.
+  `NAZQV2/Table-023`), which pads the **innermost paged (straddle-window) dimension
+  to DOUBLE its `nextpow2`**, cascading ×2 to every stride above it (Table-023:
+  `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`). `ivt_survey_double()`
+  (decode.R) detects this STRUCTURALLY — never by name/type — requiring the doubled
+  corners to carry real data (non-empty presence, not a coincidental marker byte),
+  the pow2 position of paged-dim-2 to be EMPTY while its doubled position carries
+  data, and the window-padding slots empty; it is a loud `canivt_survey_directory`
+  fallback. An extent guard in `ivt_page_preflight()` honest-rejects any long-series
+  directory that overshoots the pow2 cartesian but fails the window check, so an
+  unmodelled record packing (e.g. `Table-024`, where a multi-in-page-dim straddle
+  changes `ipc`) can never silently mis-decode.
 - A **reference-period / facet** dimension (type `0x0e`, e.g. "Year (2)") is **not**
   geography-folded: in 98-10-0077 *Year* is the **innermost in-page dimension** (the
   value run carries the 2020 then 2015 value consecutively). `ivt_f2_geo_count()`
@@ -312,20 +326,20 @@ coverage in [`coverage.md`](inst/notes/coverage.md).
   4; Stages 3–5 landed the last 3). The narrative + the repeatable per-table
   onboarding recipe are retained in
   [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) for the next sweep.
-- **Open focused investigation — the `04`-gen survey directory geometry (LFHR
-  multi-dim), 2026-07-22.** A later sweep drew `SP3/NAZQV2/Table-023` (Labour Force
-  Historical Review 2009, 6 dims incl. a 276-month Timeseries) — the first
-  *multi-dimensional, long-series* member of the otherwise-onboarded survey lineage
-  (LFHR `Table-051`/UCR/justice). It needs one small real fix (`ivt_f2_time_members()`
-  must read `alloc` as a full u16 — Table-023's `alloc = 512` trips the `alloc < 256`
-  guard, so the Timeseries dim can't be sized and the table is rejected) **plus** a
-  genuine reverse-engineering of the lineage's directory paging: with the descriptor
-  recovered the in-page dimension decodes exactly (Canada total-employed matches
-  published LFS) but the directory-paged dims scramble under *both* the pow2-padded
-  and the dense stride models. **Not an in-family fix.** Full diagnosis in
-  [`coverage.md`](inst/notes/coverage.md) "Future focused investigation" +
-  [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md); the reject is honest
-  (`ivt_is_supported()` returns FALSE), not a silent mis-decode.
+- **`04`-gen doubled-window survey directory (LFHR multi-dim) — DONE (2026-07-22).**
+  `SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009, 6 dims incl. a
+  276-month Timeseries) is onboarded (**4,986,342 cells**, LFS-validated). Two
+  fixes: (1) `ivt_f2_time_members()` reads `alloc` as a full u16 (Table-023's
+  `alloc = 512` tripped the `alloc < 256` guard); (2) `ivt_survey_double()`
+  (decode.R) detects STRUCTURALLY that this lineage pads the innermost paged
+  (straddle-window) dimension to **double** its nextpow2 → strides
+  `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`, a loud
+  `canivt_survey_directory` fallback (`strict_clean = FALSE`). An extent guard in
+  `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
+  the pow2 model but fails the window check. STILL OPEN: the sibling `Table-024`
+  (Occupation straddles, Hours+Timeseries both in-page) uses a different record
+  `ipc` — a separate packing puzzle, not in the corpus, honest-rejected. See
+  [`decode-history.md`](inst/notes/decode-history.md) + [`coverage.md`](inst/notes/coverage.md).
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck
   (it is fine at ~5 s for the 7.5M-cell reference table).
 

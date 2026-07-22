@@ -3091,8 +3091,11 @@ ivt_f2_time_members <- function(raw, dir) {
     off <- dir[r, "off"]; len <- dir[r, "len"]
     if (len < 10L || off + 6L > n || off + len > n) next
     if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
-        as.integer(raw[off + 4L]) != 0x00L || as.integer(raw[off + 5L]) != 0x08L ||
+        as.integer(raw[off + 5L]) != 0x08L ||
         as.integer(raw[off + 6L]) != 0x00L) next
+    # `alloc` is a full u16 -- long series need >255 slots (LFHR Table-023's
+    # 276-month Timeseries allocates 512), so the high byte at off+4 is NOT a
+    # fixed 0x00; the `08 00` sub-marker at off+5/off+6 identifies the block.
     alloc <- rd_u16(raw, off + 2L)
     if (is.na(alloc) || alloc < 1L || bitwAnd(alloc, alloc - 1L) != 0L ||
         6L + alloc > len) next

@@ -843,6 +843,54 @@ records against **215** codes/members, so the reader keeps the stable numeric co
 labels rather than risk a mis-aligned name mapping (the geography name is junk HTML
 in this single-area viewer export — the same accepted quirk as table_6_c).
 
+### LFHR `Table-023` — the doubled-window survey directory (2026-07-22) — DONE
+
+`SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009) is the first
+*multi-dimensional, long-time-series* survey table: Geography(11) × Sex(3) ×
+Class of worker(3) × Occupation(33) × Hours(9) × Timeseries(276 monthly,
+1987-01…2009-12). The single-area siblings (`Table-051`, UCR, justice) never
+stress multi-dim paging, so this exposed two new things.
+
+**(1) The u16 `alloc`.** The Timeseries member table is `81 02 <alloc-u16> 08 00`;
+`alloc = 512 ≥ 256`, so the alloc-high byte is `0x02`, not `0x00`.
+`ivt_f2_time_members()` had guarded `raw[off+4] == 0x00` (i.e. `alloc < 256`) and
+skipped the block → Timeseries unsized → `descriptor_from_slots` declined →
+unsupported. Reading `alloc` as a full u16 (the `08 00` sub-marker at `off+5/off+6`
+still tags the block) recovers the 6-dim descriptor. `markers.md` §E.1 updated.
+
+**(2) The doubled window (the RE).** With the descriptor recovered the pow2
+`ivt_layout()` decodes plausible-looking but WRONG cells: the *in-page* Timeseries
+is right (Canada total employed 11,714→16,826k, matches published LFS) but the
+directory-paged dims scramble. Reverse-engineered from the raw directory: within a
+super-block the pages run as triples-of-8, super-blocks step by 2048 in a
+period-4 pattern (3 present + 1 pad = Sex(3) padded to 4) repeated 11× (Geography).
+That gives strides `[win 1, occ 8, class 512, sex 2048, geo 8192]` — **exactly the
+census pow2 model `[1,4,256,1024,4096]` but with the innermost paged (straddle
+window) dimension padded to DOUBLE its nextpow2** (3 hours-windows in 8 slots, not
+4), which cascades ×2 to every stride above it. Validated by 3-way additivity: sex
+(Both 453,700.2 = M 278,980 + F 174,720), geography (Canada = Σ 10 provinces to
+base-100 rounding), all 11 provinces named in order, 276 months.
+
+The detector `ivt_survey_double()` (decode.R) is purely structural (no name/type
+branch). An early weak version (accept a valid *marker* at the doubled corner)
+false-positived on six large pow2 profile/crosstab corpus tables; the final gate
+requires ALL of: the doubled corners carry **real data** (non-empty presence
+record, not a coincidental marker byte on a big file); the **pow2 position** of
+paged-dim-2's member 1 is EMPTY while its **doubled position** carries data; and
+the window-padding slots `[win, 2·win_slots)` of block 0 are empty (so a table
+whose true window count is larger — a different record packing — is not silently
+halved). Corpus stays `survey_double = FALSE` throughout (FAIL 0, PASS 267 before
+adding the row). An extent guard in `ivt_page_preflight()` honest-rejects any
+long-series directory that overshoots the pow2 model but fails the window check, so
+an unmodelled shape can never silently mis-decode. Reads **4,986,342 cells** via
+`canivt_descriptor_from_slots` + `canivt_survey_directory` (both `canivt_fallback`,
+`strict_clean = FALSE`). Known minor label gap (as elsewhere in this lineage):
+Hours member 1 carries the employment total but is labelled "01 - 14 hours" — a
+codebook ordinal offset, not a geometry error. The sibling `Table-024` (Occupation
+straddles, Hours+Timeseries both in-page) packs its record with a different `ipc`
+than `ivt_layout()` computes (in-page occ = 2, 17 windows) — a separate puzzle, not
+in the corpus, honest-rejected by the extent guard.
+
 ## Invariant derivations & historical bugs
 
 Why the "Key invariants" in `CLAUDE.md` are what they are — the measurements and the

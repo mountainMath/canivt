@@ -163,12 +163,76 @@ ivt_layout_impl <- function(raw, d = NULL) {
   estride <- integer(length(ent_counts)); eb <- 1L
   for (t in seq_along(ent_counts)) { estride[t] <- eb; eb <- ivt_f2_nextpow2(ent_counts[t] * eb) }
 
+  # Directory-paging variant probe. The census tables pad every paged dimension to
+  # nextpow2 of its slot count (the strides above). The `04`-gen long-time-series
+  # survey lineage (Labour Force Historical Review, e.g. NAZQV2/Table-023) pads the
+  # INNERMOST paged dimension -- the straddle window -- to DOUBLE its nextpow2, so
+  # every stride above the window is 2x the census model and the directory extends
+  # to ~2x the pow2 cartesian. This is detected structurally, never by name/type:
+  # `ivt_survey_double()` probes the doubled corner (valid entries live beyond the
+  # pow2 extent) and verifies the window-padding (the slots past the real window
+  # count are empty). Only then are the strides doubled -- a loud fallback raised
+  # at decode. A directory that overshoots the pow2 model but fails the window
+  # check (a different record packing) keeps the pow2 strides and is honest-
+  # rejected by the extent guard in `ivt_page_preflight()`.
+  survey_double <- FALSE
+  if (length(ent_counts) >= 2L)
+    survey_double <- ivt_survey_double(raw, ent_counts, estride, win,
+                                       lay$rec_bytes, grid$bit)
+  if (survey_double) estride <- c(estride[1L], estride[-1L] * 2L)
+
   list(counts = cnt, slugs = slugs, n_dim = m, geo_dim = gd,
        straddle = straddle, ipc = ipc, window_count = win,
        inpage_idx = inpage_idx, grid = grid, rec_bytes = lay$rec_bytes,
        ent_idx = ent_idx, ent_counts = ent_counts, estride = estride,
-       slot_pos = slot_pos,
+       slot_pos = slot_pos, survey_double = survey_double,
        geo_in_page = straddle == gd)
+}
+
+# Structural detector for the doubled-window directory variant (see `ivt_layout`).
+# Returns TRUE only when BOTH hold, so a normal (pow2) directory always returns
+# FALSE cheaply (the first probe misses):
+#   1. the outer paged dimensions' last members are present at their DOUBLED
+#      positions (k = (count-1) * 2*estride), which lie beyond the pow2 cartesian
+#      -- on a pow2 directory those offsets are padding/past-EOF and invalid;
+#   2. within block 0 the slots past the real window count are empty (no data
+#      page), i.e. the window really has `win` members in 2*win_slots slots -- a
+#      table whose true window count is larger (a different record packing) fails
+#      here and is left on the pow2 strides.
+ivt_survey_double <- function(raw, ent_counts, estride, win, rec_bytes, bit) {
+  ne <- length(ent_counts); n <- length(raw)
+  idx0 <- tryCatch(ivt_idx0(raw), error = function(e) NA_integer_)
+  if (is.na(idx0)) return(FALSE)
+  estride_dbl <- c(estride[1L], estride[-1L] * 2L)
+  win_slots <- estride[2L]
+  data_page <- function(kp) {
+    en <- ivt_dir_entry(raw, idx0 + 8L * kp, n)
+    if (is.null(en) || !en$marker) return(FALSE)
+    sum(ivt_f2_record_present(raw, en$off + 4L, rec_bytes, bit)) > 0L
+  }
+  # (1) every outer paged dimension's last member must carry REAL DATA at its
+  # DOUBLED corner (k = (count-1) * 2*estride, inner coords 0). These offsets lie
+  # beyond the pow2 cartesian: on a normal pow2 directory they are padding entries
+  # (empty presence record) or past the directory end, so requiring a non-empty
+  # presence record -- not merely a valid marker byte, which a large file can hit
+  # by coincidence -- keeps the pow2 profile/crosstab tables (95F0490 &c.) FALSE.
+  for (t in 2:ne) {
+    if (ent_counts[t] < 2L) next
+    if (!data_page((ent_counts[t] - 1L) * estride_dbl[t])) return(FALSE)
+  }
+  # (2) the pow2 model must be INSUFFICIENT: the second paged dimension's member 1
+  # sits at k = win_slots (= nextpow2(win)) under the pow2 model, but under the
+  # doubled model that offset is a WINDOW-PADDING slot (win_slots >= win) carrying
+  # no data, while the real member 1 moves to 2*win_slots. So the doubled variant
+  # is confirmed only when the pow2 position is EMPTY and the doubled position
+  # carries data -- exactly the reverse of a genuine pow2 directory.
+  if (data_page(win_slots) || !data_page(2L * win_slots)) return(FALSE)
+  # (3) window-padding: slots [win, 2*win_slots) of block 0 carry no data page
+  # (rules out a table whose true window count exceeds `win` -- a different record
+  # packing that must NOT be silently halved).
+  hi <- 2L * win_slots - 1L
+  if (win <= hi) for (s in win:hi) if (data_page(s)) return(FALSE)
+  TRUE
 }
 
 # Decode one page at 0-based byte offset `off`: returns the present cells' in-page
@@ -346,7 +410,20 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     en <- ivt_dir_entry(raw, idx0 + 8L * k, n)
     if (!is.null(en) && en$marker) { hi_k <- k; break }
   }
-  hi_k >= 0L && (hi_k %/% ostride + 1L) * 2L > ocount
+  if (!(hi_k >= 0L && (hi_k %/% ostride + 1L) * 2L > ocount)) return(FALSE)
+  # Extent guard against an UNMODELLED directory that overshoots the layout's
+  # cartesian. The highest entry index the model can address is the outermost
+  # dimension's last member at its stride; a directory that carries valid entries
+  # at DOUBLE that (a long-series survey directory whose window packing this layout
+  # does not model, e.g. a multi-in-page-dim straddle) would otherwise silently
+  # decode only the first half. Probe the doubled outer corner: a valid marker
+  # there means the nesting is wrong -> reject as unsupported (the doubled-window
+  # variant `ivt_survey_double()` handles has ALREADY doubled its strides, so its
+  # own doubled-again corner is past the real directory and stays clear).
+  kp <- (ocount - 1L) * 2L * ostride
+  ov <- ivt_dir_entry(raw, idx0 + 8L * kp, n)
+  if (!is.null(ov) && ov$marker) return(FALSE)
+  TRUE
 }
 
 #' Decode every cell of an IVT into a tibble of one value per row.
@@ -359,6 +436,12 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
 #' @noRd
 ivt_decode <- function(raw, lay = NULL) {
   if (is.null(lay)) lay <- ivt_layout(raw)
+  if (isTRUE(lay$survey_double))
+    ivt_fallback(paste(
+      "directory uses the doubled-window paging variant (the innermost paged",
+      "dimension is padded to double its nextpow2); strides were doubled from the",
+      "census model after a structural directory probe."),
+      class = "canivt_survey_directory")
   n <- length(raw); idx0 <- ivt_idx0(raw)
   m <- lay$n_dim; straddle <- lay$straddle; ipc1 <- lay$ipc[1L]
   ne <- length(lay$ent_counts)
