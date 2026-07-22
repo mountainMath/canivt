@@ -88,10 +88,15 @@ ivt_dir_entry <- function(raw, o, n = length(raw)) {
   # survey generation (file byte 0 == 0x02) writes them as [used][allocated] with
   # used <= allocated (e.g. tb111996's single dense page: 1508 used, 1716
   # allocated), so accept the pair there and take the USED size (the smaller --
-  # the exact-fit extent the decoder checks against). Every other family still
-  # requires strict equality, so this cannot loosen a directory scan elsewhere.
+  # the exact-fit extent the decoder checks against). Some `04`-gen survey
+  # crosstabs pad the allocation per page too: the UCR crime lineage
+  # (table_5_c-ivt-2008) stores every data page with a small 16-byte-aligned
+  # allocation slack (16-32 bytes over the used size). Accept used <= allocated
+  # there as well, but bound the slack so a coincidental [x][y] pair cannot pass
+  # as a directory record (the strict `04` families keep s1 == s2, so this only
+  # engages where a real page carries padding).
   is02 <- as.integer(raw[1L]) == 0x02L
-  if (!is02 && s1 != s2) return(NULL)
+  if (s1 != s2 && !is02 && abs(s1 - s2) > 256L) return(NULL)
   list(off = off, size = min(s1, s2), marker = ivt_f2_is_marker(raw, off))
 }
 

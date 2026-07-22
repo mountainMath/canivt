@@ -300,15 +300,21 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     if (nv == 0L) next
     end <- 4L + lay$rec_bytes + tr + nv * w
     if (end > s1 || off + end > n || nv > cap) return(FALSE)
-    # Exact fit is required ONLY for pages that carry no auxiliary head and no
+    # Exact fit is the norm for pages that carry no auxiliary head and no
     # suppression tail: b2 == 0 (no trailer) AND b3 == 0x08 (head = 0). Pages
     # with a head block (b3 >= 0x09) may append a per-(geo, outer-dim) missing-
     # cell mask / allocation slack after the dense value run, so only the <=
     # extent bound applies -- the 2006 census vintage (97-563) does this on its
     # b3 >= 0x0a pages, and the 2001 profile lineage (95F0490) already on its
-    # b3 == 0x09 pages (8-80 byte tails). Decoding stays presence-authoritative
-    # (exactly popcount values read from vstart), so the tail never affects it.
-    if (b2 == 0x00L && b3 <= 0x08L && end != s1) return(FALSE)
+    # b3 == 0x09 pages (8-80 byte tails). Even some b2==0/b3==08 pages carry a
+    # small ALLOCATION-PADDING tail: the 04-gen UCR survey crosstab lineage
+    # (table_5_c-ivt-2008) 32-byte-aligns each page, leaving a 0-32 byte gap after
+    # the value run. So require no overrun and only a modest (<= 32 byte)
+    # undershoot rather than strict equality. Decoding stays presence-
+    # authoritative (exactly popcount values read from vstart), so the tail never
+    # affects it, and the bound keeps a misread width/count (which throws `end`
+    # far off, or overruns) still caught.
+    if (b2 == 0x00L && b3 <= 0x08L && (end > s1 || s1 - end > 32L)) return(FALSE)
     seen <- seen + 1L
     if (seen >= max_pages) break
   }

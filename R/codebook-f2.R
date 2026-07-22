@@ -3788,6 +3788,35 @@ ivt_f2_descriptor_impl <- function(raw) {
     fs <- tryCatch(ivt_f2_descriptor_from_slots(raw), error = function(e) NULL)
     if (!is.null(fs) && length(fs$dims) == ndim_auth) dims <- fs$dims
   }
+  # LAST resort -- FORWARD / master-directory variant of the inverted retry. The
+  # `81 02 <ndim> 00` named-record descriptor block can sit AFTER the offset @32
+  # resolves to, out of reach of the backward inverted search: the Census of
+  # Agriculture overview lineage (00040231) points @32 at the identity block
+  # ("Source: Statistics Canada (tableau CANSIM 004-0231 ...)") with the real
+  # descriptor block immediately following it, while its sibling 00040240 points
+  # @32 just PAST the same block so the backward retry reaches it. Its reference-
+  # period "Date" dimension carries no member array, so the slot rebuilds above
+  # come up empty -- but the block itself lists the two real (doubled-name) data
+  # dimensions. Walk each `81 02 ..`-headed master-dir block forward and adopt the
+  # first that yields >= 2 records. Runs only after every slot rebuild has failed,
+  # so it never pre-empts a table those read (table_6_c-ivt-2007's Year(1) is
+  # rebuilt from slots above before this could mis-size it from an `81 02 04 00`
+  # sub-header); structural and quiet like the master-directory relocation itself.
+  if (length(dims) < 2L) {
+    md <- tryCatch(ivt_f2_master_dir(raw), error = function(e) NULL)
+    cand <- if (!is.null(md)) sort(unique(as.integer(md[, "off"]))) else integer(0)
+    for (off in cand) {
+      if (is.na(off) || off < 0L || off + 8L > n) next
+      if (raw[off + 1L] != as.raw(0x81) || raw[off + 2L] != as.raw(0x02) ||
+          raw[off + 4L] != as.raw(0x00)) next
+      nd <- as.integer(raw[off + 3L])
+      if (nd < 1L || nd > 32L) next
+      hi <- min(off + 4000L, n)
+      v3 <- as.integer(raw[(off + 1L):hi])
+      dims3 <- walk_records(v3, length(v3), 32L)
+      if (length(dims3) >= 2L) { dims <- dims3; break }
+    }
+  }
 
   title <- regmatches(txt, regexpr("FACET04[^.]*", txt))
   title <- if (length(title)) trimws(sub("FACET04", "", title)) else NA_character_

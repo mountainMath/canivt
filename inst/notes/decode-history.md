@@ -791,6 +791,58 @@ strict-clean** (no fallbacks). Validated: Canada = Σ provinces, DIVISIONS Total
 Subtotal(A−B); Subtotal = Σ 8 size ranges) all hold EXACTLY; Canada/Total/Total(A)
 = 1,996,322 establishments. **The onboarding backlog is fully cleared.**
 
+### Second random sweep (2026-07-21) — two Borealis `04`-gen survey tables — DONE
+
+A fresh random sample of 10 StatCan + 10 Borealis catalogue tables not yet in the
+corpus. All 10 StatCan decoded; of the 10 Borealis, 5 decoded, 3 were 403-blocked
+(access-restricted OCDMVE dataset — an access grant, not a decode gap), and two
+`04 00 20 00` survey tables failed. Both are now onboarded.
+
+**`SP3_THNM6I_00040231`** (Census of Agriculture overview, "Computers used for
+farm business", CANSIM 004-0231). The descriptor pointer `@32` points at the
+IDENTITY block ("Source: Statistics Canada (tableau CANSIM 004-0231 …)"), NOT the
+descriptor — its real `81 02 03 00` named-record descriptor block (listed in the
+master directory) sits **after** that identity block. The sibling `00040240`
+points `@32` just *past* the same descriptor block, so the existing inverted
+retry (which scans **backward** from D for `81 02 03 00`) reaches it — but
+00040231's D is *before* its block, out of the backward window. The slot-table
+rebuilds (`ivt_f2_dims_from_slots`/`descriptor_from_slots`) also come up empty
+because the trailing "Date" reference dimension carries no member array (this is a
+2-D table, Geography × Computers, "Date" folded). Fix: a **forward /
+master-directory variant of the inverted retry** in `ivt_f2_descriptor_impl()` —
+after every slot rebuild has failed, walk each `81 02 ..`-headed master-dir block
+forward and adopt the first yielding ≥ 2 doubled-name records. Placed LAST so it
+never pre-empts a slot rebuild (table_6_c-ivt-2007's Year(1) still rebuilds from
+slots first, not mis-sized from an `81 02 04 00` sub-header). Reads
+Geography(2180) × Computers(3) → **6,216 cells** (`canivt_geo_datadim`, as the
+sibling — bare-code agriculture geography, no DGUID). Validated: Canada 122,678
+farms use computers / 114,416 use internet / 92,154 high-speed (high-speed ⊆
+internet ✓).
+
+**`SP3_Q2JJJO_table_5_c-ivt-2008`** (UCR crime, sibling of the onboarded
+table_6_c). Two stacked container gaps, both about ALLOCATION PADDING the `04`
+families were assumed never to use:
+1. **`[used][allocated]` directory entries.** Every page-directory record stores
+   `s1 = used < s2 = allocated` (16-byte-aligned slack, 0–32 bytes), which
+   `ivt_dir_entry()` accepted only for the `02`-gen (byte 0 `0x02`). So `@558`
+   (6207, the real directory) validated no entries and `ivt_idx0()` fell to the
+   constant → pre-flight `valid = 0`. Fix: accept `used <= allocated` with a
+   bounded (≤ 256 byte) slack for all families, taking the used size.
+2. **Padding tail on `b2==0/b3==08` pages.** Even after the directory resolved,
+   the pre-flight's EXACT-FIT rule rejected the first page: the value run ends
+   3292 bytes in but `s1 = 3308` (a 16-byte alignment tail) on a page with no head
+   / no trailer, where exact fit was required. Relaxed to no-overrun + ≤ 32 byte
+   undershoot (decoding stays presence-authoritative, so the tail is inert).
+
+Reads Geography(1) × Accused Status(9) × Age Accused(105) × Offences(215) × [Year] →
+**35,237 cells**; widths are mixed per page (`84`=int32 / `82`=int16), which the
+decoder already handles. Validated: total accused (Total age × Total status ×
+offence 1) = 1,110,371. **Known label limitation** (documented, `canivt_geo_datadim`
++ fallbacks, not strict-clean): the Offences dimension's name block carries **216**
+records against **215** codes/members, so the reader keeps the stable numeric code
+labels rather than risk a mis-aligned name mapping (the geography name is junk HTML
+in this single-area viewer export — the same accepted quirk as table_6_c).
+
 ## Invariant derivations & historical bugs
 
 Why the "Key invariants" in `CLAUDE.md` are what they are — the measurements and the

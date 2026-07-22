@@ -15,6 +15,16 @@ inverted descriptor rebuilt from the slot table), and `PRSIC1dec1999` (earlier
 is cleared — fold the residue back into `coverage.md`'s "fully supported"
 statement and retire this doc.
 
+**Second random sweep (2026-07-21).** A fresh 10 StatCan + 10 Borealis sample
+(none in the corpus): all 10 StatCan decoded; of the 10 Borealis, 5 decoded, 3
+were 403-blocked (access-restricted OCDMVE dataset, not a decode gap), and two
+`04`-gen survey tables failed and are now onboarded (ledger + `decode-history.md`
+"Second random sweep") — `SP3_THNM6I_00040231` (Census of Agriculture overview:
+`@32`→identity block, real descriptor recovered by a FORWARD master-directory
+variant of the inverted retry) and `SP3_Q2JJJO_table_5_c-ivt-2008` (UCR crime:
+`[used][allocated]` directory entries + a `b3==08` allocation-padding tail, both
+`04`-gen adaptations of allowances the `02`-gen already had). Corpus FAIL 0.
+
 Companion docs: format ref [`ivt-format.md`](ivt-format.md); marker catalog
 [`markers.md`](markers.md); coverage [`coverage.md`](coverage.md); the narrative
 of how each earlier table was cracked [`decode-history.md`](decode-history.md).
