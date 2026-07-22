@@ -25,6 +25,19 @@ variant of the inverted retry) and `SP3_Q2JJJO_table_5_c-ivt-2008` (UCR crime:
 `[used][allocated]` directory entries + a `b3==08` allocation-padding tail, both
 `04`-gen adaptations of allowances the `02`-gen already had). Corpus FAIL 0.
 
+**Open focused investigation (2026-07-22): the `04`-gen survey directory geometry
+(LFHR multi-dim).** A later sweep drew `SP3/NAZQV2/Table-023` (Labour Force
+Historical Review 2009, 6 dims incl. a 276-month Timeseries) — the first
+*multi-dimensional, long-series* member of the otherwise-onboarded survey lineage
+(LFHR `Table-051`/UCR/justice). It needs one small real fix (`ivt_f2_time_members()`
+must read `alloc` as a full u16 — Table-023's alloc = 512 trips the `alloc < 256`
+guard) AND a genuine reverse-engineering of the lineage's directory paging: with the
+descriptor recovered the in-page dimension decodes exactly (Canada total-employed
+matches LFS) but the directory-paged dims scramble under both the pow2-padded and
+the dense stride models. **Not an in-family fix** — see
+[`coverage.md`](coverage.md) "Future focused investigation" for the full diagnosis
+and the [`sampled-tables.csv`](sampled-tables.csv) `Table-023` row.
+
 **Sampling log — [`sampled-tables.csv`](sampled-tables.csv).** Every table drawn
 in a random sweep is now recorded there (one row per `sweep_date`/`source`/`key`
 with `outcome` ∈ {`decoded_clean`, `decoded_fallback`, `onboarded_fixed`,

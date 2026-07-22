@@ -312,7 +312,20 @@ coverage in [`coverage.md`](inst/notes/coverage.md).
   4; Stages 3–5 landed the last 3). The narrative + the repeatable per-table
   onboarding recipe are retained in
   [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) for the next sweep.
-  No open decoding gaps remain.
+- **Open focused investigation — the `04`-gen survey directory geometry (LFHR
+  multi-dim), 2026-07-22.** A later sweep drew `SP3/NAZQV2/Table-023` (Labour Force
+  Historical Review 2009, 6 dims incl. a 276-month Timeseries) — the first
+  *multi-dimensional, long-series* member of the otherwise-onboarded survey lineage
+  (LFHR `Table-051`/UCR/justice). It needs one small real fix (`ivt_f2_time_members()`
+  must read `alloc` as a full u16 — Table-023's `alloc = 512` trips the `alloc < 256`
+  guard, so the Timeseries dim can't be sized and the table is rejected) **plus** a
+  genuine reverse-engineering of the lineage's directory paging: with the descriptor
+  recovered the in-page dimension decodes exactly (Canada total-employed matches
+  published LFS) but the directory-paged dims scramble under *both* the pow2-padded
+  and the dense stride models. **Not an in-family fix.** Full diagnosis in
+  [`coverage.md`](inst/notes/coverage.md) "Future focused investigation" +
+  [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md); the reject is honest
+  (`ivt_is_supported()` returns FALSE), not a silent mis-decode.
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck
   (it is fine at ~5 s for the 7.5M-cell reference table).
 

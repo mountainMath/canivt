@@ -1587,3 +1587,42 @@ pre-flight-rejected), the **Labour Force Historical Review** (descriptor does
 not parse), **Uniform Crime Reporting** and the **2016 Census of Agriculture**
 (both `04`-family, descriptor parses, pre-flight-rejected). These are the
 highest-value targets for the next parser-coverage pass.
+
+### Future focused investigation — the `04`-gen survey directory geometry (LFHR multi-dim)
+
+**Status: not decodable; needs dedicated reverse-engineering, not an in-family fix
+(2026-07-22).** The single-area survey tables of this lineage (LFHR `Table-051`,
+UCR, justice) are onboarded via `ivt_f2_descriptor_from_slots()`, but the first
+*multi-dimensional, long-time-series* member of the lineage —
+**`SP3/NAZQV2/Table-023`** (Labour Force Historical Review 2009: Geography(11) ×
+Sex(3) × Class of worker(3) × Occupation(33) × Hours(9) × **Timeseries(276
+monthly, 1987-01…2009-12)**) — exposes two things:
+
+1. **A one-line, real generalization** (worth landing on its own): its Timeseries
+   member table is `81 02 <alloc-u16> 08 00` with **alloc = 512 ≥ 256**, so the
+   `alloc`-high byte is non-zero (`00 02`). `ivt_f2_time_members()` currently
+   guards `raw[off+4] == 0x00`, assuming `alloc < 256`, and skips the block →
+   member count `NA` → `descriptor_from_slots` declines → *unsupported*. Reading
+   `alloc` as a full u16 (drop the `off+4` guard; keep the `08 00` sub-marker +
+   pow2 + date-range checks) recovers the correct 6-dim descriptor. Update
+   `markers.md` §E.1 in the same commit (the `81 02 <alloc> 00 08 00` notation
+   treats the alloc-high byte as a fixed `00`).
+
+2. **The actual blocker (why the fix above is NOT enough).** With the descriptor
+   fixed the table decodes, but the **directory-paged dimensions scramble**.
+   Validated against published LFS: the Canada total-employed monthly series
+   decodes byte-exact (11,714 → 16,826 thousand across 1987→2009, i.e. the
+   *in-page* dimension timeseries is right), but geography and sex do **not** add
+   up (geo 2 = 8,127, impossible for NL ~230; provinces sum to 13,588 ≠ Canada
+   16,826; Both ≠ Male+Female). The total series only ever varies the in-page
+   dimension, so it never exercises the directory strides. Tested both stride
+   models in `ivt_layout()`: power-of-two-padded (`estride 1,4,256,1024,4096` —
+   all 11 geos present but wrong values) and fully-dense (`1,3,99,297,891` —
+   collapses to 2 geos). **Neither is correct**, so the `04`-gen survey directory
+   uses a geometry the current `ivt_layout()` does not model. Cracking it needs
+   the real directory layout reverse-engineered against ground truth; this is a
+   custom Borealis tabulation, so likely NOT in the B2020 web viewer —
+   validation would come from matching the full cross-tab to published LFS
+   series. The sibling `Table-051` did not catch this because it is a single-area
+   800-cell table that never stresses multi-dim paging. Diagnosis recorded on the
+   `SP3/NAZQV2/Table-023` row of [`sampled-tables.csv`](sampled-tables.csv).
