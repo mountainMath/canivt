@@ -25,6 +25,16 @@ variant of the inverted retry) and `SP3_Q2JJJO_table_5_c-ivt-2008` (UCR crime:
 `[used][allocated]` directory entries + a `b3==08` allocation-padding tail, both
 `04`-gen adaptations of allowances the `02`-gen already had). Corpus FAIL 0.
 
+**Sampling log — [`sampled-tables.csv`](sampled-tables.csv).** Every table drawn
+in a random sweep is now recorded there (one row per `sweep_date`/`source`/`key`
+with `outcome` ∈ {`decoded_clean`, `decoded_fallback`, `onboarded_fixed`,
+`http_403_blocked`, `error`} + `n_cells`/`note`), so future sweeps can DEDUP
+against it instead of re-drawing the same tables. Only tables we onboard land in
+the corpus ledger; this log is the fuller record of what has been *tried* (incl.
+the ones that just worked and the access-blocked ones). The 2026-07-21 second
+sweep seeds it with its 20 rows (8 clean / 7 fallback / 2 fixed / 3 403-blocked);
+back-fill earlier sweeps opportunistically.
+
 Companion docs: format ref [`ivt-format.md`](ivt-format.md); marker catalog
 [`markers.md`](markers.md); coverage [`coverage.md`](coverage.md); the narrative
 of how each earlier table was cracked [`decode-history.md`](decode-history.md).
