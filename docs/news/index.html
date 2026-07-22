@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,6 +38,14 @@
       <small>Source: <a href="https://github.com/mountainMath/canivt/blob/HEAD/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.3.0" id="canivt-030">canivt 0.3.0<a class="anchor" aria-label="anchor" href="#canivt-030"></a></h2>
+<ul><li>Cleared the 2026-07 onboarding backlog: a fresh random re-sample of the StatCan and Borealis catalogues surfaced 7 previously-unseen tables that did not read strict-clean; all 7 now decode, validated against external ground truth (accounting identities / published counts). Every <code>.ivt</code> in the corpus now decodes.</li>
+<li>Onboarded an earlier <code>02 00 20 00</code> container generation (provincial SIC establishment counts, <code>PRSIC1dec1999</code>): tolerates block directories with interior null holes, a <code>0x10</code>-marked dense member array, and the <code>English Label</code> / <code>Etiquette</code> schema vocabulary.</li>
+<li>Onboarded the UCR survey cross-tabulation lineage (<code>table_6_c-ivt-2007</code>), whose descriptor is stored inverted before a <code>…80 01</code> signature — rebuilt from the header slot table when the forward walk finds nothing.</li>
+<li>Geography of uid-less custom single-area extracts is now read directly from the file’s field dictionary instead of triggering a spurious DGUID byte-scan.</li>
+<li>Recovered several profile / F-series / 2006 census tables that previously failed the family gate (geography-last prose-bleed dimension names; page pre-flight relaxed for <code>b3 &gt;= 9</code> pages carrying an allocation/mask tail).</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.2.0" id="canivt-020">canivt 0.2.0<a class="anchor" aria-label="anchor" href="#canivt-020"></a></h2>
 <ul><li>Decodes the older <code>02 00 20 00</code> “split-definition survey” container generation alongside the modern <code>04 00 20 00</code> census/custom lineage — covers Health Statistics at a Glance (1999), the 1996 Census of Agriculture, and the 1996 Small Area Business survey. These tables have no geography dimension (a single area per file) and can carry a time-series reference dimension whose member labels are generated from an on-disk date table rather than a stored codebook.</li>

@@ -40,14 +40,22 @@ This folder is self-contained. Companion docs under `inst/notes/`:
   — the **consolidation / harmonization backlog** from the 2026-07
   parser review (dedup targets, the per-read `ctx` refactor, fallback
   paths to retire). Check items off as they land.
+- [`onboarding-backlog.md`](https://mountainmath.github.io/canivt/inst/notes/onboarding-backlog.md)
+  — the **active onboarding queue**: 7 newly-sampled tables that don’t
+  yet read strict-clean, grouped into stages, plus the repeatable
+  per-table onboarding recipe. Work here when adding format coverage.
 
 ## What works today
 
-**Every `.ivt` in the local corpus decodes — there are no unsupported
-files.** A single, descriptor-driven, name/type-agnostic decoder
-(`decode.R`: `ivt_layout()` + `ivt_decode()`) handles all of them, plus
-one shared metadata path (`ivt_f2_metadata()`). The historical “family 1
-/ family 2” split is **not two formats** — it is one power-of-two-nested
+**Every `.ivt` in the corpus decodes** — the 2026-07-21 onboarding
+backlog (7 newly-sampled tables) is fully cleared (see
+[`onboarding-backlog.md`](https://mountainmath.github.io/canivt/inst/notes/onboarding-backlog.md)
+/
+[`decode-history.md`](https://mountainmath.github.io/canivt/inst/notes/decode-history.md)).
+A single, descriptor-driven, name/type-agnostic decoder (`decode.R`:
+`ivt_layout()` + `ivt_decode()`) handles all of them, plus one shared
+metadata path (`ivt_f2_metadata()`). The historical “family 1 / family
+2” split is **not two formats** — it is one power-of-two-nested
 positional layout differing only in *which dimension straddles the
 2048-bit page boundary* (see “Key invariants”). Geography is dimension 1
 *structurally* (except the profile lineage, geography- last), the
@@ -168,16 +176,22 @@ The *rules*; the measurements and original bugs behind them are in
   `32·(b3 − 8)`, `b3 ∈ {08,09,0a,0c}`. Unknown markers **abort**
   (`canivt_unknown_marker`). Every page is extent-checked against its
   directory entry’s u16 size
-  (`4 + presence + trailer + head + nv·width ≤ size`, **equality when
-  `b2 == 0` and `b3 ≤ 09`** — `b3 ≥ 0a` pages append absent-cell mask
-  tails; `canivt_page_overrun`). Valid entries pointing at unknown
-  markers are skipped **loudly** (`canivt_skipped_pages`). The store
-  keeps only **non-zero** cells, so a missing cell = 0; entirely empty
-  geographies (zero presence record) are normal. A **ZERO high nibble in
-  b0 is the DENSE page variant** (1991 profiles): bytes 3–4 are a u16
-  value COUNT, not b2/b3 — `[b0][01][u16 count]` + one value per grid
-  position, zeros stored literally, count zero-padded past the window,
-  exact fit `4 + count·width == size` (`ivt_decode_page_dense()`).
+  (`4 + presence + trailer + head + nv·width ≤ size`, **equality only
+  when `b2 == 0` and `b3 == 08`** (no head, no tail) — pages with a head
+  block (`b3 ≥ 09`) may append an absent-cell mask / allocation slack
+  after the dense value run, so only the `≤` bound applies (the 2006
+  vintage 97-563/97-555 on `b3 ≥ 0a`, the 2001 profile lineage 95F0490
+  already on `b3 == 09`, 8–80 byte tails); `canivt_page_overrun`).
+  Decoding stays presence-authoritative (exactly `popcount` values from
+  the run start), so a tail never affects it. Valid entries pointing at
+  unknown markers are skipped **loudly** (`canivt_skipped_pages`). The
+  store keeps only **non-zero** cells, so a missing cell = 0; entirely
+  empty geographies (zero presence record) are normal. A **ZERO high
+  nibble in b0 is the DENSE page variant** (1991 profiles): bytes 3–4
+  are a u16 value COUNT, not b2/b3 — `[b0][01][u16 count]` + one value
+  per grid position, zeros stored literally, count zero-padded past the
+  window, exact fit `4 + count·width == size`
+  (`ivt_decode_page_dense()`).
 - **Fallbacks are LOUD** (`ivt_fallback()`, `fallback.R`): every
   content-heuristic path (stride walk, regex/dedup scans, count-keyed
   labels, marker-scan directory location, fixed slot orders, tail
@@ -342,14 +356,18 @@ When a gap is closed or a table is onboarded, update the ledger row (and
 
 The decoder, unified metadata, uniform geography parsing, the family-2
 attribute table, commuting-flow decoding (all vintages), footnote scope
-and geo-name completeness are all **done** — the corpus is fully
-supported. The completed work log (and how each table was cracked) lives
-in
+and geo-name completeness are all **done**. The completed work log (and
+how each table was cracked) lives in
 [`decode-history.md`](https://mountainmath.github.io/canivt/inst/notes/decode-history.md);
 measured coverage in
 [`coverage.md`](https://mountainmath.github.io/canivt/inst/notes/coverage.md).
-What remains is optional:
 
+- **Onboarding backlog — CLEARED (2026-07-21).** The 2026-07-21
+  re-sample’s 7 tables that did not read strict-clean are all onboarded
+  now (Stage 1 pass landed 4; Stages 3–5 landed the last 3). The
+  narrative + the repeatable per-table onboarding recipe are retained in
+  [`onboarding-backlog.md`](https://mountainmath.github.io/canivt/inst/notes/onboarding-backlog.md)
+  for the next sweep. No open decoding gaps remain.
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a
   bottleneck (it is fine at ~5 s for the 7.5M-cell reference table).
 

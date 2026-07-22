@@ -79,8 +79,8 @@ A tibble with the dimension columns converted to factors.
 the Arrow dataset returned by
 [`get_statcan_ivt()`](https://mountainmath.github.io/canivt/reference/get_statcan_ivt.md)
 (optionally after `dplyr` verbs such as
-[`filter()`](https://dplyr.tidyverse.org/reference/filter.html)), or a
-path to a Parquet written by
+[`filter()`](https://rdrr.io/r/stats/filter.html)), or a path to a
+Parquet written by
 [`ivt_write_parquet()`](https://mountainmath.github.io/canivt/reference/ivt_write_parquet.md).
 For the Arrow / Parquet forms the member levels come from the
 `<name>_members.parquet` sidecar written alongside the data (or pass

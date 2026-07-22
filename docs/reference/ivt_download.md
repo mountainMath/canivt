@@ -55,6 +55,7 @@ warning) if the endpoint could not be reached.
 # (no error), so no try() is needed.
 # \donttest{
 path <- ivt_download("98100241", dest_dir = tempdir())
+#> Downloading <https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip>
 if (!is.null(path)) ivt <- read_ivt(path)
 # }
 ```
