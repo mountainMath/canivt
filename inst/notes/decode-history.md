@@ -847,7 +847,7 @@ in this single-area viewer export — the same accepted quirk as table_6_c).
 
 `SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009) is the first
 *multi-dimensional, long-time-series* survey table: Geography(11) × Sex(3) ×
-Class of worker(3) × Occupation(33) × Hours(9) × Timeseries(276 monthly,
+Class of worker(3) × Occupation(33) × Hours(10) × Timeseries(276 monthly,
 1987-01…2009-12). The single-area siblings (`Table-051`, UCR, justice) never
 stress multi-dim paging, so this exposed two new things.
 
@@ -882,14 +882,35 @@ whose true window count is larger — a different record packing — is not sile
 halved). Corpus stays `survey_double = FALSE` throughout (FAIL 0, PASS 267 before
 adding the row). An extent guard in `ivt_page_preflight()` honest-rejects any
 long-series directory that overshoots the pow2 model but fails the window check, so
-an unmodelled shape can never silently mis-decode. Reads **4,986,342 cells** via
+an unmodelled shape can never silently mis-decode. Reads **5,771,932 cells** via
 `canivt_descriptor_from_slots` + `canivt_survey_directory` (both `canivt_fallback`,
-`strict_clean = FALSE`). Known minor label gap (as elsewhere in this lineage):
-Hours member 1 carries the employment total but is labelled "01 - 14 hours" — a
-codebook ordinal offset, not a geometry error. The sibling `Table-024` (Occupation
+`strict_clean = FALSE`). The sibling `Table-024` (Occupation
 straddles, Hours+Timeseries both in-page) packs its record with a different `ipc`
 than `ivt_layout()` computes (in-page occ = 2, 17 windows) — a separate puzzle, not
 in the corpus, honest-rejected by the extent guard.
+
+**(3) The Hours dimension: 10 members, not 9 (2026-07-22, fixed).** The first
+read shipped Hours with **9** members and **4,986,342** cells — dropping the 10th
+member ("Average usual hours (main job)", 785,590 cells) and shifting every Hours
+label by one. Root cause was NOT the directory doubling (its over-allocation
+padding is genuinely EMPTY, verified by a full directory scan: every occupied
+entry decomposes cleanly into used ranges). It was the codebook: the descriptor
+block (offset 1568, `81 02 06 00`) reads `0c 0a 05 01 "Hours worked"` — count
+`0x0a` = 10 — correctly, but the forward master-dir walk recovers only 5 of 6 dims
+(Timeseries has no standard `01` name anchor), so `length(dims) < ndim` and
+`ivt_f2_descriptor_from_slots()` pre-empts it. That path counts members via
+`ivt_f2_slot_member_count()`, and Hours stores its member **descriptions** in a
+bit-headed dense array `[81 01][f8 00 bitmap alloc][32-byte bitmap][20 marker][10
+Pascal records]` whose post-bitmap marker byte is **`0x20`** — a variant
+`ivt_f2_dir_entry_members()` did not admit (it required `{0x80,0x01,0x10}`), so it
+returned NULL and the count fell back to the member **CODE** array, which has only
+9 entries ("Total employed" carries no code). Widening the dense-array reader to
+accept the `0x20` marker (this `04`-gen lineage's member-description framing;
+markers.md §F updated) restores Hours = 10 → cells **5,771,932**, labels
+un-shifted ("Total employed" first, "Average usual hours (main job)" last).
+Validated by additivity on Canada/1987-01: Σ 7 hour-buckets = 11,714.4 = Total
+employed ✓, and Total usual hours 430,271.4 / 11,714.4 = 36.73 ≈ file's
+"Average usual hours" 36.7 ✓.
 
 **NOT CLOSED — the geometry is provisional (requires further investigation).**
 The cells are right, but two things keep the *model* open: (1) the doubled window

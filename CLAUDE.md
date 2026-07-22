@@ -332,7 +332,7 @@ coverage in [`coverage.md`](inst/notes/coverage.md).
   [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) for the next sweep.
 - **`04`-gen doubled-window survey directory (LFHR multi-dim) — CELLS VALIDATED,
   GEOMETRY OPEN (2026-07-22).** `SP3/NAZQV2/Table-023` (Labour Force Historical
-  Review 2009, 6 dims incl. a 276-month Timeseries) is onboarded (**4,986,342
+  Review 2009, 6 dims incl. a 276-month Timeseries) is onboarded (**5,771,932
   cells**, LFS-validated) via two loud fallbacks: (1) `ivt_f2_time_members()`
   reads `alloc` as a full u16 (Table-023's `alloc = 512` tripped the `alloc < 256`
   guard); (2) `ivt_survey_double()` (decode.R) detects STRUCTURALLY that this
@@ -346,7 +346,11 @@ coverage in [`coverage.md`](inst/notes/coverage.md).
   metadata marker** (if real, a header/descriptor field must declare it and the
   parser should key off that). Do NOT treat `ivt_survey_double()` as understood.
   An extent guard in `ivt_page_preflight()` honest-rejects any long-series
-  directory that overshoots the pow2 model but fails the window check. See
+  directory that overshoots the pow2 model but fails the window check. (A separate
+  **codebook** bug — Hours read 9 members not 10 (4,986,342 cells) because its
+  member-description block's post-bitmap marker `0x20` was un-catalogued in
+  `ivt_f2_dir_entry_members()` — was fixed 2026-07-22; unrelated to the doubling,
+  whose padding is genuinely empty.) See
   [`coverage.md`](inst/notes/coverage.md) "Open concerns" +
   [`decode-history.md`](inst/notes/decode-history.md).
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck

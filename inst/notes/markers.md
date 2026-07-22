@@ -135,7 +135,7 @@ value block in one of three framings, all opening with `01 01` or `81 01`:
 | bytes | meaning | recognizer |
 |-------|---------|-----------|
 | `[01 01][u16 len-4][u16 n_slots] <records [len][text][00]>` | **plain** member array; NUL-terminated records, an absent member = empty record `00 00` → NA | `ivt_f2_dir_entry_members()` |
-| `[81 01][u16 nbits][bitstream u16-padded][80\|01\|10] <records [len][text]>` | **bit-headed DENSE** array; absent members skipped, re-aligned against sibling NA pattern. Pre-records marker byte is `0x80`/`0x01` on the modern chunked tables, `0x10` on the earlier `02 00 20 00` survey generation (PRSIC1dec1999's 11-member "Employment size ranges") | `ivt_f2_dir_entry_members()` |
+| `[81 01][u16 nbits][bitstream u16-padded][80\|01\|10\|20] <records [len][text]>` | **bit-headed DENSE** array; absent members skipped, re-aligned against sibling NA pattern. Pre-records marker byte is `0x80`/`0x01` on the modern chunked tables, `0x10` on the earlier `02 00 20 00` survey generation (PRSIC1dec1999's 11-member "Employment size ranges"), `0x20` on the `04`-gen long-time-series survey lineage (LFHR Table-023's 10-member "Hours worked") | `ivt_f2_dir_entry_members()` |
 | `[01 01][u16 len-4][01] <latin1 text, NO NUL>` | **footnote / note TEXT blob** — a lone un-terminated text (e.g. `Renvoi 1 / Ne comprend pas ...`), one per member that cites a note, in the geo directory TAIL; **not** a member array | `ivt_f2_dir_is_text_block()` |
 
 The text-blob framing reuses the plain `01 01` header, so it is told apart

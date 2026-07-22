@@ -1605,11 +1605,11 @@ so the table is onboarded, but do not treat the geometry as understood.
 
 **`SP3/NAZQV2/Table-023`** (Labour Force
 Historical Review 2009: Geography(11) × Sex(3) × Class of worker(3) ×
-Occupation(33) × Hours(9) × **Timeseries(276 monthly, 1987-01…2009-12)**) — the
+Occupation(33) × Hours(10) × **Timeseries(276 monthly, 1987-01…2009-12)**) — the
 first *multi-dimensional, long-time-series* member of the survey lineage (siblings
-LFHR `Table-051`, UCR, justice are single-area) — reads **4,986,342 cells**
+LFHR `Table-051`, UCR, justice are single-area) — reads **5,771,932 cells**
 via two documented loud fallbacks (`canivt_descriptor_from_slots` +
-`canivt_survey_directory`, `strict_clean = FALSE`). Two things had to be cracked:
+`canivt_survey_directory`, `strict_clean = FALSE`). Three things had to be cracked:
 
 1. **The u16 `alloc` (the descriptor unblock).** Its Timeseries member table is
    `81 02 <alloc-u16> 08 00` with **alloc = 512 ≥ 256**, so the alloc-high byte is
@@ -1641,6 +1641,21 @@ via two documented loud fallbacks (`canivt_descriptor_from_slots` +
    `ivt_page_preflight()` honest-rejects any long-series directory that overshoots
    the pow2 model but fails the window check, so it can never silently mis-decode.
 
+3. **Hours = 10, not 9 — the codebook member-count fix (2026-07-22).** The first
+   read shipped Hours with 9 members / **4,986,342** cells, dropping the 10th
+   member ("Average usual hours (main job)", 785,590 cells) and shifting every
+   Hours label by one. This was NOT the directory doubling (its padding is
+   genuinely EMPTY — a full directory scan shows every occupied entry decomposing
+   into used ranges). The descriptor block reads count 10 correctly, but the
+   forward walk recovers only 5/6 dims (Timeseries has no `01` name anchor) so
+   `ivt_f2_descriptor_from_slots()` pre-empts it and re-counts Hours from its
+   member-description block — a bit-headed dense array `[81 01][f8 00][32-byte
+   bitmap][20][10 records]` whose post-bitmap marker `0x20` `ivt_f2_dir_entry_members()`
+   did not admit, so the count fell to the 9-entry member-CODE array. Widening the
+   dense-array reader to accept `0x20` (markers.md §F) restores Hours = 10 → cells
+   **5,771,932**, labels un-shifted. Additivity validated (Canada/1987-01:
+   Σ 7 buckets = 11,714.4 = Total employed; 430,271.4 / 11,714.4 = 36.73 ≈ 36.7).
+
 **Not fully general yet — the multi-in-page-dim straddle.** Triangulation across
 siblings (Table-024 Occ-straddle, Table-005 Students-straddle, Table-100) showed
 the doubled strides reproduce Table-023's cells exactly while the census/profile
@@ -1649,10 +1664,9 @@ corpus stays pow2 — but the sibling `Table-024` (Timeseries only
 record with a different `ipc` than `ivt_layout()` computes (in-page occ = 2, 17
 windows, not the modelled 4/9) — a distinct record-packing puzzle. Table-024 is
 NOT in the corpus; if a long-series table of that shape is ever sampled, the
-extent guard rejects it honestly rather than mis-decoding. Known minor label gap
-(as with the lineage's other imperfect labels): Table-023's Hours member 1 carries
-the employment total but is labelled "01 - 14 hours" — a codebook ordinal offset,
-not a geometry error (additivity + the LFS level confirm the cells). Sampling row
+extent guard rejects it honestly rather than mis-decoding. (The former "Hours
+member 1 mislabelled" note is now resolved — see crack point 3: Hours reads 10
+members with un-shifted labels.) Sampling row
 updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).
 
 **Open concerns (why this is NOT closed):**

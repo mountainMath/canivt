@@ -565,7 +565,7 @@ ivt_f2_dir_entry_records <- function(raw, off, len) {
 #       -> 128 slots, trailing slots empty; the 256-member chunks of the big tables
 #       carry n_slots = 256), so the caller trims the all-NA tail back to the
 #       chunk size.
-#   [81 01][u16 nbits][bitstream, u16-padded: 2*ceil(nbits/16) bytes][80|01]
+#   [81 01][u16 nbits][bitstream, u16-padded: 2*ceil(nbits/16) bytes][80|01|10|20]
 #       <records>   bit-headed DENSE array: records are unterminated `[len][text]`
 #       and absent members are skipped entirely, so the caller re-aligns the dense
 #       values with the NA pattern of the entry's plain siblings. The bitstream is
@@ -574,8 +574,10 @@ ivt_f2_dir_entry_records <- function(raw, off, len) {
 #       popcount == the records-region byte length + 1, i.e. it is a per-BYTE map
 #       of the packed records region, not a per-member one -- so it cannot supply
 #       member positions and the sibling NA pattern is the right alignment (see
-#       refactor-plan.md section 6.1). The one-byte marker before the records is 0x80 or
-#       0x01 (semantics unknown; both observed).
+#       refactor-plan.md section 6.1). The one-byte marker before the records is
+#       0x80/0x01 (modern chunked tables), 0x10 (the `02 00 20 00` survey
+#       generation) or 0x20 (the `04`-gen long-time-series survey lineage);
+#       semantics unknown, all observed.
 #
 # Returns list(values, dense) -- `values` with NA holes for a plain array, the
 # packed values for a dense one -- or NULL when the entry does not carry either
@@ -616,8 +618,10 @@ ivt_f2_dir_entry_members <- function(raw, off, len) {
   # the one-byte marker before the records: 0x80 / 0x01 on the modern chunked
   # tables, 0x10 on the earlier `02 00 20 00` survey generation's dense member
   # arrays (PRSIC1dec1999's "Employment size ranges": 11 members after a `10`
+  # marker), 0x20 on the `04`-gen long-time-series survey lineage's member-
+  # description arrays (LFHR Table-023's 10-member "Hours worked" after a `20`
   # marker). Semantics unknown; the records parse self-validatingly regardless.
-  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L, 0x10L)))
+  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L, 0x10L, 0x20L)))
     return(NULL)
   i <- i + 1L; end <- off + len
   while (i < end) {
