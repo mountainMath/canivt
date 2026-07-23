@@ -1741,22 +1741,27 @@ updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).
    `ivt_survey_double()` stays a `canivt_survey_directory` loud fallback
    (`strict_clean = FALSE`), NOT a validated primary path.
 
-3. **A second table proves concern 1 empirically — the "wasted" half can carry
-   REAL data (2026-07-22).** The 7-dim adult-criminal-court survey
-   `SP3/MRVVPK/accs-…` (FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × Sex(3) ×
-   Offences(40) × Geography(17) × Decision(6)) has the *same* doubled-window
-   directory shape as `Table-023` — a full scan finds 12 104 valid entries over
-   `k = 0 … 63 916` (the doubled span), true strides `[1,16,64,512,4096]` vs pow2
-   `[1,8,32,256,2048]`. But here the doubled half is **populated**: slots `k=32`
-   and `k=40` point at distinct data pages (presence popcounts 103+), and within a
-   window unit data sits at window-slots 0–4 **and** 8–12. So on `accs` the ×2 is
-   demonstrably an un-modelled nested level, not empty padding — exactly the
-   hypothesis in concern 1. `ivt_survey_double()` correctly does NOT fire on it
-   (its padding-page size signature is absent — the doubled slots hold data pages,
-   not minimal ones), so it is **honestly rejected** by the `ivt_page_preflight()`
-   overshoot guard (`read_ivt()` → clean "Unsupported IVT format" error, no silent
-   mis-decode) and deferred with `Table-024`. This is why `survey_double` must stay
-   a narrow, size-signature-gated fallback and never be generalised into a "double
-   whenever the directory overshoots" rule: that would under-decode `accs`.
-   Cracking the true `accs` / `Table-024` geometry is the way to close concern 1
-   for the whole lineage.
+3. **A look-alike table turned out to be a DIFFERENT cause — accs is a DELETED
+   MEMBER SLOT, now SOLVED (2026-07-22).** The 7-dim adult-criminal-court survey
+   `SP3/MRVVPK/accs-…` (FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × Sex(5) ×
+   Offences(40) × Geography(17) × Decision(6)) had the *same* doubled-directory
+   *symptom* as `Table-023` (a full scan finds 12 104 valid entries over
+   `k = 0 … 63 916`, the doubled span) and had been deferred as `Table-024`-class.
+   It is **not** the Table-023 phenomenon. Its Sex dimension has **6 physical slots
+   but 5 members** (`Total/Males/Females/Company/Unknown` + a deleted "Company"
+   slot 3): the codebook member-label array holds 6 records, the descriptor
+   declares 5, and the interior deleted slot leaves **NO directory entry** (per
+   64-block occupancy `{0,8,16,32,40}`, 24 absent — an interior GAP, whereas
+   Table-023's window padding slots are PRESENT entries pointing at minimal empty
+   pages). Using Sex's physical extent 6 gives a **clean pow2 nesting**
+   `[1,8,64,512,4096]`, `survey_double = FALSE`, additivity-exact (4,573,026
+   cells). So `accs` is now off this list — see the `accs` section in
+   decode-history.md. **The lesson for Table-023:** the deleted-slot explanation
+   does NOT transfer — every Table-023 dimension has an EXACT codebook count (no
+   surplus label records), and its "wasted" slots are present-but-empty padding
+   pages, not missing entries. So concern 1 is *narrower* now, not resolved: the
+   Table-023/Table-024 empty-window over-allocation is a genuine, still-unexplained
+   ×2 that is distinct from a deleted slot. When re-examining, first rule out a
+   deleted slot (compare each dim's descriptor count to its codebook label-record
+   count via `ivt_f2_dim_slot_expand()`); Table-023 already passes that test
+   cleanly, so its ×2 needs a different explanation.

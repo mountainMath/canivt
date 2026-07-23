@@ -85,16 +85,24 @@ Recognizers: `ivt_f2_is_marker()`, `ivt_value_trailer()`; sets `ivt_f2_marker_b0
 `b5/b6` vary (`20`/`28`); `b9 ∈ {0x03, 0xff}` (**`0x03`** standard, **`0xff`** the
 Canadian Business Patterns lineage). Recognizer `ivt_f2_is_descriptor()`.
 
-Within the descriptor each dimension is a record `[count][type 01][name][name]`
+Within the descriptor each dimension is a record `[count][type][sep][name][name]`
 (doubled name; the first copy may be truncated ~14 chars). The type byte is a
-storage/width tag, **not** a fixed dimension identity. A **reference-period /
-facet** dimension uses a double-marker variant `[type][count] 01 [01|02] <doubled
-name>` — the byte after the `01` is a name-copy marker, `01` (the "Year (2)"
-record `0e 02 01 01`) **or `02`** (the "Date (2)" facet of the Census-of-Agriculture
-2016 crosstabs 00040200/00040207, `13 02 01 02 DateDate`). The `01 02` form also
-occurs mid-prose where a doubled name butts against a previous name's tail, so
-the `v[k]==0x02` anchor is gated on a plausible small facet count (`count < 0x20`).
-Recognizer `ivt_f2_descriptor()` (`anchorA`).
+storage/width tag, **not** a fixed dimension identity. The name **separator** is
+normally `01`, but the `04`-gen criminal-court survey lineage frames its
+reference-period / year record with a **bare `02`** separator instead —
+`[count][type] 02 <name><name>` (accs's "Fiscal year": `10 04 02`, count 0x10 =
+16, type 0x04). The `01`-only anchor dropped that record, collapsing the strict
+walk to 6 of 7 dimensions and forcing the slot-table rebuild (which then
+miscounts the deleted-slot "Sex" — see §F). The bare-`02` anchor reads count/type
+the standard way and is guarded by the doubled-name self-check. Distinct from the
+double-marker **reference-period / facet** variant `[type][count] 01 [01|02]
+<doubled name>` — there the byte after the `01` is a name-copy marker, `01` (the
+"Year (2)" record `0e 02 01 01`) **or `02`** (the "Date (2)" facet of the
+Census-of-Agriculture 2016 crosstabs 00040200/00040207, `13 02 01 02 DateDate`);
+the `01 02` form also occurs mid-prose where a doubled name butts against a
+previous name's tail, so the `v[k]==0x02` double-marker anchor is gated on a
+plausible small facet count (`count < 0x20`).
+Recognizer `ivt_f2_descriptor()` (`anchorA` / `bare02`).
 
 ## E. Codebook name markers (`81 02 [sub] 00`)
 
@@ -142,7 +150,7 @@ value block in one of three framings, all opening with `01 01` or `81 01`:
 | bytes | meaning | recognizer |
 |-------|---------|-----------|
 | `[01 01][u16 len-4][u16 n_slots] <records [len][text][00]>` | **plain** member array; NUL-terminated records, an absent member = empty record `00 00` → NA | `ivt_f2_dir_entry_members()` |
-| `[81 01][u16 nbits][bitstream u16-padded][80\|01\|10\|20] <records [len][text]>` | **bit-headed DENSE** array; absent members skipped, re-aligned against sibling NA pattern. Pre-records marker byte is `0x80`/`0x01` on the modern chunked tables, `0x10` on the earlier `02 00 20 00` survey generation (PRSIC1dec1999's 11-member "Employment size ranges"), `0x20` on the `04`-gen long-time-series survey lineage (LFHR Table-023's 10-member "Hours worked") | `ivt_f2_dir_entry_members()` |
+| `[81 01][u16 nbits][bitstream u16-padded][80\|01\|10\|20\|08] <records [len][text]>` | **bit-headed DENSE** array; absent members skipped, re-aligned against sibling NA pattern. Pre-records marker byte is `0x80`/`0x01` on the modern chunked tables, `0x10` on the earlier `02 00 20 00` survey generation (PRSIC1dec1999's 11-member "Employment size ranges"), `0x20` on the `04`-gen long-time-series survey lineage (LFHR Table-023's 10-member "Hours worked"), `0x08` on the `04`-gen criminal-court survey lineage's member-label arrays (accs's **6-slot** "Sex" — `Total/Males/Females/Company/Unknown` plus a **DELETED slot** that retains its label; the record count 6 is the physical slot EXTENT, one more than the descriptor's logical count 5) | `ivt_f2_dir_entry_members()` |
 | `[01 01][u16 len-4][01] <latin1 text, NO NUL>` | **footnote / note TEXT blob** — a lone un-terminated text (e.g. `Renvoi 1 / Ne comprend pas ...`), one per member that cites a note, in the geo directory TAIL; **not** a member array | `ivt_f2_dir_is_text_block()` |
 
 The text-blob framing reuses the plain `01 01` header, so it is told apart
@@ -183,6 +191,15 @@ layout.
 
 ## Change log
 
+- **2026-07-22** — Onboarded the `accs` adult-criminal-court survey. §D: the
+  descriptor's bare-`02` name separator (`[count][type] 02 <name><name>`, accs's
+  "Fiscal year"). §F: the dense member-label array's `0x08` pre-records marker,
+  and the **deleted-slot** insight — a codebook member-label array can carry MORE
+  records than the descriptor's logical count (accs "Sex": 6 slots, 5 members);
+  the physical slot EXTENT drives the page geometry, and the deleted slot decodes
+  empty. This is what made accs LOOK like the LFHR "doubled-window" survey
+  directory; it is a distinct root cause (`ivt_f2_dim_slot_expand()`,
+  `canivt_deleted_slot`). See decode-history.md.
 - **2026-07-18** — Catalog created. Added §F footnote **text-blob** framing
   (`[01 01][u16 len-4][01]<text, no NUL>`, `ivt_f2_dir_is_text_block()`), the fix
   that made 98100019 (FSA) / 98100010 (FED) / 98100013 (ADA) read completely.

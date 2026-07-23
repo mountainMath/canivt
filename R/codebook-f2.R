@@ -620,8 +620,11 @@ ivt_f2_dir_entry_members <- function(raw, off, len) {
   # arrays (PRSIC1dec1999's "Employment size ranges": 11 members after a `10`
   # marker), 0x20 on the `04`-gen long-time-series survey lineage's member-
   # description arrays (LFHR Table-023's 10-member "Hours worked" after a `20`
-  # marker). Semantics unknown; the records parse self-validatingly regardless.
-  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L, 0x10L, 0x20L)))
+  # marker), 0x08 on the `04`-gen criminal-court survey lineage's member-label
+  # arrays (accs's 6-slot "Sex" -- Total/Males/Females/Company/Unknown plus a
+  # DELETED slot that retains its label -- after an `08` marker). Semantics
+  # unknown; the records parse self-validatingly regardless.
+  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L, 0x10L, 0x20L, 0x08L)))
     return(NULL)
   i <- i + 1L; end <- off + len
   while (i < end) {
@@ -3659,9 +3662,22 @@ ivt_f2_descriptor_impl <- function(raw) {
       # letters -- a spurious record whose garbage count breaks the layout. A
       # genuine facet is tiny (Date = 2), and its dropped 1-member sibling collapses
       # harmlessly, so bounding to < 0x20 loses nothing.
+      # a BARE 0x02 name-separator (vs the usual 0x01, and distinct from the
+      # `01 02` double-marker above): the reference-period / year dimension of the
+      # `04`-gen criminal-court survey lineage frames its FIRST record
+      # `[count][type] 02 <name><name>` -- accs's "Fiscal year": `10 04 02` (count
+      # 0x10 = 16, type 0x04) -- structurally identical to the standard
+      # `[count][type] 01 <name>` but with a 0x02 separator. Reading count/type the
+      # standard way (else-branch below) recovers Fiscal(16); the doubled-name
+      # self-check (`ivt_f2_descriptor_name()` returns non-NA) rejects a stray 0x02.
+      # Missing this record dropped the walk to 6 of 7 dimensions, forcing the
+      # slot-table rebuild (which then miscounts the deleted-slot "Sex").
+      bare02 <- v[k] == 0x02L && v[k - 1L] != 0x01L &&
+                v[k - 1L] >= 1L && v[k - 1L] <= 0x10L && v[k - 2L] >= 1L
       anchorA <- (v[k] == 0x01L ||
                     (v[k] == 0x02L && v[k - 1L] == 0x01L &&
-                       v[k - 2L] >= 1L && v[k - 2L] < 0x20L)) && namestart
+                       v[k - 2L] >= 1L && v[k - 2L] < 0x20L) ||
+                    bare02) && namestart
       anchorB <- lenient && !anchorA && namestart && k >= 4L &&
                  v[k] %in% geotypes && v[k - 1L] > 0L &&
                  (v[k - 2L] + v[k - 1L] * 256L) <= 200000L

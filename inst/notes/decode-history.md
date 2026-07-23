@@ -972,66 +972,107 @@ employed ✓, and Total usual hours 430,271.4 / 11,714.4 = 36.73 ≈ file's
 **NOT CLOSED — the geometry is provisional (requires further investigation).**
 The cells are right, but two things keep the *model* open: (1) the doubled window
 WASTES half the directory (3 windows in 8 slots, cascading ×2) — out of character
-for these tightly pow2-packed containers, and a strong hint that an un-modelled
-nested level (or value/flag pair, or derived-member sub-axis) actually occupies
-the "wasted" slots and I am collapsing it into a phantom ×2 stride; the
-`Table-024` `ipc` mismatch is probably the same misunderstanding from the
-multi-in-page side. (2) `ivt_survey_double()` now reads the directory **size
-signature** (container metadata — the padding pages are the minimal allocation),
-not the cell presence bitmaps, which is more robust; but it still infers the
-doubling from the directory *structure* rather than a **declared** marker. If the
-doubling is real there should be a field in the header/descriptor/slot table that
-DECLARES it, and the parser should key off that. Until such a declaration is
-found it stays `canivt_survey_directory` (`strict_clean = FALSE`), not a validated
-primary path. Full write-up + marker-hunt candidates in coverage.md "Open
-concerns".
+for these tightly pow2-packed containers, and a hint that an un-modelled nested
+level (or value/flag pair, or derived-member sub-axis) occupies the "wasted" slots
+that I am collapsing into a phantom ×2 stride. (2) `ivt_survey_double()` now reads
+the directory **size signature** (container metadata — the padding pages are the
+minimal allocation), not the cell presence bitmaps, which is more robust; but it
+still infers the doubling from the directory *structure* rather than a **declared**
+marker. If the doubling is real there should be a field in the
+header/descriptor/slot table that DECLARES it, and the parser should key off that.
+Until such a declaration is found it stays `canivt_survey_directory`
+(`strict_clean = FALSE`), not a validated primary path.
 
-### `accs` adult criminal court — a `Table-024`-class table: the doubled half carries REAL data (2026-07-22) — DEFERRED, honestly rejected
+**One sibling ruled OUT (2026-07-22): the `accs` table is NOT this phenomenon.**
+`accs` had been deferred as `Table-024`-class (same doubled directory), and its
+window over-allocation was cited here as corroboration. It turned out to be a
+**DELETED MEMBER SLOT** in a paged dimension (Sex: 6 physical slots, 5 members,
+interior slot 3 deleted) — an INTERIOR gap with **no directory entry**, structurally
+different from Table-023's **present-but-empty** window padding pages (392-byte
+minimal allocations). See the `accs` section below; it decodes clean pow2, no
+`survey_double`. So Table-023's empty-window over-allocation is now MORE isolated,
+not less — the deleted-slot explanation does **not** transfer (every Table-023
+dimension has an exact codebook count). `Table-024` is unverified (not in the
+corpus); it may be a deleted slot like accs, an `ipc` mismatch, or the genuine
+padding of Table-023 — do not assume. Full write-up + marker-hunt candidates in
+coverage.md "Open concerns".
+
+### `accs` adult criminal court — the "doubled directory" was a DELETED MEMBER SLOT (2026-07-22) — SOLVED, additivity-validated
 
 `SP3/MRVVPK/accs-number-of-cases-and-charges-by-type-of-decision-1994-1995-to-2009-2010`
-(7 dims: FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × Sex(3) × Offences(40) ×
-Geography(17) × Decision(6)) is a `04`-gen survey table that **fails the family
-gate** — `read_ivt()` raises the clean classed "Unsupported IVT format" error, no
-crash and no silent mis-decode. It was investigated (not merely flagged) on
-2026-07-22, and the finding is important because it **decides between the two
-competing hypotheses** for the doubled-window survey directory (`Table-023` /
-`Table-024`).
+(7 dims: FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × **Sex(5)** × Offences(40) ×
+Geography(17) × Decision(6)) is a `04`-gen survey table that had been **deferred as
+`Table-024`-class** (its page directory spans the DOUBLED cartesian, `k = 0 … 63 916`
+vs the pow2 32 768). It is now **fully onboarded — 4,573,026 cells, additivity-exact**
+— and the finding **overturns the `Table-024`-class hypothesis for this table**: the
+doubling is **not** an un-modelled straddle sub-axis / wasteful ×2 pad, it is a
+**DELETED MEMBER SLOT** in the Sex dimension.
 
-The descriptor reads cleanly (all 7 dims, every count a u8), so this is not a
-descriptor bug. `ivt_layout()` chooses Offences(40) as the straddle, in-page dims
-Offences/Geography/Decision (ipc `[8,17,6]`), window = 5, paged dims (innermost
-first) offence-window(5) × sex(3) × age(7) × charge(5) × fiscal(16), pow2 strides
-`[1,8,32,256,2048]`, cartesian 32 768. `ivt_page_preflight()` rejects at its
-**overshoot guard**: a valid page-directory entry exists at `k = (16−1)·2·2048 =
-61 440`, double the outermost (fiscal) pow2 corner.
+**The evidence.** Sex's codebook member-label array carries **SIX** records —
+`Total | Males | Females | Company | Unknown | Company` (FR
+`Total | Hommes | Femmes | Sociétés | Inconnu | Sociétés`) — while the descriptor
+declares **5** members. The physical layout addresses members BY SLOT and pads to
+`nextpow2(extent)`: Sex occupies slots `{0,1,2,3,4,5}` with **slot 3 deleted** (it
+retains its "Company" label but carries no data). Reading Sex as its logical count
+(3 or 5) mis-nests the whole paged geometry — the missing slot 5 (real "Unknown"
+data) is pushed past the count, and the block above cascades — which is exactly the
+"doubled directory" symptom. Using Sex's physical **extent 6** gives a **CLEAN pow2
+nesting** `estride [1,8,64,512,4096]`, cartesian 65 536, `survey_double = FALSE`,
+and every additivity identity holds exactly:
+- **Sex**: Males(664 830) + Females(106 433) + Company(32 991) + Unknown(5 159) =
+  **Total 809 413** (at Canada / Total-offence / Total-decision / 1994-1995), and
+  the deleted slot 3 decodes **0 cells**;
+- **Age**: Σ age groups = Total; **Charge/Case**: Single + Multiple cases = Total
+  Cases (361 788).
 
-A full directory scan confirms the overshoot is real, not a coincidental
-marker-byte hit: **12 104 valid entries spread over `k = 0 … 63 916`** — the
-DOUBLED span. Autocorrelating directory occupancy at every power-of-two stride
-recovers the true strides `[1,16,64,512,4096]` (every stride above the straddle
-window is ×2 the pow2 model), the same doubled-window shape as `Table-023`. So
-far, identical to LFHR.
+**The bug chain that hid it.** (1) The descriptor's FIRST record, the year
+dimension "Fiscal year", frames its doubled name with a **bare `02` separator**
+(`10 04 02 Fiscal yearCASEYEAR`) instead of `01` — the standard `01`-anchor
+skipped it, so the strict walk found 6 of 7 dimensions and fell to the
+slot-table rebuild (`ivt_f2_descriptor_from_slots()`), which miscounted Sex as
+**3** (its member-label array is a DENSE `81 01` block the reader could not parse —
+see below). (2) Sex's dense label array uses the post-bitmap marker byte **`0x08`**,
+absent from `ivt_f2_dir_entry_members()`'s accepted set `{0x80,0x01,0x10,0x20}`, so
+the label records (and hence the true slot extent 6) were unreadable.
 
-**The decisive difference:** on `Table-023` the doubled ("wasted") half is
-genuinely EMPTY — every padding slot is a minimal 392-byte page, which is exactly
-what `ivt_survey_double()` keys off. On `accs` the doubled half carries **real
-data**. Within one age(64) block the pow2-sized sex span is 32 slots, yet slots
-32–44 (the "doubled" half) hold live directory entries pointing at **distinct data
-pages** (`k=32` and `k=40` → different byte offsets, presence popcounts 103+),
-and within each window unit data sits at window-slots 0–4 **and** 8–12. The
-`survey_double` model would visit only the first half and **skip** those pages,
-under-decoding the table.
+**The fix (three small, general, metadata-driven changes).**
+- `ivt_f2_dir_entry_members()` admits the `0x08` dense-array marker (markers.md §F),
+  so the 6-record Sex label array parses — the physical extent is now readable.
+- `ivt_f2_descriptor()` (`anchorA`/`bare02`) admits the bare-`02` name separator on
+  the standard `[count][type] 02 <name><name>` framing (markers.md §D), so the strict
+  walk finds all 7 dimensions; accs then reads through the designed
+  `canivt_descriptor_lenient` path (its names are display+description pairs —
+  "Offences" + "Common Offence Classification" — the doubled-name matcher rejects, so
+  the slot-marker names are used) with the descriptor's own authoritative counts.
+- `ivt_f2_dim_slot_expand()` (dimdir.R, called from `ivt_f2_dim_count_reconcile()`)
+  compares each dimension's descriptor count against its codebook member-label
+  record count and, when the codebook holds a SMALL surplus (≤ 2 — a deleted slot or
+  two, not a mis-parsed footnote block), expands the count to the physical extent.
+  LOUD (`canivt_deleted_slot`), so strict mode surfaces it; `strict_clean = FALSE`.
 
-This is direct empirical support for the hypothesis flagged on `Table-023` and
-`Table-024`: the ×2 is **not** a wasteful pad but an **un-modelled nested level /
-straddle sub-axis** (an `ipc` mismatch) occupying the "wasted" slots. On
-`Table-023` that hidden level happens to be empty for every member so the phantom
-×2 stride reproduces the cells; on `accs` it is populated, so the same shortcut
-would be wrong. Rather than force a decode to incorrect cells, `accs` stays
-**honestly rejected** by the extent guard and is deferred alongside `Table-024`
-until the sub-level is modelled (or a header/descriptor field that declares the
-packing is found). No external ground-truth validation was attempted because there
-is no correct geometry to validate against yet.
+The layout's existing slot-aware machinery (`$slots`/`slot_pos`/`ext`, built for the
+survey time dimensions) needs no change — extent 6 drives the nesting and the deleted
+slot falls out empty. Sex is surfaced with its 6 physical slots (the deleted slot
+appears as an empty "Company" member, a faithful reflection of the file's allocation).
+
+**This does NOT explain `Table-023`.** The two tables looked identical (both a
+doubled page directory) but have **different root causes**, confirmed by direct
+comparison:
+- **accs** — the deleted Sex slot leaves **NO directory entry** at its position
+  (an INTERIOR gap: occupancy `{0,8,16,32,40}` per 64-block, **24 absent**). Every
+  dimension's real data is captured once the extent is right; `survey_double` is
+  NOT engaged.
+- **`Table-023`** — every dimension has an **exact** codebook count (no deleted
+  slot). Its doubling is on the straddle **window** (3 real Hours-windows allocated
+  **8** directory slots): slots 3–7 are **present** directory entries pointing at
+  real **minimal 392-byte EMPTY padding pages** (a genuine ×2 over-allocation the
+  writer physically wrote), which is exactly the size signature `ivt_survey_double()`
+  keys off. Table-023 is UNCHANGED by the accs fix — still 5,771,932 cells, still
+  `canivt_survey_directory`, still genuinely OPEN (see the Table-023 section above).
+
+So the accs onboarding **narrows** the doubled-window mystery rather than solving it
+wholesale: accs is off the list (deleted slot); `Table-023`/`Table-024`'s empty
+window over-allocation remains the open case.
 
 ### `CDNAIC3_LOC-1` Business Patterns — the `canivt_skipped_pages` false alarm & the geometry-validated tripwire (2026-07-22) — DONE, additivity-validated
 

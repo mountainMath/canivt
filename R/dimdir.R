@@ -536,11 +536,12 @@ ivt_f2_dir_member_count <- function(raw, nm, dir) {
 # codebook cannot contradict, are left untouched, so every validated table is
 # byte-identical through this.
 ivt_f2_dim_count_reconcile <- function(raw, dims) {
+  slots <- ivt_f2_dim_slots(raw, m = length(dims))
+  if (is.null(slots)) return(dims)
+  dims <- ivt_f2_dim_slot_expand(raw, dims, slots)
   amb <- which(vapply(dims, function(d)
     isTRUE(d$double01) || identical(as.integer(d$count), 0L), logical(1)))
   if (!length(amb)) return(dims)
-  slots <- ivt_f2_dim_slots(raw, m = length(dims))
-  if (is.null(slots)) return(dims)
   for (k in amb) {
     zero <- identical(as.integer(dims[[k]]$count), 0L)
     fix_zero <- function() {                          # count-0 last resort: 1, loud
@@ -564,6 +565,43 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
     if (dims[[k]]$count >= 1L && dims[[k]]$count <= mc$slots) next
     if (!is.na(mc$count) && mc$count >= 1L) dims[[k]]$count <- mc$count
     else if (zero) fix_zero()
+  }
+  dims
+}
+
+# DELETED-SLOT expansion: a dimension's physical slot EXTENT can exceed the
+# descriptor's logical member count when a member slot was DELETED but retained
+# its label in the codebook. The adult-criminal-court survey lineage's
+# `accs-...-decision` table declares "Sex (5)" -- Total/Males/Females/Company/
+# Unknown -- but its member-label array carries SIX records (a second, deleted
+# "Company"/"Sociétés" slot). The page directory addresses members BY SLOT and
+# pads to `nextpow2(extent)`, so the whole page geometry needs the larger
+# extent-6 nesting; laid out on the descriptor's 5 it loses the last real member
+# (its window sits past the count) and mis-nests every stride above it -- which is
+# what made this lineage LOOK like the LFHR "doubled-window" survey directory
+# (the phantom x2 stride is really this un-modelled deleted slot). The deleted
+# slot decodes EMPTY (no page addresses it), so expanding to the physical extent
+# is loss-free. Read the extent from the codebook member-label array
+# (`ivt_f2_slot_member_count()`, which counts the dense/plain label records), and
+# expand only by a SMALL margin (a footnote-text block would over-count by far
+# more than a deleted slot or two, so `<= 2` rejects it) on a genuine multi-member
+# dimension. LOUD (`canivt_deleted_slot`): a count beyond the descriptor's stated
+# one is supplied from the codebook, so strict mode surfaces it.
+ivt_f2_dim_slot_expand <- function(raw, dims, slots) {
+  for (k in seq_along(dims)) {
+    c0 <- as.integer(dims[[k]]$count)
+    if (is.na(c0) || c0 < 3L || isTRUE(dims[[k]]$double01)) next
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (is.null(dir)) next
+    ext <- ivt_f2_slot_member_count(raw, dir)
+    if (is.na(ext) || ext <= c0 || ext - c0 > 2L) next
+    nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
+    ivt_fallback(sprintf(paste0(
+      "Dimension %d (\"%s\") declares %d members but its codebook holds %d member ",
+      "slots (a deleted member retains its label); using the physical extent %d ",
+      "for the page geometry (the deleted slot decodes empty)."),
+      k, nm, c0, ext, ext), class = "canivt_deleted_slot")
+    dims[[k]]$count <- ext
   }
   dims
 }

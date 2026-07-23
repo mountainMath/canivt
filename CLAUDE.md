@@ -354,7 +354,18 @@ coverage in [`coverage.md`](inst/notes/coverage.md).
   **codebook** bug — Hours read 9 members not 10 (4,986,342 cells) because its
   member-description block's post-bitmap marker `0x20` was un-catalogued in
   `ivt_f2_dir_entry_members()` — was fixed 2026-07-22; unrelated to the doubling,
-  whose padding is genuinely empty.) See
+  whose padding is genuinely empty.) **A look-alike was RULED OUT (2026-07-22):**
+  the `accs` adult-criminal-court survey (`SP3/MRVVPK`) had the same doubled-
+  directory symptom and was deferred as `Table-024`-class, but is now onboarded
+  (**4,573,026 cells**, additivity-exact) — its doubling was a **DELETED MEMBER
+  SLOT** in Sex (6 physical slots, 5 members, interior slot 3 deleted → no
+  directory entry), NOT an un-modelled straddle sub-level. Fixed with three small
+  general changes (bare-`02` descriptor separator; `0x08` dense-array marker;
+  codebook-driven `ivt_f2_dim_slot_expand()` → `canivt_deleted_slot`) that give a
+  clean pow2 layout, no `survey_double`. This is a DIFFERENT root cause from
+  Table-023 (whose dims all have exact codebook counts and whose window padding is
+  present-but-empty pages) — so rule out a deleted slot first when re-attacking the
+  doubled window, but the explanation does not transfer to Table-023. See
   [`coverage.md`](inst/notes/coverage.md) "Open concerns" +
   [`decode-history.md`](inst/notes/decode-history.md).
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a bottleneck
