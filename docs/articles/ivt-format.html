@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -375,6 +375,19 @@ power-of-two padded and fixed, and one byte of each adjacent pair is
 swapped. The single decoder (<code>ivt_layout()</code> +
 <code>ivt_decode()</code>) computes the straddle dimension and these
 strides from the descriptor, so both cases run the identical code.</p>
+<p>The padding itself is <strong>declared metadata</strong>, not a
+derived rule: every dimension’s codebook directory carries a member
+block (<code>81 02 &lt;alloc-u16&gt; 16 00</code>, or the survey
+generations’ time-series table <code>... 08 00</code>) whose leading u16
+is the dimension’s allocated member-slot capacity, and every nesting
+level — presence bits and directory strides alike — is padded to that
+allocation. It equals <code>nextpow2(count)</code> on almost every
+table, but not always: one Labour Force Historical Review table
+allocates 32 slots for a 10-member dimension, and its page directory
+faithfully spans the larger cartesian (the padding slots hold minimal,
+empty pages). Reading the declared allocation instead of re-deriving
+<code>nextpow2</code> is what lets one layout rule cover that lineage
+too.</p>
 </div>
 <div class="section level2">
 <h2 id="the-codebook-labels-geographic-ids-footnotes">The codebook: labels, geographic ids, footnotes<a class="anchor" aria-label="anchor" href="#the-codebook-labels-geographic-ids-footnotes"></a>

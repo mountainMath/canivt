@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,6 +38,12 @@
       <small>Source: <a href="https://github.com/mountainMath/canivt/blob/HEAD/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.4.0" id="canivt-040">canivt 0.4.0<a class="anchor" aria-label="anchor" href="#canivt-040"></a></h2>
+<ul><li>The page/presence nesting geometry is now driven by each dimension’s <strong>declared member-slot allocation</strong> (the u16 opening its codebook member-code block <code>81 02 &lt;alloc-u16&gt; 16 00</code> or time-series table <code>... 08 00</code>) instead of re-deriving <code>nextpow2(count)</code>. The two coincide on almost every table, but the declared value is authoritative: LFHR <code>Table-023</code>’s Hours dimension allocates 32 slots for 10 members, which <em>is</em> the formerly-mysterious “doubled-window” directory. The structural page-size probe (<code>ivt_survey_double()</code>) and its <code>canivt_survey_directory</code> fallback are retired; the table decodes byte-identically with no fallback, and the deferred <code>Table-024</code> record-packing puzzle is predicted by the same rule.</li>
+<li>English/French member-label attribution on the <code>04</code>-gen survey tables now reads the file’s own field dictionary: the declared <code>Description</code>/<code>Description_FRA</code> and <code>English</code>/<code>French|Français</code> column pairs (matched tolerant of field-struct byte bleed) join the previously recognized vocabularies, so the loud content-score language fallback no longer fires on any dimension with a declared pair.</li>
+<li>The bit-headed dense member-array reader accepts its pre-records marker as the structural single-bit-byte class rather than an enumeration; this parses Table-023’s English “Sex” block (marker <code>0x04</code>), fixing that dimension labelling French, and harmonizes the Business Patterns lineage (CBP 2008/2010 now expand the same deleted 12th employment-size slot as CBP 2007/CDNAIC).</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.3.0" id="canivt-030">canivt 0.3.0<a class="anchor" aria-label="anchor" href="#canivt-030"></a></h2>
 <ul><li>Cleared the 2026-07 onboarding backlog: a fresh random re-sample of the StatCan and Borealis catalogues surfaced 7 previously-unseen tables that did not read strict-clean; all 7 now decode, validated against external ground truth (accounting identities / published counts). Every <code>.ivt</code> in the corpus now decodes.</li>

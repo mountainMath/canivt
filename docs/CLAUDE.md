@@ -114,7 +114,7 @@ Key semantics to know:
 | `utils-bytes.R` | low-level readers: `rd_u16/rd_u32/rd_int_run/rd_pascal`; latin-1 decode. **All offsets are 0-based** (binary layout); helpers convert to R’s 1-based indexing. |
 | `fallback.R` | **loud fallbacks**: `ivt_fallback(msg, class)` — classed warning (`canivt_fallback` by default) raised whenever a content-heuristic fallback supplies values or pages are skipped; `options(canivt.strict = TRUE)` upgrades to a classed error. `ivt_quietly()` muffles both for speculative probes (family detection). Wire every new fallback path through this. |
 | `container.R` | page-directory anchor `ivt_idx0()` (reads `u16@558`, validates by checking the first entry points at a page marker). `IVT_IDX0_DEFAULT=37167` is a fallback. (The legacy 0x1000-stride geography counter is retired; `ivt_layout()` computes directory strides.) |
-| `decode.R` | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides. `ivt_decode()` walks the paged-coordinate cartesian and decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`; dense pages via `ivt_decode_page_dense()`) → cell tibble (`geo` + one slug column per data dimension). Handles the former family 1 and family 2 identically. |
+| `decode.R` | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit page cap, and computes in-page / straddle / paged roles, the in-page bit grid, and the 8-byte directory-entry strides — every level padded to the dimension’s **declared slot allocation** (`ivt_f2_dim_slot_alloc()`; `nextpow2(extent)` only when none is declared that fits). `ivt_decode()` walks the paged-coordinate cartesian and decodes each page (`ivt_f2_record_present()` + marker-driven value-start `ivt_value_trailer()`; dense pages via `ivt_decode_page_dense()`) → cell tibble (`geo` + one slug column per data dimension). Handles the former family 1 and family 2 identically. |
 | `container-f2.R` | family-2 page-directory finder (used by the metadata path) + the marker byte model (`ivt_f2_is_marker()`: `b0` width/variant nibbles, `b3 ∈ {08,09,0a,0c}` head-block codes); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
 | `decode-f2.R` | shared presence-bitmap primitives used for **every** table (the `ivt_f2_` prefix is historical): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()` (power-of-two-nested strides), `ivt_f2_cell_grid()` (cells in dense value order), `ivt_f2_record_present()` (**byte-pair-swap**, **MSB-first** bit read). |
 | `dimdir.R` | **bilingual labels, dimension names, and the header directory slot table.** `ivt_f2_dim_dir_label1()` returns `list(en, fr, name_fr)` per dimension — EN vs FR chosen by a structural marker (`ivt_f2_dim_dict_en_first()`, `English Desc` before `Desc Français`), with `ivt_f2_frscore()` as the loud fallback. `ivt_f2_total_name()` gives the French dimension name (the `Total - <name>` first member; the header Variable List is English-only). **The header per-dimension directory slot table** is the primary codebook anchor: header `@824 + 14·(k−1)` holds a 14-byte record per descriptor dimension (`[u32 dir_ptr][u32 ?][u32 n_entries][2B]`); `ivt_f2_dim_slots()` reads it, `ivt_f2_dim_dir(raw, k)` resolves dimension `k`’s block directory (`[u32 off][u16 len][u16 len]` entries, two indirection depths for the big chunked geo dirs), self-validated against `n_entries`. Each directory lists the dimension’s codebook in logical order (dictionary/schema, member-id table, ordinals, the `81 02 02 00` doubled-name marker, EN then FR member blocks, that dimension’s footnotes). `ivt_f2_dim_dir_labels()` reads data-dim labels positionally; `ivt_f2_dim_dir_ordinals()` the member ordinals; `ivt_f2_dir_footnotes()` footnotes with **scope** attribution (`scope`/`dimension`/`member_id`) — member notes are flagged by a `84 01` member bitmap (`ivt_f2_footnote_bitmap()`, pair-swap/MSB-first) opening the footnote region, the rest are dimension notes; `ivt_f2_table_footnotes()` reads table-level (cube) notes from the master-directory identity blob. Also the two other header slots: `ivt_f2_master_dir()` (`@544` → the master directory at offset 992: FACET04 titles, descriptor, EN/FR identity/notes blobs, product id, EOF trailer) and `ivt_f2_dqf_legend()` (`@712` → the data-quality-flag legend, `[82 01]`-framed EN/FR records per code A–E/R/P). |
@@ -299,31 +299,26 @@ The *rules*; the measurements and original bugs behind them are in
     asks which dimension is geography — on the 1981 profile (geography =
     dim 3, LAST) the same walk puts geography in the presence record (3
     windows), Profile at directory stride 4, Values as the trivial
-    outermost entry dimension. **Directory strides pad each paged
-    dimension to `nextpow2` of its slot count.** The `04`-gen
-    long-time-series survey lineage (LFHR, e.g. `NAZQV2/Table-023`)
-    *appears* to pad the **innermost paged (straddle-window) dimension
-    to DOUBLE its `nextpow2`**, cascading ×2 to every stride above it
-    (Table-023: `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`) —
-    but this is a **PROVISIONAL model under open investigation**: the
-    doubling wastes half the directory (suspicious — probably an
-    un-modelled nested level, not a real 2× pad) and has no declared
-    metadata marker. `ivt_survey_double()` (decode.R) detects it
-    STRUCTURALLY — never by name/type — from the page-directory **size
-    signature** (container metadata only, no presence-bitmap decode): a
-    window-padding page holds no values so it is the **minimal page
-    allocation**, strictly smaller than any data page (`minsize`
-    self-calibrated per table from block 0’s floor). It requires the
-    doubled corners to carry a DATA page (larger than `minsize`), the
-    pow2 position of paged-dim-2 to be EMPTY (minimal) while its doubled
-    position is a data page, and the window-padding slots minimal; it is
-    a loud `canivt_survey_directory` fallback (`strict_clean = FALSE`),
-    never a validated primary path. An extent guard in
-    `ivt_page_preflight()` honest-rejects any long-series directory that
-    overshoots the pow2 cartesian but fails the window check, so an
-    unmodelled record packing (e.g. `Table-024`, where a
-    multi-in-page-dim straddle changes `ipc` — likely the same
-    misunderstanding) can never silently mis-decode.
+    outermost entry dimension. **All nesting geometry — presence-bit
+    strides AND directory strides — pads each dimension to its DECLARED
+    member-slot allocation** (`ivt_f2_dim_slot_alloc()`, codebook-f2.R:
+    the u16 opening the dimension’s `81 02 <alloc-u16> 16 00`
+    member-code block or `08 00` time table, present for every dimension
+    of every corpus table), falling back to `nextpow2(extent)` only when
+    the declaration cannot hold the members (chunked \>1024-member dims
+    declare a block-local 1024). The allocation is `nextpow2(count)` on
+    every supported dimension except Table-023’s Hours (**32 slots for
+    10 members**), whose windows-of-4 then occupy 8 directory slots —
+    the strides `[1,8,512,2048,8192]` that the retired
+    `ivt_survey_double()` page-size probe used to infer as a
+    “doubled-window variant” are simply the declared allocation
+    (resolved 2026-07-23; decode byte-identical,
+    `canivt_survey_directory` gone). The deferred `Table-024` “ipc
+    mismatch” (in-page occ = 2, 17 windows) is exactly what the
+    allocation rule predicts (Hours 32 × Timeseries 32 = 1024-bit inner
+    block). An extent guard in `ivt_page_preflight()` honest-rejects any
+    directory that overshoots the modelled cartesian, so an unmodelled
+    record packing can never silently mis-decode.
 - A **reference-period / facet** dimension (type `0x0e`, e.g. “Year
   (2)”) is **not** geography-folded: in 98-10-0077 *Year* is the
   **innermost in-page dimension** (the value run carries the 2020 then
@@ -394,33 +389,22 @@ measured coverage in
   narrative + the repeatable per-table onboarding recipe are retained in
   [`onboarding-backlog.md`](https://mountainmath.github.io/canivt/inst/notes/onboarding-backlog.md)
   for the next sweep.
-- **`04`-gen doubled-window survey directory (LFHR multi-dim) — CELLS
-  VALIDATED, GEOMETRY OPEN (2026-07-22).** `SP3/NAZQV2/Table-023`
-  (Labour Force Historical Review 2009, 6 dims incl. a 276-month
-  Timeseries) is onboarded (**5,771,932 cells**, LFS-validated) via two
-  loud fallbacks: (1) `ivt_f2_time_members()` reads `alloc` as a full
-  u16 (Table-023’s `alloc = 512` tripped the `alloc < 256` guard); (2)
-  `ivt_survey_double()` (decode.R) detects STRUCTURALLY that this
-  lineage *appears* to pad the innermost paged (straddle-window)
-  dimension to **double** its nextpow2 → strides `[1,8,512,2048,8192]`
-  not pow2 `[1,4,256,1024,4096]`, a loud `canivt_survey_directory`
-  fallback (`strict_clean = FALSE`). **Two open concerns keep the
-  GEOMETRY unresolved** (the cells are right regardless): the doubling
-  **wastes half the directory** (suspicious — likely an un-modelled
-  nested level, cf. `Table-024`’s `ipc` mismatch, not a real 2× pad),
-  and it is found by a CONTENT probe with **no metadata marker** (if
-  real, a header/descriptor field must declare it and the parser should
-  key off that). Do NOT treat `ivt_survey_double()` as understood. An
-  extent guard in `ivt_page_preflight()` honest-rejects any long-series
-  directory that overshoots the pow2 model but fails the window check.
-  (A separate **codebook** bug — Hours read 9 members not 10 (4,986,342
-  cells) because its member-description block’s post-bitmap marker
-  `0x20` was un-catalogued in `ivt_f2_dir_entry_members()` — was fixed
-  2026-07-22; unrelated to the doubling, whose padding is genuinely
-  empty.) See
-  [`coverage.md`](https://mountainmath.github.io/canivt/inst/notes/coverage.md)
-  “Open concerns” +
-  [`decode-history.md`](https://mountainmath.github.io/canivt/inst/notes/decode-history.md).
+- **`04`-gen “doubled-window” survey directory — RESOLVED (2026-07-23):
+  the paging geometry is DECLARED per-dimension slot allocation.** The
+  `81 02 <alloc-u16> 16 00` member-code block (present for every
+  dimension of every corpus table) declares each dimension’s slot
+  capacity; `ivt_layout()` pads all nesting to it
+  (`ivt_f2_dim_slot_alloc()`), and Table-023’s Hours declares 32 slots
+  for 10 members — exactly the strides the retired `ivt_survey_double()`
+  probe had inferred. Table-023 re-validated at its 5,771,932 cells with
+  no probe; Table-024’s once-puzzling `ipc` mismatch is predicted by the
+  same rule. See the invariant above, coverage.md and decode-history.md.
+  **Still open from that pass:** the `16 00` block’s mid-section (likely
+  per-slot flags) is undecoded — decoding it would subsume the
+  `ivt_f2_dim_slot_expand()` deleted-slot margin heuristic (accs Sex)
+  and fix the accs **Offences** label alignment (64 stored labels for 40
+  members; its labels currently come from a count-anchored scan and may
+  be misaligned).
 - **`Rcpp` fast path** — consider one only if pure-R decode becomes a
   bottleneck (it is fine at ~5 s for the 7.5M-cell reference table).
 
