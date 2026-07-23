@@ -228,6 +228,18 @@ tests and detection gate do). Design points:
 
 ## 6. Sharpening toward metadata-driven (retiring fallback paths)
 
+- [x] **`ivt_survey_double()` retired — the paging geometry is declared
+  (2026-07-23).** The `81 02 <alloc-u16> 16 00` member-code block's u16 is the
+  dimension's slot allocation; `ivt_layout()` pads every nesting level to it
+  (`ivt_f2_dim_slot_alloc()`), which reproduces the pow2 model corpus-wide and
+  Table-023's "doubled" strides exactly (Hours: 32 slots / 10 members). The
+  `canivt_survey_directory` fallback and the page-size signature probe are gone.
+  Same pass: dense pre-records marker accepted as the single-bit-byte class
+  (0x04 fixed Table-023's Sex EN/FR); `ivt_f2_dim_dict_en_first()` reads the
+  declared `Description`/`Description_FRA` and `English`/`French|Français`
+  pairs, retiring the content-score language fallback on every `04`-gen dim
+  with a declared pair. See decode-history.md 2026-07-23.
+
 - [~] **Decode the `[81 01]` dense bitstream — INVESTIGATED, hypothesis
   FALSIFIED** (2026-07-11). The premise was that the `[81 01]` bitstream might be
   the same pair-swap/MSB-first *member*-presence convention as the `[84 01]`

@@ -332,6 +332,41 @@ Milestones that were once on the "likely next tasks" list and are now done.
 Kept for the record; the current architecture they produced is described in
 `CLAUDE.md`.
 
+- **Paging geometry is DECLARED metadata — the doubled-window mystery closed
+  (2026-07-23).** Hunting for the declaration the Table-023 "doubled-window"
+  fallback was missing (coverage.md had flagged: "if the layout is real there
+  must be a declaration for it in the header/descriptor"), a corpus-wide census
+  of the `81 02 <u16> 16 00` member-code blocks (and the `08 00` time tables)
+  found that their leading u16 is a per-dimension **member-slot allocation**,
+  present for EVERY dimension of EVERY corpus table across all generations. It
+  equals `nextpow2(count)` on every supported dimension except exactly one —
+  Table-023's Hours, **32 slots for 10 members** — which is precisely the lone
+  table that needed the doubled directory: windows-of-4 over 32 allocated slots
+  = 8 directory slots. `ivt_layout()` now pads every nesting level (presence
+  bits and directory strides) to the declared allocation
+  (`ivt_f2_dim_slot_alloc()`), falling back to `nextpow2(extent)` only when the
+  declared value cannot hold the members (chunked >1024-member dims declare a
+  block-local 1024). Byte-identical corpus-wide (`alloc == nextpow2` everywhere
+  else); Table-023 re-validated at its exact 5,771,932 cells with **no probe and
+  no `canivt_survey_directory` fallback**; `ivt_survey_double()` (the page-size
+  signature probe) deleted. A full directory scan confirmed the allocation
+  padding is genuinely empty (every larger-than-minimal page sits inside the
+  real member cartesian). Retro-confirmation: the deferred Table-024 "ipc
+  mismatch" (in-page occ = 2, 17 windows vs the modelled 4/9) is exactly what
+  the allocation rule predicts (Hours 32 × Timeseries 32 = 1024-bit inner
+  block). Same pass: (a) the dense-array pre-records marker is accepted as the
+  single-bit-byte CLASS (Table-023's English Sex block carried the
+  never-catalogued `0x04` and was silently dropped — the dimension labelled
+  French; now EN/FR correct); (b) `ivt_f2_dim_dict_en_first()` reads the
+  remaining declared `04`-gen language vocabularies (`Description`/
+  `Description_FRA`, `English`/`French|Français`, bleed-tolerant leading-boundary
+  match inside the tagged `22 00` dict block) — the content-score
+  language fallback now fires on ZERO survey dims with a declared pair (only
+  accs's "Fiscal year", whose dict names the fields after the dimension itself
+  in each language, stays loud). Known remaining gap, documented in coverage.md:
+  the `16 00` block's mid-section (likely per-slot flags) is undecoded — it
+  would subsume the `ivt_f2_dim_slot_expand()` deleted-slot margin and fix accs
+  Offences' 64-labels-for-40-members alignment.
 - **Geography read consolidated — recover-then-specialize (2026-07-17).** The
   geography read was the most diffuse part of the parser: six layout readers
   (`inline_dir`, `attrs_dir`, `flow_dir`, `custom`, `bare_codes`, `dguids_dir`)

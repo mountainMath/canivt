@@ -1,3 +1,27 @@
+# canivt 0.4.0
+
+* The page/presence nesting geometry is now driven by each dimension's
+  **declared member-slot allocation** (the u16 opening its codebook member-code
+  block `81 02 <alloc-u16> 16 00` or time-series table `... 08 00`) instead of
+  re-deriving `nextpow2(count)`. The two coincide on almost every table, but
+  the declared value is authoritative: LFHR `Table-023`'s Hours dimension
+  allocates 32 slots for 10 members, which *is* the formerly-mysterious
+  "doubled-window" directory. The structural page-size probe
+  (`ivt_survey_double()`) and its `canivt_survey_directory` fallback are
+  retired; the table decodes byte-identically with no fallback, and the
+  deferred `Table-024` record-packing puzzle is predicted by the same rule.
+* English/French member-label attribution on the `04`-gen survey tables now
+  reads the file's own field dictionary: the declared
+  `Description`/`Description_FRA` and `English`/`French|Français` column pairs
+  (matched tolerant of field-struct byte bleed) join the previously recognized
+  vocabularies, so the loud content-score language fallback no longer fires on
+  any dimension with a declared pair.
+* The bit-headed dense member-array reader accepts its pre-records marker as
+  the structural single-bit-byte class rather than an enumeration; this parses
+  Table-023's English "Sex" block (marker `0x04`), fixing that dimension
+  labelling French, and harmonizes the Business Patterns lineage (CBP 2008/2010
+  now expand the same deleted 12th employment-size slot as CBP 2007/CDNAIC).
+
 # canivt 0.3.0
 
 * Cleared the 2026-07 onboarding backlog: a fresh random re-sample of the

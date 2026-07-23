@@ -252,10 +252,32 @@ ivt_f2_dim_dict_en_first <- function(raw, dir) {
     ie <- regexpr("\\bDesc\\b", txt)
     ifr <- regexpr("\\bDescf\\b", txt)
     if (ie > 0L && ifr > 0L) return(ie < ifr)
-    # the single-letter E/F fields, only inside a `81 02 <n> 00 22 00` schema
-    # block (the Pascal pair `01 45`/`01 46` is too short to trust elsewhere)
+    # the remaining survey-generation vocabularies live inside a tagged
+    # `81 02 <n> 00 22 00` schema block; the tag gate keeps member-label text
+    # (a language-of-instruction dimension's "English"/"French" members, say)
+    # from ever matching these looser word pairs
     if (ln >= 8L && win[1] == as.raw(0x81) && win[2] == as.raw(0x02) &&
         win[5] == as.raw(0x22) && win[6] == as.raw(0x00)) {
+      # the `04`-gen "Description" / "Description_FRA" pair (LFHR/agriculture/
+      # justice: h2530002, table_5_c/_6_c, 00040200/07/31, ucr2.2). Leading
+      # boundary only: the field-struct bytes after a name can decode to word
+      # chars ("Descriptionarge" -- the "English Labelco" phenomenon above), so
+      # a trailing `\b` misses bled names. The lookbehind excludes the sparse
+      # "_Description" notes field; the English position is any occurrence that
+      # is not the "Description_FRA" field itself.
+      ifr <- regexpr("Description_FRA", txt)
+      if (ifr > 0L) {
+        starts <- gregexpr("(?<![_A-Za-z])Description", txt, perl = TRUE)[[1L]]
+        en_pos <- setdiff(starts[starts > 0L], ifr)
+        if (length(en_pos)) return(min(en_pos) < ifr)
+      }
+      # the accs justice-survey "English" / "French" | "Francais" pair
+      # (leading-boundary only, bleed-tolerant as above)
+      ie <- regexpr("(?<![A-Za-z])English", txt, perl = TRUE)
+      ifr <- regexpr("(?<![A-Za-z])(French|Fran[\u00e7c]ais)", txt, perl = TRUE)
+      if (ie > 0L && ifr > 0L) return(ie < ifr)
+      # the single-letter E/F fields (the Pascal pair `01 45`/`01 46` is too
+      # short to trust outside the tagged block)
       pe <- grepRaw(as.raw(c(0x01, 0x45)), win, fixed = TRUE)
       pf <- grepRaw(as.raw(c(0x01, 0x46)), win, fixed = TRUE)
       if (length(pe) && length(pf)) return(pe[1] < pf[1])

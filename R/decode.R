@@ -119,6 +119,21 @@ ivt_layout_impl <- function(raw, d = NULL) {
     if (is.null(x$name) || is.na(x$name)) NA_character_ else as.character(x$name), "")
   slugs <- character(m); slugs[gd] <- "geo"
   if (length(didx)) slugs[didx] <- ivt_dim_slugs(dnms, didx)
+  # Each dimension's DECLARED slot allocation (the u16 of its codebook
+  # member-code / time-table block, `ivt_f2_dim_slot_alloc()`): the container
+  # pads every nesting level -- presence bits and directory strides alike -- to
+  # this allocated capacity. It is nextpow2(extent) for almost every table
+  # (making the padded geometry identical to the pow2 model), but can exceed it
+  # (Table-023's Hours allocates 32 slots for 10 members), and a dimension whose
+  # codebook is chunked past its block allocation declares none that can hold
+  # its members -- `pad` then falls back to the extent (nextpow2-padded by the
+  # nesting below, exact for the chunked layouts). `slots_tbl` is passed down so
+  # the read never re-enters the descriptor parse (the `02 00 20 00` count probe
+  # calls this while the descriptor compute is in flight).
+  slots_tbl <- ivt_f2_dim_slots(raw, m = m)
+  alloc <- vapply(seq_len(m), function(j)
+    ivt_f2_dim_slot_alloc(raw, j, ext[j], slots_tbl), integer(1))
+  pad <- ifelse(is.na(alloc), ext, alloc)
 
   # Nest innermost (dim m) outward; find the dimension that overflows the record.
   # Dimension 1 (geography) ALWAYS takes the straddle role when nothing inner
@@ -131,7 +146,7 @@ ivt_layout_impl <- function(raw, d = NULL) {
   # sized to the used bits, 64 bytes, misaligns the value run.)
   blk <- 1L; straddle <- NA_integer_; inner_block <- 1L
   for (j in m:1L) {
-    need <- ivt_f2_nextpow2(ext[j] * blk)
+    need <- ivt_f2_nextpow2(pad[j] * blk)
     if (need > IVT_PRES_BITS || j == 1L) { straddle <- j; inner_block <- blk; break }
     blk <- need
   }
@@ -139,9 +154,10 @@ ivt_layout_impl <- function(raw, d = NULL) {
   win <- as.integer(ceiling(ext[straddle] / ipc_straddle))
   inpage_idx <- straddle:m
   ipc <- cnt[inpage_idx]; ipc[1L] <- ipc_straddle   # cap the straddle dimension
-  # bit strides span the slot EXTENTS; the grid enumerates real MEMBERS, each
-  # member's bit taken from its slot position (dense when no slot table)
-  ipc_ext <- ext[inpage_idx]; ipc_ext[1L] <- ipc_straddle
+  # bit strides span the declared slot ALLOCATIONS; the grid enumerates real
+  # MEMBERS, each member's bit taken from its slot position (dense when no slot
+  # table)
+  ipc_ext <- pad[inpage_idx]; ipc_ext[1L] <- ipc_straddle
   lay  <- ivt_f2_bit_layout(ipc_ext)
   # per-in-page-dim 0-based bit positions; the straddle's in-page part stays
   # window-dense (slot-aware straddles are mapped window-side in ivt_decode)
@@ -154,107 +170,35 @@ ivt_layout_impl <- function(raw, d = NULL) {
 
   # Paged dimensions, innermost-first: the straddle window, then every dimension
   # outside the straddle toward geography. When geography straddles, this is just
-  # the geography window (a flat, contiguous directory). Entry spans and strides
-  # cover the slot EXTENT of each paged dimension.
-  ent_idx <- straddle; ent_counts <- win
+  # the geography window (a flat, contiguous directory). Entry counts are the
+  # REAL member cartesian (what the decode enumerates); the strides pad each
+  # level to the dimension's DECLARED slot allocation -- the straddle window
+  # level to `alloc / ipc` window slots (its members' windows over the allocated
+  # slot capacity), every outer dimension to its own allocation. With the
+  # near-universal `alloc == nextpow2(extent)` this is byte-for-byte the pow2
+  # model; Table-023's Hours (alloc 32, 10 members, ipc 4) makes the window
+  # level 8 slots where the pow2 model said 4 -- the "doubled-window directory"
+  # formerly inferred by a page-size probe (`ivt_survey_double()`, retired
+  # 2026-07-23), now read from the file's own allocation. Slots past the real
+  # counts hold minimal empty pages (verified: every larger-than-minimal page in
+  # Table-023's directory sits inside the real cartesian).
+  ws <- ivt_f2_nextpow2(win)
+  if (!is.na(alloc[straddle]))
+    ws <- max(ws, alloc[straddle] %/% ipc_straddle)
+  ent_idx <- straddle; ent_counts <- win; ent_pad <- ws
   if (straddle > 1L) for (j in (straddle - 1L):1L) {
     ent_idx <- c(ent_idx, j); ent_counts <- c(ent_counts, ext[j])
+    ent_pad <- c(ent_pad, pad[j])
   }
   estride <- integer(length(ent_counts)); eb <- 1L
-  for (t in seq_along(ent_counts)) { estride[t] <- eb; eb <- ivt_f2_nextpow2(ent_counts[t] * eb) }
-
-  # Directory-paging variant probe. The census tables pad every paged dimension to
-  # nextpow2 of its slot count (the strides above). The `04`-gen long-time-series
-  # survey lineage (Labour Force Historical Review, e.g. NAZQV2/Table-023) appears
-  # to pad the INNERMOST paged dimension -- the straddle window -- to DOUBLE its
-  # nextpow2, so every stride above the window is 2x the census model and the
-  # directory extends to ~2x the pow2 cartesian.
-  #
-  # PROVISIONAL / OPEN INVESTIGATION (see coverage.md "Open concerns"): the
-  # doubled strides reproduce Table-023's cells EXACTLY (sex/geo additivity, LFS
-  # levels), so the decode is right, but the MODEL is suspect -- a 2x
-  # over-allocation wastes half the directory, out of character for these tightly
-  # pow2-packed containers, and more likely means an un-modelled nested level (or
-  # value/flag pair) occupies the "wasted" slots (cf. Table-024's `ipc` mismatch).
-  # And it is found from the directory structure, not a declared metadata marker;
-  # if the layout is real there must be a declaration for it in the
-  # header/descriptor, and this should key off that instead. So it stays a LOUD
-  # `canivt_survey_directory` fallback (strict_clean = FALSE), never a validated
-  # primary path. Detected structurally, never by name/type: `ivt_survey_double()`
-  # reads the page-directory SIZE signature (the doubled corner holds a data page
-  # beyond the pow2 extent; the window-padding slots hold minimal empty pages) --
-  # container metadata only, no cell presence decode. A directory that overshoots
-  # the pow2 model but fails the window check keeps the pow2 strides and is
-  # honest-rejected by the extent guard in `ivt_page_preflight()`.
-  survey_double <- FALSE
-  if (length(ent_counts) >= 2L)
-    survey_double <- ivt_survey_double(raw, ent_counts, estride, win)
-  if (survey_double) estride <- c(estride[1L], estride[-1L] * 2L)
+  for (t in seq_along(ent_counts)) { estride[t] <- eb; eb <- ivt_f2_nextpow2(ent_pad[t] * eb) }
 
   list(counts = cnt, slugs = slugs, n_dim = m, geo_dim = gd,
        straddle = straddle, ipc = ipc, window_count = win,
        inpage_idx = inpage_idx, grid = grid, rec_bytes = lay$rec_bytes,
        ent_idx = ent_idx, ent_counts = ent_counts, estride = estride,
-       slot_pos = slot_pos, survey_double = survey_double,
+       slot_pos = slot_pos,
        geo_in_page = straddle == gd)
-}
-
-# Structural detector for the doubled-window directory variant (see `ivt_layout`).
-# Keyed off the page DIRECTORY SIZE SIGNATURE -- pure container metadata (the
-# 8-byte entries' u16 size fields), never the cell presence bitmaps. This is
-# robust precisely because it does not depend on the layout hypothesis under test:
-# a window-padding page carries no values, so it is the MINIMAL page allocation,
-# strictly smaller than any page that stores cells. (On Table-023 every padding
-# page is 392 bytes vs 4744..9092 for data pages.) `minsize` is self-calibrated
-# per table from block 0's floor -- no hard-coded size, no marker/type branch.
-# Returns TRUE only when all three hold, so a normal (pow2) directory returns
-# FALSE cheaply:
-#   1. the outer paged dimensions' last members occupy a DATA (larger-than-minimal)
-#      page at their DOUBLED positions (k = (count-1) * 2*estride), which lie
-#      beyond the pow2 cartesian -- on a pow2 directory those offsets are
-#      padding/past-EOF, so no data page there;
-#   2. the pow2 model is INSUFFICIENT: member 1 of the second paged dimension sits
-#      at k = win_slots (= nextpow2(win)) under the pow2 model, but under the
-#      doubled model that slot is WINDOW PADDING (minimal page) while the real
-#      member 1 moves to 2*win_slots -- confirmed only when the pow2 position is
-#      empty and the doubled position is a data page (the reverse of a pow2 dir);
-#   3. every window-padding slot [win, 2*win_slots) of block 0 is a minimal
-#      (empty) page -- a table whose true window count exceeds `win` (a different
-#      record packing) carries data there and is left on the pow2 strides.
-ivt_survey_double <- function(raw, ent_counts, estride, win) {
-  ne <- length(ent_counts); n <- length(raw)
-  idx0 <- tryCatch(ivt_idx0(raw), error = function(e) NA_integer_)
-  if (is.na(idx0)) return(FALSE)
-  estride_dbl <- c(estride[1L], estride[-1L] * 2L)
-  win_slots <- estride[2L]
-  page_size <- function(kp) {
-    en <- ivt_dir_entry(raw, idx0 + 8L * kp, n)
-    if (is.null(en) || !en$marker) return(NA_integer_)
-    en$size
-  }
-  # Minimal (empty) page size: the floor across block 0's 2*win_slots slots. A
-  # padding page holds no values so it is the smallest allocation; a page that
-  # stores cells is strictly larger. `has_data` = "this slot's page exceeds the
-  # empty floor" -- an entirely-metadata read (no presence decode).
-  block0 <- vapply(0:(2L * win_slots - 1L), page_size, integer(1))
-  if (all(is.na(block0))) return(FALSE)
-  minsize <- min(block0, na.rm = TRUE)
-  has_data <- function(kp) { s <- page_size(kp); !is.na(s) && s > minsize }
-  # (1) every outer paged dimension's last member must occupy a DATA page at its
-  # DOUBLED corner. On a pow2 directory these offsets are past the real cartesian
-  # (padding/EOF), so requiring a larger-than-minimal page -- not merely a valid
-  # marker byte, which a large file can hit by coincidence -- keeps the pow2
-  # profile/crosstab tables (95F0490 &c.) FALSE.
-  for (t in 2:ne) {
-    if (ent_counts[t] < 2L) next
-    if (!has_data((ent_counts[t] - 1L) * estride_dbl[t])) return(FALSE)
-  }
-  # (2) pow2 position empty, doubled position a data page.
-  if (has_data(win_slots) || !has_data(2L * win_slots)) return(FALSE)
-  # (3) window padding: slots [win, 2*win_slots) of block 0 carry no data page.
-  hi <- 2L * win_slots - 1L
-  if (win <= hi) for (s in win:hi) if (has_data(s)) return(FALSE)
-  TRUE
 }
 
 # Decode one page at 0-based byte offset `off`: returns the present cells' in-page
@@ -436,12 +380,13 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   # Extent guard against an UNMODELLED directory that overshoots the layout's
   # cartesian. The highest entry index the model can address is the outermost
   # dimension's last member at its stride; a directory that carries valid entries
-  # at DOUBLE that (a long-series survey directory whose window packing this layout
-  # does not model, e.g. a multi-in-page-dim straddle) would otherwise silently
-  # decode only the first half. Probe the doubled outer corner: a valid marker
-  # there means the nesting is wrong -> reject as unsupported (the doubled-window
-  # variant `ivt_survey_double()` handles has ALREADY doubled its strides, so its
-  # own doubled-again corner is past the real directory and stays clear).
+  # at DOUBLE that (a directory whose window packing this layout does not model,
+  # e.g. a multi-in-page-dim straddle) would otherwise silently decode only the
+  # first half. Probe the doubled outer corner: a valid marker there means the
+  # nesting is wrong -> reject as unsupported (a directory padded past the pow2
+  # cartesian by a DECLARED slot allocation already carries those slots in
+  # `estride`, so its doubled-again corner is past the real directory and stays
+  # clear).
   kp <- (ocount - 1L) * 2L * ostride
   ov <- ivt_dir_entry(raw, idx0 + 8L * kp, n)
   if (!is.null(ov) && ov$marker) return(FALSE)
@@ -491,12 +436,6 @@ ivt_skip_is_lost_page <- function(raw, off, size, lay, n = length(raw)) {
 #' @noRd
 ivt_decode <- function(raw, lay = NULL) {
   if (is.null(lay)) lay <- ivt_layout(raw)
-  if (isTRUE(lay$survey_double))
-    ivt_fallback(paste(
-      "directory uses the doubled-window paging variant (the innermost paged",
-      "dimension is padded to double its nextpow2); strides were doubled from the",
-      "census model after a structural directory probe."),
-      class = "canivt_survey_directory")
   n <- length(raw); idx0 <- ivt_idx0(raw)
   m <- lay$n_dim; straddle <- lay$straddle; ipc1 <- lay$ipc[1L]
   ne <- length(lay$ent_counts)

@@ -253,6 +253,17 @@ power-of-two padded and fixed, and one byte of each adjacent pair is swapped. Th
 single decoder (`ivt_layout()` + `ivt_decode()`) computes the straddle dimension
 and these strides from the descriptor, so both cases run the identical code.
 
+The padding itself is **declared metadata**, not a derived rule: every
+dimension's codebook directory carries a member block (`81 02 <alloc-u16> 16 00`,
+or the survey generations' time-series table `... 08 00`) whose leading u16 is
+the dimension's allocated member-slot capacity, and every nesting level —
+presence bits and directory strides alike — is padded to that allocation. It
+equals `nextpow2(count)` on almost every table, but not always: one Labour Force
+Historical Review table allocates 32 slots for a 10-member dimension, and its
+page directory faithfully spans the larger cartesian (the padding slots hold
+minimal, empty pages). Reading the declared allocation instead of re-deriving
+`nextpow2` is what lets one layout rule cover that lineage too.
+
 ## The codebook: labels, geographic ids, footnotes
 
 The tail of the file holds the codebook: for each dimension, several parallel,

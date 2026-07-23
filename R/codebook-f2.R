@@ -615,17 +615,17 @@ ivt_f2_dir_entry_members <- function(raw, off, len) {
   # 0x81: bit-headed dense array
   if (is.na(u16) || u16 < 1L || u16 > 8L * len) return(NULL)
   i <- off + 4L + 2L * as.integer(ceiling(u16 / 16))   # skip the u16-padded bitstream
-  # the one-byte marker before the records: 0x80 / 0x01 on the modern chunked
-  # tables, 0x10 on the earlier `02 00 20 00` survey generation's dense member
-  # arrays (PRSIC1dec1999's "Employment size ranges": 11 members after a `10`
-  # marker), 0x20 on the `04`-gen long-time-series survey lineage's member-
-  # description arrays (LFHR Table-023's 10-member "Hours worked" after a `20`
-  # marker), 0x08 on the `04`-gen criminal-court survey lineage's member-label
-  # arrays (accs's 6-slot "Sex" -- Total/Males/Females/Company/Unknown plus a
-  # DELETED slot that retains its label -- after an `08` marker). Semantics
-  # unknown; the records parse self-validatingly regardless.
-  if (i + 1L > off + len || !(as.integer(raw[i + 1L]) %in% c(0x80L, 0x01L, 0x10L, 0x20L, 0x08L)))
-    return(NULL)
+  # the one-byte marker before the records is always a SINGLE-BIT byte: 0x80 /
+  # 0x01 on the modern chunked tables, 0x10 on the earlier `02 00 20 00` survey
+  # generation (PRSIC1dec1999's "Employment size ranges"), 0x20 on the `04`-gen
+  # long-time-series lineage (LFHR Table-023's "Hours worked"), 0x08 on the
+  # criminal-court lineage (accs's 6-slot "Sex"), 0x04 on Table-023's "Sex"
+  # ("Both sexes"/Males/Females). Each new lineage surfaced another power of
+  # two, so the recognizer accepts the CLASS (exactly one bit set) rather than
+  # the enumeration; the flag's semantics stay unknown and the records parse
+  # self-validatingly regardless.
+  mkb <- if (i + 1L <= off + len) as.integer(raw[i + 1L]) else 0L
+  if (mkb == 0L || bitwAnd(mkb, mkb - 1L) != 0L) return(NULL)
   i <- i + 1L; end <- off + len
   while (i < end) {
     L <- as.integer(raw[i + 1L])
@@ -3196,6 +3196,46 @@ ivt_f2_time_members <- function(raw, dir) {
                 labels = labels))
   }
   NULL
+}
+
+# The DECLARED member-slot allocation of one dimension: the u16 that opens its
+# member-code block `[81 02][u16 alloc][16 00]` or its time-series member table
+# `[81 02][u16 alloc][08 00]` (`ivt_f2_time_members()`). Every dimension of
+# every corpus table (all generations, census through survey) carries exactly
+# one of the two, and `alloc` is the power-of-two SLOT CAPACITY the container
+# allocated for the dimension's members -- the basis of the paging geometry
+# (`ivt_layout()`): presence-bit nesting and page-directory strides pad each
+# level to this allocation, NOT to nextpow2 of the member count. The two almost
+# always coincide (nextpow2(count) slots), which is why the nextpow2 model
+# decoded the corpus -- but they can differ: LFHR `Table-023`'s Hours dimension
+# allocates 32 slots for 10 members, whose windows-of-4 then occupy 8 directory
+# slots, the "doubled-window directory" the retired `ivt_survey_double()` probe
+# used to infer from page sizes.
+#
+# Returns the allocation, or NA when the dimension declares none that can hold
+# its members: a chunked >alloc-member dimension stores its codebook in
+# 256-member chunks and this block's u16 is then a block-local allocation
+# (observed 1024 on every >1024-member dimension), so a value below the slot
+# extent is not the dimension's capacity -- the caller falls back to
+# nextpow2(extent), which is exact for the chunked layouts. Non-power-of-two
+# values are likewise rejected (the nesting is power-of-two by construction;
+# no corpus block carries one).
+ivt_f2_dim_slot_alloc <- function(raw, k, ext, slots = NULL) {
+  dir <- tryCatch(ivt_f2_dim_dir(raw, k, slots), error = function(e) NULL)
+  if (is.null(dir)) return(NA_integer_)
+  n <- length(raw)
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 6L || off + 6L > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        !(as.integer(raw[off + 5L]) %in% c(0x16L, 0x08L)) ||
+        as.integer(raw[off + 6L]) != 0x00L) next
+    a <- rd_u16(raw, off + 2L)
+    if (is.na(a) || a < 1L || bitwAnd(a, a - 1L) != 0L) next
+    if (a < ext) next
+    return(a)
+  }
+  NA_integer_
 }
 
 # One dimension's member count from its codebook block directory, WITHOUT the

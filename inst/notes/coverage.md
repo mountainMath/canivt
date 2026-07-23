@@ -1617,26 +1617,50 @@ long-series `Table-023`, see below) and **Uniform Crime Reporting** as well
 (`table_5_c`/`table_6_c`). These are the highest-value remaining targets for the
 next parser-coverage pass.
 
-### The `04`-gen doubled-window survey directory (LFHR multi-dim) — cells validated, GEOMETRY STILL OPEN (2026-07-22)
+### The `04`-gen "doubled-window" survey directory — RESOLVED: it is the DECLARED slot allocation (2026-07-23)
 
-**Status: decodes (LFS-validated cells) via a loud `strict_clean = FALSE`
-fallback, but the directory MODEL is provisional and REQUIRES FURTHER
-INVESTIGATION.** Two red flags keep this open (see "Open concerns" at the end of
-this section): the doubled-window layout **wastes half the directory** (a
-suspicious signal that the structure is misread, not merely padded), and the
-variant is detected by a **content/structural probe, not a metadata marker** —
-if the doubling is real there must be a declaration for it in the file's
-metadata, and the parser should key off that, not a heuristic. The cells are
-correct (additivity is exact regardless of *why* the strides are what they are),
-so the table is onboarded, but do not treat the geometry as understood.
+**Status: CLOSED. The "doubling" was never a variant — the paging geometry is
+declared per-dimension metadata that the layout had been re-deriving as
+`nextpow2(count)`.** Every dimension of every corpus table (all generations)
+carries a member-slot block in its slot directory — the member-code block
+`81 02 <alloc-u16> 16 00` or the time-series table `81 02 <alloc-u16> 08 00` —
+whose leading u16 is the dimension's allocated SLOT CAPACITY.
+`ivt_layout()` now pads every nesting level (presence bits and directory strides
+alike) to this **declared allocation** (`ivt_f2_dim_slot_alloc()`,
+codebook-f2.R), falling back to `nextpow2(extent)` only when the dimension
+declares none that can hold its members (the chunked >1024-member dims, whose
+u16 is a block-local 1024). Corpus-wide census: `alloc == nextpow2(count)` on
+every dimension of every supported table EXCEPT Table-023's Hours — **32 slots
+declared for 10 members** — which is exactly the lone table that needed the
+"doubled window": windows-of-4 over 32 allocated slots = 8 directory slots where
+`nextpow2(ceil(10/4)) = 4`. So the census/profile corpus is byte-identical under
+the new rule, Table-023 decodes its identical 5,771,932 cells with **no probe
+and no fallback**, and `ivt_survey_double()` (the page-size signature probe) is
+**retired**. The two former red flags dissolve: the "wasted half" is genuinely
+declared allocation padding (a full 87,300-entry directory scan confirms every
+larger-than-minimal page sits inside the real member cartesian — the padding
+slots hold only minimal 392-byte empty pages), and the detection now IS a
+declared metadata field, not an inferred structure signature.
+
+**Table-024 retro-confirmation.** The deferred sibling's "ipc mismatch" —
+in-page Occupation `ipc = 2` with 17 windows where the pow2 model computed 4/9 —
+is exactly what the allocation rule produces: Hours alloc 32 (as on Table-023) ×
+Timeseries alloc 32 (`nextpow2(23)`) = a 1024-bit inner block → `ipc =
+2048/1024 = 2`, `ceil(33/2) = 17` windows. Table-024 is still not in the corpus,
+but the once-separate "multi-in-page-dim straddle puzzle" now has a predicted,
+declared-metadata explanation; if such a table is ever sampled it should read
+clean.
 
 **`SP3/NAZQV2/Table-023`** (Labour Force
 Historical Review 2009: Geography(11) × Sex(3) × Class of worker(3) ×
 Occupation(33) × Hours(10) × **Timeseries(276 monthly, 1987-01…2009-12)**) — the
 first *multi-dimensional, long-time-series* member of the survey lineage (siblings
 LFHR `Table-051`, UCR, justice are single-area) — reads **5,771,932 cells**
-via two documented loud fallbacks (`canivt_descriptor_from_slots` +
-`canivt_survey_directory`, `strict_clean = FALSE`). Three things had to be cracked:
+(today via one documented loud fallback, `canivt_descriptor_from_slots`,
+`strict_clean = FALSE`; the `canivt_survey_directory` fallback is gone). The
+historical record of how it was cracked (the doubled strides were first
+reverse-engineered from page positions + additivity, then explained by the
+declared allocation):
 
 1. **The u16 `alloc` (the descriptor unblock).** Its Timeseries member table is
    `81 02 <alloc-u16> 08 00` with **alloc = 512 ≥ 256**, so the alloc-high byte is
@@ -1691,77 +1715,31 @@ via two documented loud fallbacks (`canivt_descriptor_from_slots` +
    **5,771,932**, labels un-shifted. Additivity validated (Canada/1987-01:
    Σ 7 buckets = 11,714.4 = Total employed; 430,271.4 / 11,714.4 = 36.73 ≈ 36.7).
 
-**Not fully general yet — the multi-in-page-dim straddle.** Triangulation across
-siblings (Table-024 Occ-straddle, Table-005 Students-straddle, Table-100) showed
-the doubled strides reproduce Table-023's cells exactly while the census/profile
-corpus stays pow2 — but the sibling `Table-024` (Timeseries only
-23, so **Occupation** straddles with Hours+Timeseries *both* in-page) packs its
-record with a different `ipc` than `ivt_layout()` computes (in-page occ = 2, 17
-windows, not the modelled 4/9) — a distinct record-packing puzzle. Table-024 is
-NOT in the corpus; if a long-series table of that shape is ever sampled, the
-extent guard rejects it honestly rather than mis-decoding. (The former "Hours
-member 1 mislabelled" note is now resolved — see crack point 3: Hours reads 10
-members with un-shifted labels.) Sampling row
-updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).
+**How the case closed (2026-07-23).** The remaining "why 2×?" question fell to
+a corpus-wide census of the `81 02 <u16> 16 00` / `08 00` blocks: their u16 is a
+per-dimension slot allocation, `nextpow2(count)` on ~350 dimensions across ~100
+tables with exactly one exception — Table-023's Hours, 32 for 10 members. That
+single declared value reproduces the reverse-engineered strides
+`[1,8,512,2048,8192]` with the ordinary padding rule (pad each level to the
+declared allocation), so the "doubled window" was the general rule seen through
+a re-derivation (`nextpow2`) that happened to match everywhere else. The decode
+was re-validated identical (5,771,932 cells) and `ivt_survey_double()` retired;
+the `ivt_page_preflight()` extent guard is retained and still honest-rejects a
+directory whose shape the (now allocation-driven) layout does not model.
 
-**Open concerns (why this is NOT closed):**
+**Related, still open:** the `16 00` block's mid-section (between the u16 and
+the tail Pascal codes) is undecoded and very likely carries **per-slot flags**
+(the analogue of the time table's flag bytes). Decoding it would give a fully
+declared slot table for every dimension — subsuming the `ivt_f2_dim_slot_expand()`
+deleted-slot margin heuristic (accs Sex: 6 slots / 5 members) and resolving the
+accs **Offences** label alignment (its label arrays store 64 records for 40
+members — 24 deleted slots whose positions are unknown, so labels for that
+dimension currently come from a count-anchored scan and may be misaligned; its
+EN/FR pair is also affected). See "accs" in decode-history.md.
 
-1. **The doubled window wastes space — the structure is suspicious.** The window
-   holds 3 real values in 8 directory slots; a pow2 layout would use 4 (3 + 1
-   pad), so the doubling wastes an *extra* 4 slots per window-block and cascades
-   ×2 to every stride above it — half the directory points at empty pages. B2020
-   containers are otherwise tightly power-of-two packed, so a deliberate 2×
-   over-allocation is out of character and more likely means the model is WRONG:
-   e.g. an un-modelled dimension (or a value/flag pair, or a derived-member
-   sub-axis) really occupies those "wasted" slots, and what looks like "double
-   the window stride" is actually "one more nested level". The empty padding
-   pages ARE physically present in the file (392-byte, all-zero presence +
-   `f0/ff/80` allocation mask), so the waste is real — the question is whether
-   they are padding or a level we are collapsing. The `Table-024` `ipc` mismatch
-   (in-page occ = 2 with 17 windows, not the modelled 4/9) is very likely the
-   SAME misunderstanding seen from the multi-in-page-dim side, and cracking one
-   should crack both. Re-examine the record/page packing of this whole lineage
-   before trusting `ivt_survey_double()`.
-
-2. **There is no DECLARED metadata marker — the detection reads the directory
-   structure, not a declared field.** `ivt_survey_double()` now keys off the
-   page-directory **size signature** (the padding pages are the minimal
-   allocation) — container metadata, not the cell presence bitmaps, and
-   independent of the layout hypothesis under test — which is more robust than the
-   former presence-popcount probe. But it still *infers* the doubling from the
-   directory's shape rather than reading a field that DECLARES it. Per this
-   package's rule (drive parsing off declared markers/metadata, not inferred
-   structure), if the doubled-window layout survives further validation there
-   should be a declaration of it somewhere in the header / slot-directory /
-   descriptor that distinguishes this lineage from the pow2 census tables — and
-   the parser should read that, retiring the structural size probe. Candidates to
-   look for: a byte in the descriptor record or the header `@824` slot table for
-   the straddle dimension, a container-generation/version field, or a page-marker
-   nibble that differs from the census pages. Until such a declaration is found,
-   `ivt_survey_double()` stays a `canivt_survey_directory` loud fallback
-   (`strict_clean = FALSE`), NOT a validated primary path.
-
-3. **A look-alike table turned out to be a DIFFERENT cause — accs is a DELETED
-   MEMBER SLOT, now SOLVED (2026-07-22).** The 7-dim adult-criminal-court survey
-   `SP3/MRVVPK/accs-…` (FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × Sex(5) ×
-   Offences(40) × Geography(17) × Decision(6)) had the *same* doubled-directory
-   *symptom* as `Table-023` (a full scan finds 12 104 valid entries over
-   `k = 0 … 63 916`, the doubled span) and had been deferred as `Table-024`-class.
-   It is **not** the Table-023 phenomenon. Its Sex dimension has **6 physical slots
-   but 5 members** (`Total/Males/Females/Company/Unknown` + a deleted "Company"
-   slot 3): the codebook member-label array holds 6 records, the descriptor
-   declares 5, and the interior deleted slot leaves **NO directory entry** (per
-   64-block occupancy `{0,8,16,32,40}`, 24 absent — an interior GAP, whereas
-   Table-023's window padding slots are PRESENT entries pointing at minimal empty
-   pages). Using Sex's physical extent 6 gives a **clean pow2 nesting**
-   `[1,8,64,512,4096]`, `survey_double = FALSE`, additivity-exact (4,573,026
-   cells). So `accs` is now off this list — see the `accs` section in
-   decode-history.md. **The lesson for Table-023:** the deleted-slot explanation
-   does NOT transfer — every Table-023 dimension has an EXACT codebook count (no
-   surplus label records), and its "wasted" slots are present-but-empty padding
-   pages, not missing entries. So concern 1 is *narrower* now, not resolved: the
-   Table-023/Table-024 empty-window over-allocation is a genuine, still-unexplained
-   ×2 that is distinct from a deleted slot. When re-examining, first rule out a
-   deleted slot (compare each dim's descriptor count to its codebook label-record
-   count via `ivt_f2_dim_slot_expand()`); Table-023 already passes that test
-   cleanly, so its ×2 needs a different explanation.
+(Historical note kept for the record: the accs table had the same
+doubled-directory *symptom* but a different cause — an interior DELETED member
+slot in Sex, solved 2026-07-22 via `ivt_f2_dim_slot_expand()`,
+`canivt_deleted_slot`. With the allocation rule in place the two cases are now
+both principled: deleted slots widen the *extent*; the allocation widens the
+*padding*.)

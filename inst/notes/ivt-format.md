@@ -362,6 +362,22 @@ General principle (also seen in the 1991 format): presence granularity = the
 innermost dimension; the "present" marker is `2^n − 2` over that bit-width
 (Tenure n=7 → byte `0xFE`); the bitmap is padded to fixed per-dimension strides.
 
+**The stride padding is DECLARED, not derived (2026-07-23).** Every dimension's
+slot directory carries a member-code block `81 02 <alloc-u16> 16 00` (or, for
+the survey generations' reference-period dimensions, the time-series member
+table `81 02 <alloc-u16> 08 00`) whose leading u16 is the dimension's allocated
+member-slot capacity. The presence-bit nesting and the page-directory entry
+strides both pad each level to this **declared allocation**
+(`ivt_f2_dim_slot_alloc()` → `ivt_layout()`); it equals `nextpow2(count)` on
+almost every table — which is why the derived-`nextpow2` model decoded the
+corpus — but can exceed it (LFHR Table-023's Hours: 32 slots for 10 members,
+whose windows-of-4 occupy 8 directory slots — the once-mysterious
+"doubled-window directory"). On chunked >1024-member dimensions the u16 is a
+block-local allocation (1024) smaller than the member count; the layout then
+falls back to `nextpow2(extent)`, exact for those layouts. The block's
+mid-section (between the u16 and the tail Pascal member codes) is still
+undecoded and likely carries per-slot flags (cf. markers.md §E.1).
+
 ## Codebook (labels, geo ids, footnotes)
 
 At the end of the file, each dimension stores several parallel, member-ordered
