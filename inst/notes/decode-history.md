@@ -843,6 +843,53 @@ records against **215** codes/members, so the reader keeps the stable numeric co
 labels rather than risk a mis-aligned name mapping (the geography name is junk HTML
 in this single-area viewer export — the same accepted quirk as table_6_c).
 
+### Census of Agriculture 2016 `00040200` / `00040207` (2026-07-22) — the `01 02` facet framing + square-bracket inline geography
+
+A fresh 10 StatCan + 10 Borealis sweep flagged 4 Borealis tables. Two — the
+Census of Agriculture 2016 crosstabs `SP3_WLOGGX_00040200` (number of farms by
+NAICS × Canada/regions/CDs × 2011/2016) and `00040207` (manure practices) —
+failed the family gate, both for the **same** reason.
+
+Their descriptor block reads only **2 of 3** dimensions, so the parse fell back to
+the slot-table rebuild (`ivt_f2_descriptor_from_slots`), which sizes the chunked
+geography from its largest single member array — one **256-member chunk** — capping
+the real 2,568 geographies at 256. With geography under-counted the directory
+cartesian cannot span the 161 pages and `ivt_page_preflight()` honestly rejected.
+
+The dropped dimension is the **`Date (2)` facet** (2011/2016). Its descriptor
+record uses a double-marker variant of the reference-period framing:
+`[type][count] 01 02 <doubled name>` — `13 02 01 02 DateDate` — where the byte
+after the `01` is a **`02`** name-copy marker, not the `01` of the
+`01 01`-terminated "Year (2)" record (`0e 02 01 01`). The `01`-only descriptor
+anchor skipped it. Fix: admit the `01 02` framing in `ivt_f2_descriptor()`'s
+`anchorA` (markers.md §D), reading its `[type][count]` exactly as the `01 01`
+record. **Gated on a small facet count (`count < 0x20`)**: the `01 02` marker also
+appears mid-prose where a doubled name butts against a previous name's tail — the
+sibling `00040231` (single-date overview) frames `…business` + `01 02 DateDate`
+with the count byte landing on `s` (0x73), a spurious record whose garbage count
+had regressed 00040231. Its `Date` is a genuine **1-member** facet (a single
+reference date; its `81 02 01 00 08 00` time table allocates one slot) that
+collapses harmlessly, so **not** matching it keeps 00040231's correct 2-dim /
+6,216-cell decode (Geography × Computers, Date folded) — confirming the earlier
+"Date folded" note was right for that table.
+
+With all 3 records found, geography reads its real u16 count **2,568** directly
+from the descriptor (`08 0a 0c` = 2568, type 0x0c). Geography stores its code
+INLINE in **square brackets** — "`Canada [000000000]`", "`Division No. 1,
+Newfoundland and Labrador [CD100101000]`" — a new inline shape (`IVT_F2_INLINE_PAT3`,
+same as the paren code-last form but with `[...]`). The data-style geography reader
+(`ivt_f2_geo_datadim`, reached because the interleaved index/uid blocks defeat the
+inline reader's chunk walk) now splits it into clean bilingual `geo_name` +
+`geo_uid` when ≥ 90% of labels carry a bracketed code. Loud `canivt_geo_datadim`
+(`strict_clean = FALSE`).
+
+Cell-exact validated: `00040200` **92,584 cells** — Canada total farms 2011 =
+**205,730** / 2016 = **193,492** (the published Census-of-Agriculture totals), and
+Beef(36,013) + Dairy(10,525) = Cattle(46,538). `00040207` **55,020 cells** —
+Canada farms reporting manure applied 2016 = 66,227 = Σ 10 provinces exactly, and
+solid-manure area 2,483,220 acres × 0.404686 = 1,004,912 ha ≈ decoded 1,004,923 ha.
+Corpus FAIL 0.
+
 ### LFHR `Table-023` — the doubled-window survey directory (2026-07-22) — CELLS VALIDATED, GEOMETRY OPEN
 
 `SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009) is the first
@@ -938,6 +985,147 @@ DECLARES it, and the parser should key off that. Until such a declaration is
 found it stays `canivt_survey_directory` (`strict_clean = FALSE`), not a validated
 primary path. Full write-up + marker-hunt candidates in coverage.md "Open
 concerns".
+
+### `accs` adult criminal court — a `Table-024`-class table: the doubled half carries REAL data (2026-07-22) — DEFERRED, honestly rejected
+
+`SP3/MRVVPK/accs-number-of-cases-and-charges-by-type-of-decision-1994-1995-to-2009-2010`
+(7 dims: FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × Sex(3) × Offences(40) ×
+Geography(17) × Decision(6)) is a `04`-gen survey table that **fails the family
+gate** — `read_ivt()` raises the clean classed "Unsupported IVT format" error, no
+crash and no silent mis-decode. It was investigated (not merely flagged) on
+2026-07-22, and the finding is important because it **decides between the two
+competing hypotheses** for the doubled-window survey directory (`Table-023` /
+`Table-024`).
+
+The descriptor reads cleanly (all 7 dims, every count a u8), so this is not a
+descriptor bug. `ivt_layout()` chooses Offences(40) as the straddle, in-page dims
+Offences/Geography/Decision (ipc `[8,17,6]`), window = 5, paged dims (innermost
+first) offence-window(5) × sex(3) × age(7) × charge(5) × fiscal(16), pow2 strides
+`[1,8,32,256,2048]`, cartesian 32 768. `ivt_page_preflight()` rejects at its
+**overshoot guard**: a valid page-directory entry exists at `k = (16−1)·2·2048 =
+61 440`, double the outermost (fiscal) pow2 corner.
+
+A full directory scan confirms the overshoot is real, not a coincidental
+marker-byte hit: **12 104 valid entries spread over `k = 0 … 63 916`** — the
+DOUBLED span. Autocorrelating directory occupancy at every power-of-two stride
+recovers the true strides `[1,16,64,512,4096]` (every stride above the straddle
+window is ×2 the pow2 model), the same doubled-window shape as `Table-023`. So
+far, identical to LFHR.
+
+**The decisive difference:** on `Table-023` the doubled ("wasted") half is
+genuinely EMPTY — every padding slot is a minimal 392-byte page, which is exactly
+what `ivt_survey_double()` keys off. On `accs` the doubled half carries **real
+data**. Within one age(64) block the pow2-sized sex span is 32 slots, yet slots
+32–44 (the "doubled" half) hold live directory entries pointing at **distinct data
+pages** (`k=32` and `k=40` → different byte offsets, presence popcounts 103+),
+and within each window unit data sits at window-slots 0–4 **and** 8–12. The
+`survey_double` model would visit only the first half and **skip** those pages,
+under-decoding the table.
+
+This is direct empirical support for the hypothesis flagged on `Table-023` and
+`Table-024`: the ×2 is **not** a wasteful pad but an **un-modelled nested level /
+straddle sub-axis** (an `ipc` mismatch) occupying the "wasted" slots. On
+`Table-023` that hidden level happens to be empty for every member so the phantom
+×2 stride reproduces the cells; on `accs` it is populated, so the same shortcut
+would be wrong. Rather than force a decode to incorrect cells, `accs` stays
+**honestly rejected** by the extent guard and is deferred alongside `Table-024`
+until the sub-level is modelled (or a header/descriptor field that declares the
+packing is found). No external ground-truth validation was attempted because there
+is no correct geometry to validate against yet.
+
+### `CDNAIC3_LOC-1` Business Patterns — the `canivt_skipped_pages` false alarm & the geometry-validated tripwire (2026-07-22) — DONE, additivity-validated
+
+`SP3/PAWNKX/CDNAIC3_LOC-1` (Canadian Business Patterns, December 2010; the
+"Structure des industries canadiennes 1988-2014" Borealis dataset) is a 3-dim
+`04`-gen crosstab Geography(314) × SUB-SECTORS(26628) × EMP.SIZE(11) — 3-digit
+NAICS × location × employment-size range. It **decodes** (133,217 cells via the
+`canivt_descriptor_lenient` + `canivt_geo_datadim` custom-lineage fallbacks) but
+was flagged because `ivt_decode()` also raised `canivt_skipped_pages`: **20,523
+directory entries pointed at unrecognised markers**, suggesting a large
+under-decode.
+
+**It was a false alarm — the decode is complete and correct.** The directory is
+very SPARSE: only **282 real data pages** (21 of 314 geographies carry data, over
+sparse sub-sector windows). `ivt_decode()` walks the full paged cartesian —
+209 sub-sector windows × 314 geographies = 65,626 coordinates — so the ~65k absent
+combinations must resolve to "no entry". Most (44,821) hit zero/invalid directory
+slots (→ `NULL`, correctly ignored). But 20,523 landed on bytes that
+`ivt_dir_entry()` accepts (two agreeing u16 size fields, in-range offset) yet point
+at CODEBOOK/member-label text — only **644 distinct offsets**, hit repeatedly. All
+644 were checked: 250 have b0 `0x00`, the rest are ASCII digits/letters/spaces or
+codebook markers (`01 01`, `81 01`, `82 01`, `84 01`); the 4 superficially
+page-like ones are a length field (`a8 00 00 00 …`, invalid `b3`) and `82 01`/`84 01`
+codebook blocks. **None is a real data page.** The `SUB-SECTORS = 26628` count is
+correct too, not a misread (decoded cells genuinely use sub-sector ids up to 26628,
+1,343 populated — NAICS3 × ~266 locations).
+
+Ground truth: **byte-exact internal additivity** on the decoded values, using the
+EMP.SIZE structure (member 1 Total = member 2 Indeterminate + member 3 Subtotal;
+Subtotal = Σ of the size ranges 1-4 … 500+). Across all 21,681 (geography,
+sub-sector) groups: `Subtotal = Σ(ranges)` holds **21,681 / 21,681 with max
+deviation 0**, and `Total = Indeterminate + Subtotal` holds **21,675 / 21,681**
+(the 6 exceptions are tiny totals at the anomalous geography 306 with
+source-suppressed components). Additivity this exact is impossible unless the
+sub-sector window math and value placement are correct — so 133,217 cells is a
+complete, correct decode.
+
+**The fix is to the tripwire, not the decode** (`ivt_skip_is_lost_page()`,
+decode.R). The old skip check counted EVERY directory entry that failed
+`ivt_f2_is_marker()` — but the four marker bytes cannot separate a real page with
+an unrecognised head from a codebook block coincidentally addressed by a sparse
+over-walk (a codebook `84 01 00 02` shares b0/b1 with an int32 page, and both a
+codebook block and a page with a doctored/novel head have a `b3 ∉ {08,09,0a,0c}`).
+So the refined check validates the target's **page GEOMETRY**: it must be a value
+page in b0 (recognised width nibble, page high nibble) and b1, whose fixed
+presence record AND its tightest possible value run (`4 + rec_bytes + nv·width`,
+trailer/head = 0) fit the entry's allocated size. A real page fits by construction
+even when its marker is unrecognised; a codebook block does not (allocation below
+`4 + rec_bytes`, or the presence bits overrun). The tally is also deduped by
+offset (distinct lost pages, not coordinate visits). Result: **0 false skips on
+`CDNAIC3_LOC-1`**, while the deliberate `98-400-X2016203`-doctoring unit test
+(a real page with `b3` set to `0x0b`) still fires `canivt_skipped_pages` (its
+presence + value run fit its size exactly, 7772 bytes). Corpus regression FAIL 0
+(277), unit FAIL 0 (1078).
+
+**Known minor limitation (deferred):** the EMP.SIZE metadata **labels** are shifted
+— the codebook stores them as a fixed-width, length-prefixed array
+(`[80 10][len]"        Total        (A)"[len]" Indeterminate    (B)"…`) that the
+generic scan fallbacks (`ivt_f2_marker_labels()` / count-keyed) misread, dropping
+"Total (A)" and bleeding footnote prose. The VALUES and member-id structure are
+correct (additivity proves it); only the human-readable labels for this one
+dimension are wrong. A proper fix needs a reader for this Business-Patterns
+fixed-width member-array framing in the shared codebook path, which carries
+corpus-wide regression risk disproportionate to a cosmetic shift, so it is left as
+a follow-up.
+
+**Ground truth — how to (re-)validate this table and the whole CDNAIC/Business
+Patterns lineage** (needed when the label follow-up lands, and reusable for any
+Business-Patterns crosstab):
+
+1. **Internal additivity (primary, no network).** The EMP.SIZE dimension is a
+   self-checking total structure — with the CORRECT member order (member id 1 =
+   `Total (A)`, 2 = `Indeterminate (B)`, 3 = `Subtotal (A−B)`, 4…11 = the size
+   ranges `1-4`, `5-9`, `10-19`, `20-49`, `50-99`, `100-199`, `200-499`, `500 +`):
+   `member1 = member2 + member3` and `member3 = Σ(member4…member11)`. Pivot the
+   decoded `x$cells` by `emp` within each `(geo, sub)` group and assert both
+   identities (expect 21,681/21,681 exact on `Subtotal = Σranges`; the handful of
+   `Total ≠ Indet + Subtotal` exceptions are source-suppressed at geo 306). A
+   correct label fix must reproduce this member ORDER — validate the new labels
+   against these value positions, NOT the other way round. NB the current
+   metadata labels are wrong (shifted), so do not use them as the join key.
+2. **The Borealis dataset** — DOI `10.5683/SP3/PAWNKX`, "Structure des industries
+   canadiennes, 1988-2014 [B2020]". `borealis_ivt_catalogue()` lists every file
+   (cache at `ivt_cache_dir("data")/borealis_ivt_catalogue.parquet`, readable
+   without a key). `CDNAIC3_LOC-1.ivt` (file_id 713248, 734 718 B) is
+   **byte-identical in size to `CDNAIC3_LOCdec2010.ivt`** (file_id 49544) → this is
+   the **December 2010** vintage; the plain `CDNAIC3.ivt` (497 KB) is the same
+   NAICS-3 data WITHOUT the location cross. Downloading needs
+   `BOREALIS_DATAVERSE_KEY` (`borealis_ivt_download()`); the PAWNKX files are not
+   access-restricted (unlike the OCDMVE dataset).
+3. **External published source** — StatCan Canadian Business Patterns / Business
+   Register establishment counts by NAICS × employment-size range × geography
+   (December 2010). Use only to spot-check absolute magnitudes; the additivity
+   check above already proves the decode is internally correct and complete.
 
 ## Invariant derivations & historical bugs
 

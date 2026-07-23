@@ -87,7 +87,14 @@ Canadian Business Patterns lineage). Recognizer `ivt_f2_is_descriptor()`.
 
 Within the descriptor each dimension is a record `[count][type 01][name][name]`
 (doubled name; the first copy may be truncated ~14 chars). The type byte is a
-storage/width tag, **not** a fixed dimension identity.
+storage/width tag, **not** a fixed dimension identity. A **reference-period /
+facet** dimension uses a double-marker variant `[type][count] 01 [01|02] <doubled
+name>` — the byte after the `01` is a name-copy marker, `01` (the "Year (2)"
+record `0e 02 01 01`) **or `02`** (the "Date (2)" facet of the Census-of-Agriculture
+2016 crosstabs 00040200/00040207, `13 02 01 02 DateDate`). The `01 02` form also
+occurs mid-prose where a doubled name butts against a previous name's tail, so
+the `v[k]==0x02` anchor is gated on a plausible small facet count (`count < 0x20`).
+Recognizer `ivt_f2_descriptor()` (`anchorA`).
 
 ## E. Codebook name markers (`81 02 [sub] 00`)
 

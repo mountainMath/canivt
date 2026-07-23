@@ -1309,6 +1309,22 @@ ivt_f2_geo_datadim <- function(raw, n_geo) {
     "blocks, no UID); member names from the generic dimension label reader."),
     "canivt_geo_datadim")
   fr <- lab$fr; if (is.null(fr) || length(fr) != n_geo) fr <- rep(NA_character_, n_geo)
+  # Some data-style geographies store their code INLINE in the display label as
+  # "<name> [<code>]" (the Census of Agriculture 2016 crosstabs: "Canada
+  # [000000000]", "Division No. 1, Newfoundland and Labrador [CD100101000]") --
+  # the same combined-string shape the inline reader handles, but with an
+  # interleaved index/uid-block roster its chunk walk cannot fit, so it lands here.
+  # When (nearly) every label carries a bracketed code, split it out: clean the
+  # name, surface the code as `geo_uid`, and keep the verbatim combined string as
+  # `geo_label` (the viewer join key). Otherwise leave the labels as-is (uid NA).
+  pe <- ivt_f2_parse_inline(lab$en)
+  if (mean(!is.na(pe$code)) >= 0.9) {
+    pf <- ivt_f2_parse_inline(fr)
+    name_en <- ifelse(is.na(pe$name), lab$en, pe$name)
+    name_fr <- ifelse(is.na(pf$name), fr, pf$name)
+    return(list(geo_label = lab$en, geo_name = name_en, geo_name_fr = name_fr,
+                geo_uid = pe$code))
+  }
   list(geo_label = lab$en, geo_name = lab$en, geo_name_fr = fr,
        geo_uid = rep(NA_character_, n_geo))
 }
@@ -2153,6 +2169,14 @@ IVT_F2_INLINE_PAT <- paste0(
 # so those vintages are unaffected.
 IVT_F2_INLINE_PAT2 <- "^(.*?)\\s*\\(([0-9A-Za-z.]+)\\)\\s*$"
 
+# A third inline layout stores the code LAST in SQUARE brackets, with no flag --
+# "<name> [<code>]" -- the Census of Agriculture 2016 crosstabs (00040200/00040207)
+# use it (e.g. "Canada [000000000]", "Census Agricultural Region 1, Newfoundland
+# and Labrador [CAR100100000]"). Same shape as `IVT_F2_INLINE_PAT2` but with
+# brackets; tried after both paren forms, so no paren-coded vintage is affected
+# (none stores its code in brackets).
+IVT_F2_INLINE_PAT3 <- "^(.*?)\\s*\\[([0-9A-Za-z.]+)\\]\\s*$"
+
 # A geography-type abbreviation stored as a NAME SUFFIX: the custom-order
 # exports (cro/ord) append it to the display name as ", <ABBR>" ("East Kootenay,
 # RD", "Elkford, DM", "British Columbia, PR") instead of the token position the
@@ -2202,6 +2226,14 @@ ivt_f2_parse_inline <- function(v) {
     idx <- which(miss)[ok2]
     nm[idx]   <- vapply(m2[ok2], `[`, "", 2L)
     code[idx] <- vapply(m2[ok2], `[`, "", 3L)
+  }
+  miss <- is.na(code) & !is.na(v)                      # square-bracket "<name> [<code>]"
+  if (any(miss)) {
+    m3 <- regmatches(v[miss], regexec(IVT_F2_INLINE_PAT3, v[miss], perl = TRUE))
+    ok3 <- vapply(m3, function(g) length(g) >= 3L, logical(1))
+    idx <- which(miss)[ok3]
+    nm[idx]   <- vapply(m3[ok3], `[`, "", 2L)
+    code[idx] <- vapply(m3[ok3], `[`, "", 3L)
   }
   ty[!is.na(ty) & ty == ""] <- NA_character_
   # suffix-stored type (cro/ord): fill only where the token position carried none
@@ -3609,7 +3641,27 @@ ivt_f2_descriptor_impl <- function(raw) {
       # geography count with count_hi > 0, so >= 256) plus the exact-`ndim_auth`
       # adoption guard reject any spurious match, so it never fires on a table the
       # standard walk already reads.
-      anchorA <- v[k] == 0x01L && namestart
+      # v[k] is the marker immediately before the name. Two framings open a
+      # record: the standard `[count][type] 01 <name>` (v[k] is the 0x01), and
+      # the reference-period DOUBLE-MARKER framing `[type][count] 01 02 <name>`
+      # (v[k] is the trailing 0x02, v[k-1] the 0x01) -- the "Date (2)" facet
+      # dimension of the Census-of-Agriculture 2016 crosstabs (00040200/00040207)
+      # is the SAME shape as the `01 01`-terminated "Year (2)" record but with a
+      # 02 name-copy marker. The 0x01-only anchor skipped it, dropping the
+      # dimension so the walk found 2 of 3 records and fell back to the slot-table
+      # rebuild -- which then u8-capped the chunked geography count at one 256
+      # chunk (2568 -> 256). The double01 flag below (v[k-1] == 0x01) then reads
+      # its type/count from the same [type][count] framing as the 01 01 record.
+      # The count byte v[k-2] must be a plausible small facet count (< 0x20): the
+      # `01 02` name-copy marker also appears MID-PROSE where a doubled name butts
+      # against a previous name's tail (00040231's single-date "...business" +
+      # `01 02 DateDate`, count byte 's' = 0x73), and there v[k-2]/v[k-3] are ASCII
+      # letters -- a spurious record whose garbage count breaks the layout. A
+      # genuine facet is tiny (Date = 2), and its dropped 1-member sibling collapses
+      # harmlessly, so bounding to < 0x20 loses nothing.
+      anchorA <- (v[k] == 0x01L ||
+                    (v[k] == 0x02L && v[k - 1L] == 0x01L &&
+                       v[k - 2L] >= 1L && v[k - 2L] < 0x20L)) && namestart
       anchorB <- lenient && !anchorA && namestart && k >= 4L &&
                  v[k] %in% geotypes && v[k - 1L] > 0L &&
                  (v[k - 2L] + v[k - 1L] * 256L) <= 200000L

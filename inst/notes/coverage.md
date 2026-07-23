@@ -18,6 +18,23 @@ but semantics unproven · `[ ]` not parsed / unknown.
 > now decodes. The narrative is in
 > [`onboarding-backlog.md`](onboarding-backlog.md) / [`decode-history.md`](decode-history.md).
 
+> **2026-07-22 sweep — Census of Agriculture 2016 onboarded (`00040200` 92,584
+> cells; `00040207` 55,020 cells).** Both failed the family gate because their
+> **`Date (2)` facet** descriptor record uses the double-marker framing
+> `[type][count] 01 02 <doubled name>` (a `02` name-copy marker instead of the
+> `01 01`-terminated "Year" record) that the `01`-only descriptor anchor skipped —
+> so the walk found 2 of 3 dimensions and fell back to the slot-table rebuild,
+> which u8-capped the **chunked geography** count at one 256-member chunk
+> (2568 → 256) and the layout could not span. Fixed by admitting the `01 02`
+> framing (gated on a small facet count `< 0x20`, so the same marker appearing
+> mid-prose — e.g. sibling `00040231`'s single-date "…business" tail — cannot
+> spuriously match). Their geography stores its code INLINE in square brackets
+> "`<name> [<code>]`" (`IVT_F2_INLINE_PAT3`); the data-style reader now splits it
+> into clean `geo_name` + `geo_uid` (`canivt_geo_datadim`, `strict_clean = FALSE`).
+> Cell-exact validated: Canada total farms 2011 = 205,730 / 2016 = 193,492 (the
+> published Census-of-Agriculture figures), Beef + Dairy = Cattle, acres × 0.4047 =
+> hectares, and Canada = Σ 10 provinces exactly. Corpus FAIL 0.
+
 Byte-coverage figures below are measured on the family-2 reference table
 **98-10-0023** (142,016,485 bytes); cross-checked against family-1 (98-10-0241)
 and the legacy 1991 table (1003011).
@@ -573,8 +590,18 @@ corpus, are enforced by the decoder (2026-07-02):
   equality on the `b2 == 0` pages when `b3 <= 0x09`; the `b3 >= 0x0a`
   suppression-tail pages append absent-cell mask records after the run); an
   overrun aborts (`canivt_page_overrun`);
-- **no silent page skips**: a valid directory entry pointing at an unknown
-  marker warns (`canivt_skipped_pages`);
+- **no silent page skips**: a directory entry pointing at a REAL value page we
+  cannot decode warns (`canivt_skipped_pages`). "Real page" is validated by
+  GEOMETRY (`ivt_skip_is_lost_page()`, 2026-07-22), not the four marker bytes
+  alone — the target must be a value page in b0/b1 whose presence record and
+  tightest value run fit the entry's allocated size. This is what separates a
+  genuinely undecodable page (which fits by construction) from a codebook block
+  or member-label text coincidentally addressed when a **sparse** directory is
+  over-walked (the Canadian Business Patterns CDNAIC location crosstabs:
+  `CDNAIC3_LOC-1` walks a 209×314 cartesian over only 282 real pages, resolving
+  ~20 k absent coordinates onto 644 distinct codebook offsets, NONE a real page —
+  additivity-validated complete without them). The tally deduplicates by offset;
+  the deliberate `98-400-X2016203`-doctoring test still fires;
 - the **pre-flight** (`ivt_page_preflight()`) applies these to the first pages
   plus a **capacity rule** (presence bits ≤ the page's real cell count) and a
   **span rule** (the highest valid directory entry must sit in the outer
@@ -1713,3 +1740,23 @@ updated on `SP3/NAZQV2/Table-023` in [`sampled-tables.csv`](sampled-tables.csv).
    nibble that differs from the census pages. Until such a declaration is found,
    `ivt_survey_double()` stays a `canivt_survey_directory` loud fallback
    (`strict_clean = FALSE`), NOT a validated primary path.
+
+3. **A second table proves concern 1 empirically — the "wasted" half can carry
+   REAL data (2026-07-22).** The 7-dim adult-criminal-court survey
+   `SP3/MRVVPK/accs-…` (FiscalYear(16) × Charge/Case(5) × AgeGroup(7) × Sex(3) ×
+   Offences(40) × Geography(17) × Decision(6)) has the *same* doubled-window
+   directory shape as `Table-023` — a full scan finds 12 104 valid entries over
+   `k = 0 … 63 916` (the doubled span), true strides `[1,16,64,512,4096]` vs pow2
+   `[1,8,32,256,2048]`. But here the doubled half is **populated**: slots `k=32`
+   and `k=40` point at distinct data pages (presence popcounts 103+), and within a
+   window unit data sits at window-slots 0–4 **and** 8–12. So on `accs` the ×2 is
+   demonstrably an un-modelled nested level, not empty padding — exactly the
+   hypothesis in concern 1. `ivt_survey_double()` correctly does NOT fire on it
+   (its padding-page size signature is absent — the doubled slots hold data pages,
+   not minimal ones), so it is **honestly rejected** by the `ivt_page_preflight()`
+   overshoot guard (`read_ivt()` → clean "Unsupported IVT format" error, no silent
+   mis-decode) and deferred with `Table-024`. This is why `survey_double` must stay
+   a narrow, size-signature-gated fallback and never be generalised into a "double
+   whenever the directory overshoots" rule: that would under-decode `accs`.
+   Cracking the true `accs` / `Table-024` geometry is the way to close concern 1
+   for the whole lineage.

@@ -448,6 +448,39 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   TRUE
 }
 
+# Tell a directory entry that points at a REAL value page we cannot decode
+# (genuine data loss -- warn loudly) apart from one whose bytes only
+# COINCIDENTALLY parse as an entry. The latter arises when a SPARSE directory is
+# over-walked: cartesian coordinates for absent (geography, data) combinations
+# resolve, via `ivt_dir_entry()`'s size-agreement test, onto codebook blocks or
+# member-label text elsewhere in the file. The Canadian Business Patterns CDNAIC
+# location crosstabs are the case in point (e.g. CDNAIC3_LOC-1: 314 geographies x
+# 209 sub-sector windows = 65 626 coordinates over a directory only ~282 pages
+# deep -- 20 523 coordinates land on `01 01`/`81 01`/text bytes, only 644 distinct
+# offsets, NONE a real page; verified via byte-exact employment-size additivity).
+# The four marker bytes alone cannot separate them: a codebook `84 01 00 02`
+# shares b0/b1 with an int32 value page, and BOTH a codebook block and a page with
+# a novel/doctored head byte have a b3 outside {08,09,0a,0c}. So validate the PAGE
+# GEOMETRY instead -- the target must be a value page in b0 (recognised width
+# nibble, page high nibble) and b1, whose fixed presence record AND its tightest
+# possible value run (trailer/head = 0) fit the entry's allocated size. A real
+# page fits by construction (its full `4 + rec_bytes + trailer + head + nv*width`
+# is <= size, so the minimal bound holds a fortiori) even when its marker is
+# unrecognised; a codebook block does not (its allocation is far below
+# `4 + rec_bytes`, or the presence bits overrun it). This keeps the loud
+# `canivt_skipped_pages` tripwire for a genuinely undecodable page (the doctored
+# 98-400-X2016203 test) while silencing the sparse-directory false alarms.
+ivt_skip_is_lost_page <- function(raw, off, size, lay, n = length(raw)) {
+  if (as.integer(raw[off + 2L]) != 0x01L) return(FALSE)      # not a page/block head
+  b0 <- as.integer(raw[off + 1L])
+  w <- bitwAnd(b0, 0x0FL); hi <- bitwAnd(b0, 0xF0L)
+  if (!(w %in% IVT_MARKER_WIDTHS) || !(hi %in% c(0x80L, 0xa0L))) return(FALSE)
+  rb <- lay$rec_bytes
+  if (off + 4L + rb > n || 4L + rb > size) return(FALSE)      # presence record must fit
+  nv <- sum(ivt_f2_record_present(raw, off + 4L, rb, lay$grid$bit))
+  nv > 0L && 4L + rb + nv * w <= size                         # tightest value run fits
+}
+
 #' Decode every cell of an IVT into a tibble of one value per row.
 #'
 #' One 1-based member-id column per dimension in descriptor order (named by the
@@ -480,20 +513,24 @@ ivt_decode <- function(raw, lay = NULL) {
   inpage_dim   <- lay$inpage_idx
 
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
-  skipped <- 0L; skipped_ex <- character(); hole_vals <- 0L
+  skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
     off <- en$off; s1 <- en$size
     if (!en$marker) {
-      # A valid directory entry (agreeing sizes, in-range offset) that does not
-      # point at a known page marker is a page variant we cannot decode -- on
-      # every validated table this never happens (0 entries corpus-wide except
-      # the 98-400-X2016203 `a2 01 03 0a` pages), so it must not pass silently:
-      # each skipped entry is a block of cells missing from the output.
-      skipped <- skipped + 1L
-      ex <- paste(sprintf("%02x", as.integer(raw[off + 1:4])), collapse = " ")
-      if (!ex %in% skipped_ex) skipped_ex <- c(skipped_ex, ex)
+      # A directory entry whose target is a REAL value page we cannot decode is
+      # genuine data loss and must warn loudly. But a sparse, over-modelled
+      # directory (the CDNAIC location crosstabs) resolves absent coordinates onto
+      # codebook/text bytes that only coincidentally parse as an entry; those are
+      # NOT lost pages. Count an entry only when its target validates as a page by
+      # GEOMETRY (`ivt_skip_is_lost_page()`), and dedupe by offset so the tally is
+      # distinct lost pages, not the (many) coordinates that address each one.
+      if (ivt_skip_is_lost_page(raw, off, s1, lay, n) && !(off %in% skipped_off)) {
+        skipped_off <- c(skipped_off, off)
+        ex <- paste(sprintf("%02x", as.integer(raw[off + 1:4])), collapse = " ")
+        if (!ex %in% skipped_ex) skipped_ex <- c(skipped_ex, ex)
+      }
       next
     }
     pg <- ivt_decode_page(raw, off, lay, size = s1)
@@ -529,6 +566,7 @@ ivt_decode <- function(raw, lay = NULL) {
     if (!nrow(md)) next
     ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- pg$vals
   }
+  skipped <- length(skipped_off)
   if (skipped > 0L) {
     ivt_fallback(paste(
       "{skipped} page-directory entr{?y/ies} point{?s/} at unrecognised page",

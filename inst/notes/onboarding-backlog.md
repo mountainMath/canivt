@@ -11,9 +11,28 @@ systematically. This doc is the backlog + the repeatable onboarding workflow.
 cascade); Stages 3–5 then landed the remaining 3 — `97-563-XCB2006058` (uid-less
 custom geography routed to the data-style reader), `table_6_c-ivt-2007` (UCR
 inverted descriptor rebuilt from the slot table), and `PRSIC1dec1999` (earlier
-`02`-gen, now **strict-clean**). See the Done section at the bottom. The backlog
-is cleared — fold the residue back into `coverage.md`'s "fully supported"
-statement and retire this doc.
+`02`-gen, now **strict-clean**). See the Done section at the bottom.
+
+**Backlog REOPENED (2026-07-22).** A new sweep flagged 4 Borealis tables — 3 that
+fail the family gate and 1 that decodes but drops 20k pages — all imported into the
+ivt cache for investigation. **Progress (2026-07-22): the two Census of Agriculture
+2016 tables (`00040200`/`00040207`) are onboarded** (the `01 02` `Date`-facet
+descriptor framing + square-bracket inline geography — see the Done section). The
+7-dim adult-criminal-court survey `SP3_MRVVPK_accs-…` (Stage 2) has been
+**investigated and DEFERRED** (2026-07-22): its directory is a doubled-window
+`04`-gen survey shape (`Table-024`-class) whose doubled half carries *real* data,
+so it cannot be decoded without resolving the un-modelled straddle sub-level — it
+stays **honestly rejected** (no silent mis-decode), see the row + Done section.
+The NAICS-by-location `SP3_PAWNKX_CDNAIC3_LOC-1` (Stage 3) is **DONE** (2026-07-22):
+its 20,523 "skipped pages" were a **verified false alarm** (sparse-directory
+over-walk onto codebook bytes, none a real page) — the decode is complete and
+**byte-exact-additivity-validated** (133,217 cells), and the skip tripwire is
+fixed to validate a skipped target as a real page by geometry. So the only open
+item is Stage 2 (`accs`, deferred with `Table-024`). See
+[**New backlog — 2026-07-22 sweep**](#new-backlog--2026-07-22-sweep-borealis--flagged-not-yet-onboarded)
+below. Do NOT retire this doc while these are open. Note this means
+`coverage.md` / CLAUDE.md's "every `.ivt` in the corpus decodes" statement no
+longer holds until they are onboarded.
 
 **Second random sweep (2026-07-21).** A fresh 10 StatCan + 10 Borealis sample
 (none in the corpus): all 10 StatCan decoded; of the 10 Borealis, 5 decoded, 3
@@ -134,6 +153,25 @@ independent — a later stage does not depend on an earlier one landing.
   Σ divisions, and the employment-size hierarchy (Total(A) = Indeterminate(B) +
   Subtotal(A−B); Subtotal = Σ 8 ranges) all hold EXACTLY.
 
+## New backlog — 2026-07-22 sweep (Borealis) — FLAGGED, not yet onboarded
+
+A fresh 10 StatCan + 10 Borealis random draw (seed `20260722`; logged in
+[`sampled-tables.csv`](sampled-tables.csv)). All 10 StatCan decoded (8 clean, 2
+via known fallbacks). Of the 10 Borealis, 7 decoded via fallbacks; **3 fail the
+family gate** and **1 decodes but silently drops pages**. All four raw `.ivt`s are
+now imported into the ivt cache (`CANIVT_IVT_CACHE`, one folder per key) for
+investigation. None is in the corpus ledger yet.
+
+Diagnostics from `ivt_f2_descriptor()` / `ivt_layout()` / `ivt_f2_decodable()`
+(under `ivt_quietly()`):
+
+| cache folder | source | sig | today | descriptor (recovered) | root-cause hypothesis | stage |
+|---|---|---|---|---|---|---|
+| `SP3_WLOGGX_00040200` | Borealis | `04` | ✅ **DONE** (92,584 cells, `canivt_geo_datadim`) | Geography(2568)×NorthAmerican(43)×Date(2) | ~~geo count u8-capped at 256~~ — the descriptor's **`Date (2)` facet** uses the `[type][count] 01 02` double-marker framing the `01`-only anchor skipped, so the walk found 2/3 dims and fell to the slot rebuild (which caps chunked geo at one 256 chunk). Admitted the `01 02` framing (small-count gated); geo then reads its real u16 2568. Square-bracket inline codes split to `geo_uid` | 1 |
+| `SP3_WLOGGX_00040207` | Borealis | `04` | ✅ **DONE** (55,020 cells, `canivt_geo_datadim`) | Geography(2568)×FarmsReporting(11)×UnitOfMeasure(3)×Date(2) | same as `00040200` (Census of Ag 2016, `01 02` Date facet) | 1 |
+| `SP3_MRVVPK_accs-…-decision-1994-1995-to-2009-2010` | Borealis | `04` | **DEFERRED — Table-024-class, honestly rejected** (family gate) | 7 dims: FiscalYear(16)×Charge/Case(5)×AgeGroup(7)×Sex(3)×Offences(40)×Geography(17)×Decision(6) | adult criminal court survey (15 MB). Descriptor reads fine (7 dims, all u8). Root cause **characterised 2026-07-22**: the page directory genuinely spans ~64 000 entries (last valid `k = 63916`) — the DOUBLED cartesian, not the pow2 32 768 — and `ivt_page_preflight()`'s overshoot guard correctly rejects it. The true strides are `[1,16,64,512,4096]` vs the pow2 `[1,8,32,256,2048]` (every stride above the straddle window ×2), i.e. the same doubled-window shape as LFHR `Table-023`. **BUT unlike Table-023 the doubled half carries REAL DATA**: slots `k=32/40/…` point to distinct data pages (popcounts 103+), and within each window unit data sits at window-slots 0–4 **and** 8–12. So the LFHR `ivt_survey_double()` fix (which assumes the doubled half is empty padding) would **skip** that data and under-decode. This is the un-modelled straddle sub-level / `ipc` mismatch flagged for `Table-024` — genuinely unresolved geometry, so the table stays **honestly rejected** (no silent mis-decode) rather than force-decoded to wrong cells. See [`decode-history.md`](decode-history.md) / [`coverage.md`](coverage.md) "Open concerns" | 2 |
+| `SP3_PAWNKX_CDNAIC3_LOC-1` | Borealis | `04` | ✅ **DONE** (133,217 cells, `canivt_descriptor_lenient`;`canivt_geo_datadim`) | Geography(314, only 21 populated)×SUB-SECTORS(26628)×EMP.SIZE(11) — Canadian Business Patterns Dec 2010, 3-digit NAICS × location × employment size | The `canivt_skipped_pages` (20,523) was a **verified false alarm**: a sparse directory (282 real pages) over-walked by the 209×314 cartesian resolves absent coordinates onto 644 distinct codebook/text offsets, **none a real page** (all 644 checked). Decode is complete+correct — **byte-exact employment-size additivity** (`Subtotal = Σ(1-4…500+)` 21681/21681 exact). Fixed the tripwire generically (`ivt_skip_is_lost_page()`, decode.R): a skipped entry counts only when its target validates as a page by GEOMETRY (presence record + tightest value run fit the entry size), deduped by offset → 0 false skips, doctored-2016203 test preserved. `SUB-SECTORS = 26628` is correct (NAICS3 × ~266 locations). Known minor: EMP.SIZE labels shifted (values correct; deferred — shared-reader regression risk) | 3 |
+
 ## The per-table onboarding workflow (repeatable recipe)
 
 Do one table at a time; land it fully (fix + validation + ledger + notes) in a
@@ -223,3 +261,27 @@ Landed (ledger rows flipped, corpus `test-corpus.R` green, FAIL 0):
 | `97-555-XCB2006058` | strict-clean | 4,166,909 | Sex Total=M+F within ±11 on 96.7% of count cells; the residual is exactly the non-additive income medians/averages/SEs (members 795–830) |
 | `SP3_BJFWAP_95f0378xcb01004` | fallback (`canivt_descriptor_from_slots`; a footnote bleeds into its descriptor) | 859,903 | Sex Total=M+F within ±11 on 99.6% of count cells |
 | `SP3_NIQKF5_95f0489xcb01007` | strict-clean (was `canivt_descriptor_lenient`) | 86,696 | cell count unchanged from the prior validated fallback read; only the warning removed |
+
+**2026-07-22 — Census of Agriculture 2016 (`00040200` / `00040207`).** Both failed
+the family gate because the `01`-only descriptor anchor skipped their **`Date (2)`
+facet** record, framed `[type][count] 01 02 <doubled name>` (`13 02 01 02 DateDate`,
+a `02` name-copy marker vs the `01 01`-terminated "Year"). The dropped dimension
+forced the slot-table rebuild, whose largest-single-array count u8-capped the chunked
+geography at one 256 chunk (2568 → 256) and the layout could not span. Two small,
+general changes in `R/codebook-f2.R`:
+
+1. **Admit the `01 02` reference-period framing** in `ivt_f2_descriptor()`'s
+   `anchorA`, gated on a plausible small facet count (`count < 0x20`). The same
+   marker appears mid-prose where a doubled name butts a previous name's tail
+   (sibling `00040231`'s single-date "…business" + `01 02 DateDate`, count byte
+   `s`=0x73); the gate rejects it, so 00040231's genuine 1-member `Date` stays folded
+   and its 6,216-cell decode is preserved. With all 3 records found, geography reads
+   its real u16 count 2,568 (`08 0a 0c`, type 0x0c) directly from the descriptor.
+2. **Square-bracket inline geography** (`IVT_F2_INLINE_PAT3`, "`<name> [<code>]`"):
+   `ivt_f2_parse_inline()` now parses it, and `ivt_f2_geo_datadim()` splits it into
+   clean bilingual `geo_name` + `geo_uid` when ≥ 90 % of labels carry a bracketed code.
+
+| table | verdict | cells | validation |
+|---|---|---|---|
+| `SP3_WLOGGX_00040200` | fallback (`canivt_geo_datadim`) | 92,584 | Canada total farms 2011=205,730 / 2016=193,492 (published Census-of-Ag totals); Beef+Dairy=Cattle |
+| `SP3_WLOGGX_00040207` | fallback (`canivt_geo_datadim`) | 55,020 | Canada manure-applied 2016=66,227=Σ 10 provinces exactly; 2,483,220 acres × 0.4047 = 1,004,912 ha ≈ decoded 1,004,923 |
