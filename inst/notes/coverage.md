@@ -35,6 +35,25 @@ but semantics unproven · `[ ]` not parsed / unknown.
 > published Census-of-Agriculture figures), Beef + Dairy = Cattle, acres × 0.4047 =
 > hectares, and Canada = Σ 10 provinces exactly. Corpus FAIL 0.
 
+> **2026-07-23 sweep 3 — `02 00 20 00` CHUNKED geography onboarded (`b34csd_1`
+> 2,240,847 cells; `EDDTAB16` 60,468 cells).** Both 1996 gen02 tables (census +
+> Census of Agriculture) preflight-rejected because a `>256`-member geography read
+> **capped at one 256-member chunk** — the gen02 descriptor is rebuilt from the
+> codebook and `ivt_f2_slot_member_count()` returns only the largest single block.
+> `ivt_f2_slot_chunked_count()` recovers the true count as the INVERSE of the
+> codebook chunk layout (R runs × n_chunks member arrays → `(n_chunks-1)·256 +
+> partial`): b34csd Geography **5544**, EDDTAB16 Geography **2315**
+> (`canivt_chunked_count`, `strict_clean = FALSE`). Validated: b34csd Highest-
+> schooling additivity exact (±5 rounding), Canada pop 15+ ≈ 22.6M (1996 census);
+> EDDTAB16 Canada total farms 277,000 (1996 Census of Ag ≈ 276,548). b34csd's
+> inline-signature geography gets a `geo` column; EDDTAB16's rich no-UID hierarchy
+> dictionary stays a data dimension labelled by geocode (like sibling `EMPLOY1`).
+> **Still deferred from sweep 3:** `Table-210` (LFHR 6-dim — irregular directory
+> packing / off-by-one in-page, the unsolved `16 00`-flags geometry; its `@558`
+> pointer is also stale, real directory at 35197 via scan) and `CDCSDNAIC3dec2006`
+> (Business Patterns Dec 2006 — SUB-SECTORS 26628 misread of ~104 NAICS +
+> fragmented directory). Corpus FAIL 0.
+
 Byte-coverage figures below are measured on the family-2 reference table
 **98-10-0023** (142,016,485 bytes); cross-checked against family-1 (98-10-0241)
 and the legacy 1991 table (1003011).

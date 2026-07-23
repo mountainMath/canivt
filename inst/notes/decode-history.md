@@ -206,6 +206,62 @@ tables, and viewer/CSV-validated on the wider corpus:
   is emitted; the raw integers are correct. Siblings `EDDTAB39` (Agriculture,
   float64) and `EMPLOY1` (Small Area Business, int32) share the generation but
   arrange descriptors differently — next onboarding step.
+- **`02 00 20 00` generation — CHUNKED geography (1996 census / Census of
+  Agriculture)** (2026-07-23). Two Borealis tables from the third random sweep,
+  both preflight-rejected because a `>256`-member geography read **capped at one
+  256-member chunk**: `b34csd_1` (1996 census, Geography(**5544**) × Sex(3) ×
+  Age(11) × Highest schooling(8) × School attendance(4)) and `EDDTAB16` (1996
+  Census of Agriculture, Units(1) × Geography(**2315**) × Variable(30)). The
+  gen02 descriptor is rebuilt from the codebook (`ivt_f2_descriptor_02()`), and
+  `ivt_f2_slot_member_count()` returns only the largest single block — 256 — so
+  the layout under-spanned the page directory and the family gate honestly
+  rejected both. Fix: `ivt_f2_slot_chunked_count()` (codebook-f2.R) — the INVERSE
+  of `ivt_f2_chunk_layout()`. The chunked codebook lays each 256-member chunk
+  down once per attribute×language RUN, so with `R` runs the geo directory holds
+  `R` copies of every chunk: `R` = how many times the single trailing PARTIAL
+  chunk (< 256) occurs, chunk count = total member arrays / R (must divide
+  evenly), true count = `(n_chunks-1)·256 + partial`. Over-determined (three
+  consistency checks), so a stray array or a non-chunked dimension yields NA, not
+  a wrong count; fires only when `ivt_f2_slot_member_count()` capped at exactly
+  256 and a `>256` value is recoverable. b34csd: 63 full + 3×168 partial arrays →
+  22 chunks → 5544 (cross-checks the descriptor block's own `a8 15` = 5544);
+  EDDTAB16: 72 full + 8×11 → 10 chunks → 2315. LOUD (`canivt_chunked_count`,
+  `strict_clean = FALSE`) — an INFERRED count, not a declared field. Validated:
+  **b34csd 2,240,847 cells** (Highest-schooling Total 22,628,925 = Σ sub-levels
+  22,628,920 ±5 base-5 rounding; Canada pop 15+ ≈ 22.6M matches the 1996 census;
+  Sex Total = M+F), geography labelled by name+SGC code via the inline signature.
+  **EDDTAB16 60,468 cells** (Canada total farms 277,000 matches the 1996 Census
+  of Agriculture ≈ 276,548). b34csd's geography matches the inline `name (code)`
+  signature so it gets a proper `geo` column; EDDTAB16's geography carries a rich
+  multi-field hierarchy dictionary (`Geocode2/ProvName/CARName/CDName/CCSName/
+  GeoLevel/LowLvlName/CompleteName`) with NO UID and six fields mapping to
+  `geo_name`, which the shared geo reader cannot disambiguate — so it stays an
+  ordinary data dimension (like the sibling `EMPLOY1`'s GEOGRAPHY) labelled by its
+  9-digit geocode. **Known minor limitation:** EDDTAB16 geography reads by code,
+  not name (the names — CANADA, CompleteName — are present in the codebook but not
+  surfaced; a role-disambiguation improvement to the shared reader is deferred).
+- **LFHR `Table-210` + Business Patterns `CDCSDNAIC3dec2006` — investigated,
+  DEFERRED** (2026-07-23). The other two sweep-3 onboarding targets are genuinely
+  hard. **`Table-210`** (LFHR, Geography(11) × Sex(3) × Age(9) × Characteristics(10)
+  × Education(10) × Timeseries(240 monthly, 1990-01…2009-12)): its header page-
+  directory pointer `@558 = 34997` is stale — the real directory is at **35197**,
+  locatable only by the marker SCAN (`ivt_f2_find_directory()`, `lo = 35197`,
+  which `ivt_idx0()` deliberately does NOT use for the DECODE path). Even from the
+  right base the directory PACKING is irregular (validity alternates 8/12 valid
+  entries per 32-entry block, pages come in two sizes) and does not fit the
+  power-of-two stride model: characteristics decode only 4 of 10 members (missing
+  Unemployment and the rates), the in-page Education dimension is off by one
+  (positions 2-8, member 1 phantom-absent). This is the `Table-023`/`Table-024`
+  "doubled-window" family's UNSOLVED geometry (the undecoded `16 00` block
+  mid-section / per-slot flags likely bites). Left rejected by the pre-flight
+  rather than routed through the scan (which would SILENTLY mis-decode).
+  **`CDCSDNAIC3dec2006`** (Business Patterns Dec 2006, CD/CSD(5914) × SUB-SECTORS ×
+  EMP(12)): the descriptor reads SUB-SECTORS = **26628** (type `0x0b`), a misread —
+  for this CD/CSD-separated variant SUB-SECTORS is pure 3-digit NAICS (~104, the
+  u8 `0x68` of the u16 `0x6804`); the sibling `CDNAIC3_LOC-1`'s 26628 was a
+  genuine NAICS×location combined dim, so the type byte alone cannot separate them.
+  Plus a sparse fragmented directory (4306 markers, finder `n_pages = 1`). Needs a
+  descriptor-count fix + directory relocation — deferred as the sweep's HARDEST.
 - **Health at a Glance line generalised** (2026-07-19): sampling 20 more files from
   the GPVU3L dataset showed the single-file title-block bound was too tight for the
   multi-dimension tables (records spill past the FACET01 title). Two metadata-driven

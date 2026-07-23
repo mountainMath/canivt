@@ -35,6 +35,19 @@ remains the only open doubled-window case.
 [**New backlog — 2026-07-22 sweep**](#new-backlog--2026-07-22-sweep-borealis--flagged-not-yet-onboarded)
 below.
 
+**Sweep 3 partial (2026-07-23).** The third sweep flagged 4 preflight-rejected
+Borealis tables. **2 onboarded, 2 deferred.** ONBOARDED: the `02 00 20 00`
+CHUNKED-geography 1996 tables `SP3_PPDO7R_b34csd_1` (census, Geography **5544**,
+2,240,847 cells) and `SP3_H7WG5V_EDDTAB16` (Census of Agriculture, Geography
+**2315**, 60,468 cells) — both capped at one 256-member chunk because the gen02
+descriptor is rebuilt from the codebook; `ivt_f2_slot_chunked_count()` recovers
+the true count as the inverse of the chunk layout (`canivt_chunked_count`,
+`strict_clean = FALSE`). DEFERRED (hard, documented in `decode-history.md`):
+`SP3_NAZQV2_Table-210` (LFHR 6-dim — stale `@558`, irregular directory packing +
+off-by-one in-page, the unsolved `Table-023`/`16 00`-flags geometry) and
+`SP_IE56KT_CDCSDNAIC3dec2006` (Business Patterns Dec 2006 — SUB-SECTORS 26628
+misread + fragmented directory). Corpus FAIL 0.
+
 **Second random sweep (2026-07-21).** A fresh 10 StatCan + 10 Borealis sample
 (none in the corpus): all 10 StatCan decoded; of the 10 Borealis, 5 decoded, 3
 were 403-blocked (access-restricted OCDMVE dataset, not a decode gap), and two

@@ -3307,6 +3307,45 @@ ivt_f2_slot_member_count <- function(raw, dir) {
   NA_integer_
 }
 
+# Recover the TRUE member count of a CHUNKED dimension whose codebook splits its
+# members into 256-member chunks stored across many directory blocks -- the older
+# `02 00 20 00` survey generation's large geography (the 1996 census / Census of
+# Agriculture: b34csd_1, EDDTAB16). `ivt_f2_slot_member_count()` returns only the
+# LARGEST single block (256), the first chunk, so a >256-member chunked dimension
+# reads capped at 256 and the layout under-spans the page directory. This is the
+# inverse of `ivt_f2_chunk_layout()`: the codebook lays each chunk down once per
+# attribute*language RUN, so with `R` runs the directory holds `R` copies of every
+# chunk -- `R` copies of the trailing PARTIAL chunk (< 256) and `R` copies of each
+# full 256 chunk. Hence `R` = how many times the (single) partial size occurs, the
+# chunk count = total member arrays / R, and the true member count is
+# `(n_chunks-1)*256 + partial`. The arithmetic is over-determined (three
+# consistency checks below), so a stray array or a non-chunked dimension yields NA
+# rather than a wrong count. Returns the recovered count (> 256) or NA. LOUD at the
+# call site (`canivt_chunked_count`) -- the count is INFERRED from the chunk-run
+# geometry, not read from a declared field.
+ivt_f2_slot_chunked_count <- function(raw, dir) {
+  if (is.null(dir)) return(NA_integer_)
+  sizes <- integer(0)
+  for (r in seq_len(nrow(dir))) {
+    e <- tryCatch(ivt_f2_dir_entry_members(raw, dir[r, "off"], dir[r, "len"]),
+                  error = function(e) NULL)
+    if (is.null(e)) next
+    v <- e$values[!is.na(e$values)]
+    if (length(v) >= 3L && !ivt_f2_is_ordinal(v)) sizes <- c(sizes, length(v))
+  }
+  full <- sum(sizes == 256L)
+  if (full < 2L) return(NA_integer_)            # 0 or 1 chunk: not a chunked dim
+  part <- sizes[sizes < 256L]
+  # exactly one trailing partial chunk (all its copies the same size); an exact
+  # multiple of 256 leaves no partial and cannot pin the tail -> decline
+  if (!length(part) || length(unique(part)) != 1L) return(NA_integer_)
+  psz <- part[1L]; R <- length(part)
+  if (R < 1L || length(sizes) %% R != 0L) return(NA_integer_)
+  n_chunks <- length(sizes) %/% R
+  if (full %% R != 0L || full %/% R != n_chunks - 1L) return(NA_integer_)
+  (n_chunks - 1L) * 256L + psz
+}
+
 # The member CODES of a survey-generation code-array block (`81 02 <alloc> 00
 # <b5> 00`, b5 not one of the schema/name/time sub-markers): the trailing Pascal
 # run whose end is closest to the block end (a stray run inside the binary
@@ -3566,6 +3605,20 @@ ivt_f2_descriptor_02 <- function(raw) {
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) return(NULL)
     cnt <- ivt_f2_slot_member_count(raw, dir)
+    # A CHUNKED dimension (large geography) reads capped at one 256-member chunk;
+    # recover the true count from the chunk-run geometry (inverse of the codebook
+    # chunk layout). Fires only when capped exactly at 256 and a >256 count is
+    # recoverable, so it never touches a single-chunk dimension.
+    if (!is.na(cnt) && cnt == 256L) {
+      cc <- ivt_f2_slot_chunked_count(raw, dir)
+      if (!is.na(cc) && cc > 256L) {
+        ivt_fallback(sprintf(paste(
+          "Dimension %d has a chunked codebook capped at one 256-member block; its",
+          "true member count (%d) was recovered from the chunk-run geometry."), k, cc),
+          class = "canivt_chunked_count")
+        cnt <- cc
+      }
+    }
     nm <- ivt_f2_02_name_marker(raw, dir)
     if (is.na(nm)) nm <- ivt_f2_02_schema_name(raw, dir)
     if (is.na(nm) && !is.na(D) && D >= 1L) nm <- ivt_f2_02_desc_reference_name(raw, D)

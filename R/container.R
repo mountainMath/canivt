@@ -22,6 +22,18 @@ IVT_IDX0_DEFAULT <- 37167L # fallback first page-directory offset (98-10-0241)
 # page-directory finder. Falls back to the historical constant when no candidate
 # validates (the page pre-flight then rejects the file rather than decode from a
 # wrong base).
+#
+# NOTE: the DECODE path deliberately uses only the validated header pointer, not
+# the marker SCAN (`ivt_f2_find_directory()`). The scan can LOCATE a directory the
+# header pointer misses (the LFHR `Table-210`: @558 = 34997 but the directory is at
+# 35197), but that lineage's 6-dim/long-timeseries directory has an irregular
+# packing the positional stride model does not yet capture (validity alternates
+# 8/12 valid entries per block; characteristics decode only 4 of 10; the in-page
+# education dimension is off by one) -- so decoding from the scanned base would
+# SILENTLY mis-decode. Until that geometry is understood, such files stay rejected
+# by the pre-flight rather than routed through the scan here. (The scan remains in
+# `ivt_f2_find_directory()` for the metadata-side page count, where a mis-modelled
+# stride cannot corrupt cell values.)
 ivt_idx0 <- function(raw) {
   anchor <- ivt_f2_dir_anchor_header(raw)
   if (!is.null(anchor)) anchor else IVT_IDX0_DEFAULT
