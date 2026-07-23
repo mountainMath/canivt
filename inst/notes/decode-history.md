@@ -1203,6 +1203,37 @@ Business-Patterns crosstab):
    (December 2010). Use only to spot-check absolute magnitudes; the additivity
    check above already proves the decode is internally correct and complete.
 
+### Title/note-only descriptor — a QUIET slot read (2026-07-23)
+
+`98-313-XCB2011025` (2011 age/sex/living-arrangements, 810 non-zero cells) surfaced
+in a random sweep reading via a **loud** `canivt_descriptor_from_slots` fallback whose
+message — "a footnote bleeds into the descriptor block" — implied a block-location bug.
+It is not one. The descriptor block is located correctly (`@4148`, signature intact);
+this table's descriptor simply carries **no per-dimension records at all**. After the
+fixed header the block is one contiguous **2103-byte printable run** — the table title
+with an embedded `Note: Population universe …` paragraph — running straight into the
+codebook region (`81 02 02 00 …`). The dimension names live **solely** in the header
+slot directories (`@824`: slots 1–4 → Geography(14)/Sex(3)/Age groups(6)/Living
+arrangements(4), slots 5–32 null). The header `n_dim` field is garbage here too
+(`38 08` → 2104), so the authoritative count comes from the leading run of populated
+slot pointers (4).
+
+Reading the dimensions from the slot directories is therefore the **correct, fully
+metadata-driven** path (the `@824` slot table is the file's primary codebook anchor),
+not a heuristic recovery — so it should not warn. `ivt_f2_descriptor_impl()` now
+detects this variant structurally and adopts the slot rebuild **quietly**: gated on the
+standard **and** lenient walks having recovered **zero** records, one large printable
+run (≥ 400 bytes — a title/note blob, not a member name) opening within the header and
+filling ≥ 85 % of the span up to the first `81 02 02 00` codebook marker, and the slot
+table resolving **exactly** the authoritative count. This is strictly narrower than the
+loud rebuild that follows it, so it only ever converts a would-be warning into a clean
+read — it never changes a decode. It is structurally distinct from the genuinely
+**mangled** case the loud path still covers (records present but a footnote spliced
+*between* them, which leaves record framing breaking up the run — e.g. the survey
+tables that legitimately keep warning: `h2530002`, `Table-051`, `table_5_c`). Corpus
+regression unchanged (FAIL 0 / 282 pass, no cell count moved); `98-313-X` now
+strict-clean.
+
 ## Invariant derivations & historical bugs
 
 Why the "Key invariants" in `CLAUDE.md` are what they are — the measurements and the

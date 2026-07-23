@@ -3870,6 +3870,49 @@ ivt_f2_descriptor_impl <- function(raw) {
       dims <- lung
     }
   }
+  # TITLE/NOTE-ONLY descriptor (QUIET slot read). A distinct variant (98-313-X
+  # CB2011025) emits NO per-dimension records at all: the descriptor block after
+  # its header is one contiguous printable run -- the table title with an embedded
+  # "Note:" paragraph -- running straight up to the codebook region. The dimension
+  # names live SOLELY in the header slot directories, which is authoritative
+  # metadata (the @824 slot table, the file's primary codebook anchor), so this is
+  # not a heuristic recovery: read it QUIETLY. Structurally distinct from the
+  # mangled case above (records present but a footnote spliced BETWEEN them, which
+  # leaves record framing breaking up the run): require the standard+lenient walk
+  # to have found NOTHING, one large printable run (>= 400 bytes -- a title/note
+  # blob, not a member name) opening near the descriptor header and filling >= 85%
+  # of the span up to the first `81 02 02 00` codebook marker, and the slot table
+  # to resolve EXACTLY the authoritative count. Narrower than the loud rebuild
+  # below, so it only ever converts a would-be warning into a clean read.
+  if (length(dims) == 0L && !is.null(slots_auth) &&
+      ndim_auth >= 2L && ndim_auth <= 32L) {
+    hj <- 18L                                        # past the fixed descriptor header
+    m <- length(v)
+    title_only <- FALSE
+    if (m > hj + 4L) {
+      cand <- which(v[seq.int(hj + 1L, m - 3L)] == 0x81L &
+                    v[seq.int(hj + 2L, m - 2L)] == 0x02L &
+                    v[seq.int(hj + 3L, m - 1L)] == 0x02L &
+                    v[seq.int(hj + 4L, m)]      == 0x00L)
+      if (length(cand)) {
+        C <- cand[1L] + hj                           # v-index of the codebook marker
+        reg <- v[seq_len(C - 1L)]
+        ok <- (reg >= 32L & reg <= 126L) | reg %in% c(9L, 10L, 13L)
+        r <- rle(ok)
+        ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
+        keep <- which(r$values & r$lengths >= 400L)
+        if (length(keep)) {
+          i <- keep[which.max(r$lengths[keep])]
+          if (starts[i] <= 32L && r$lengths[i] >= 0.85 * (C - starts[i]))
+            title_only <- TRUE
+        }
+      }
+    }
+    if (title_only) {
+      built <- ivt_f2_dims_from_slots(raw, slots_auth, ndim_auth)
+      if (!is.null(built) && length(built) == ndim_auth) dims <- built
+    }
+  }
   # Last resort: rebuild the whole descriptor from the header slot table. The
   # larger custom-extract crosstabs (the CMHC movers "Commuters"/"NOCs" tables)
   # bleed a long footnote paragraph INTO the descriptor region, so even the
