@@ -48,6 +48,15 @@ off-by-one in-page, the unsolved `Table-023`/`16 00`-flags geometry) and
 `SP_IE56KT_CDCSDNAIC3dec2006` (Business Patterns Dec 2006 — SUB-SECTORS 26628
 misread + fragmented directory). Corpus FAIL 0.
 
+**Sweep 4 (2026-07-23, seed `20260723`).** 10 StatCan + 10 Borealis, none seen
+before. 18/20 decode (11 strict-clean, 7 known fallbacks). **2 Borealis tables fail
+the family gate** — both 2001 census tables where a footnote bleeds into the
+descriptor so it is rebuilt from the slot table, u8-capping a chunked >256-member
+dimension at 256 → layout can't span. Imported to the ivt cache, FLAGGED for
+onboarding (details in
+[New backlog — 2026-07-23 sweep 4](#new-backlog--2026-07-23-sweep-4-borealis--flagged-not-yet-onboarded)).
+Not in the ledger yet.
+
 **Second random sweep (2026-07-21).** A fresh 10 StatCan + 10 Borealis sample
 (none in the corpus): all 10 StatCan decoded; of the 10 Borealis, 5 decoded, 3
 were 403-blocked (access-restricted OCDMVE dataset, not a decode gap), and two
@@ -185,6 +194,32 @@ Diagnostics from `ivt_f2_descriptor()` / `ivt_layout()` / `ivt_f2_decodable()`
 | `SP3_WLOGGX_00040207` | Borealis | `04` | ✅ **DONE** (55,020 cells, `canivt_geo_datadim`) | Geography(2568)×FarmsReporting(11)×UnitOfMeasure(3)×Date(2) | same as `00040200` (Census of Ag 2016, `01 02` Date facet) | 1 |
 | `SP3_MRVVPK_accs-…-decision-1994-1995-to-2009-2010` | Borealis | `04` | ✅ **DONE** (4,573,026 cells, `canivt_deleted_slot`;`canivt_descriptor_lenient`) | 7 dims: FiscalYear(16)×Charge/Case(5)×AgeGroup(7)×**Sex(5→6 slots)**×Offences(40)×Geography(17)×Decision(6) | adult criminal court survey (15 MB). The "doubled directory" (`k = 0 … 63 916`, double the pow2 32 768) was **NOT** a `Table-024`-class straddle sub-level — it was a **DELETED MEMBER SLOT** in Sex: the codebook member-label array holds **6** records (`Total/Males/Females/Company/Unknown` + a deleted "Company") while the descriptor declares 5, so Sex's physical slot EXTENT is 6 and the deleted interior slot 3 leaves **no directory entry** (occupancy `{0,8,16,32,40}` per 64-block, 24 absent). Using the extent-6 nesting gives clean pow2 strides `[1,8,64,512,4096]`, `survey_double = FALSE`, and additivity is exact (Males+Females+Company+Unknown = Total; Σ age = Total; Single+Multiple cases = Total Cases). Fixed by: bare-`02` descriptor name-separator (Fiscal year `10 04 02`); `0x08` dense-array marker so the 6-record label array parses; and `ivt_f2_dim_slot_expand()` (codebook-driven extent expansion, loud `canivt_deleted_slot`). **Rules accs OUT of the Table-023/Table-024 doubled-window class** (different root cause; Table-023 has present-but-empty padding pages, all counts exact). See [`decode-history.md`](decode-history.md) | 2 |
 | `SP3_PAWNKX_CDNAIC3_LOC-1` | Borealis | `04` | ✅ **DONE** (133,217 cells, `canivt_descriptor_lenient`;`canivt_geo_datadim`) | Geography(314, only 21 populated)×SUB-SECTORS(26628)×EMP.SIZE(11) — Canadian Business Patterns Dec 2010, 3-digit NAICS × location × employment size | The `canivt_skipped_pages` (20,523) was a **verified false alarm**: a sparse directory (282 real pages) over-walked by the 209×314 cartesian resolves absent coordinates onto 644 distinct codebook/text offsets, **none a real page** (all 644 checked). Decode is complete+correct — **byte-exact employment-size additivity** (`Subtotal = Σ(1-4…500+)` 21681/21681 exact). Fixed the tripwire generically (`ivt_skip_is_lost_page()`, decode.R): a skipped entry counts only when its target validates as a page by GEOMETRY (presence record + tightest value run fit the entry size), deduped by offset → 0 false skips, doctored-2016203 test preserved. `SUB-SECTORS = 26628` is correct (NAICS3 × ~266 locations). Known minor: EMP.SIZE labels shifted (values correct; deferred — shared-reader regression risk) | 3 |
+
+## New backlog — 2026-07-23 sweep 4 (Borealis) — FLAGGED, not yet onboarded
+
+A fresh 10 StatCan + 10 Borealis random draw (seed `20260723`, drawn from the
+cached catalogues excluding the corpus + all three prior sweeps). **18/20 decode**
+(11 strict-clean, 7 via known loud fallbacks — no new failures there). **2 Borealis
+tables fail the family gate** and are the actionable onboarding candidates; both are
+now imported into the ivt cache (one folder per key) and are **not** in the corpus
+ledger yet.
+
+Both fail for the **same root cause**: a **>256-member dimension whose count is
+u8-capped at 256** when the descriptor is rebuilt from the header slot table (a
+footnote bleeds into the real descriptor block, so `ivt_f2_descriptor()` finds only
+N−1 dims and falls to `ivt_f2_descriptor_from_slots()`). With the capped count the
+`ivt_layout()` cartesian can't span the page directory → `ivt_page_preflight()`
+FALSE → `ivt_family()` NA. This is the **family-1 / `04`-gen analogue** of the
+gen02 chunked-geography cap already solved for `b34csd`/`EDDTAB16` by
+`ivt_f2_slot_chunked_count()` (sweep 3) — the recovery needs extending to these
+2001 census tables. Sibling tables in the same lineages already decode
+(`SP3_NIQKF5_95f0490xcb01006`, `95f0491xcb01004`, and the Mother-tongue(331)
+`0x09` u16-count fix on `98-10-0174`), so these should be onboardable.
+
+| cache folder | source | today | descriptor (recovered) | root-cause hypothesis | stage |
+|---|---|---|---|---|---|
+| `SP3_NIQKF5_95f0491xcb01003` | Borealis (2001 Profiles, FSA-level) | ❌ UNSUPPORTED (preflight FALSE) | Values(1)×Profile(69)×**Geography(256, capped)** | Geography is a chunked >256-member codebook capped at one 256-chunk by the slot rebuild; layout can't span (35 windows on ipc=2). Recover the true geo count as the inverse of the chunk layout (as `ivt_f2_slot_chunked_count()` does for gen02) | — |
+| `SP3_AVQOPM_97F0007XCB2001042` | Borealis (2001 Language topic-based, 82 MB) | ❌ UNSUPPORTED (preflight FALSE) | **Geography(256, capped)**×Sex(3)×**Characteristics(256, capped)**×MotherTongue(4) | **TWO** dims capped at 256 — Geography (chunked) and Characteristics (likely a detailed classification like Mother-tongue(331) that needs the descriptor u16 count / `0x09` width tag). Header `n_dim` field garbage (1026). Both caps must lift before the layout spans | — |
 
 ## The per-table onboarding workflow (repeatable recipe)
 
