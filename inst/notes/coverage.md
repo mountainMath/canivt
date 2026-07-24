@@ -54,6 +54,34 @@ but semantics unproven · `[ ]` not parsed / unknown.
 > (Business Patterns Dec 2006 — SUB-SECTORS 26628 misread of ~104 NAICS +
 > fragmented directory). Corpus FAIL 0.
 
+> **2026-07-23 metadata-harvest sweep — `04`-gen chunked cap generalised (8 files
+> onboarded).** A range-based metadata harvest (`dev/range-harvest.R`, 100 Borealis
+> + 100 StatCan) surfaced the SAME 256-chunk cap on the GENERIC (`04 00 20 00`)
+> descriptor path — the count read from the slot-directory member block stops at the
+> first 256-member chunk. `ivt_f2_dim_count_reconcile()` now probes
+> `ivt_f2_slot_chunked_count()` for any dimension read as exactly 256 and adopts the
+> chunk-run count when `>256` (the same recovery `ivt_f2_descriptor_02()` already
+> used for the `0x02` generation, now shared). One fix onboarded 8 tables — the 2001
+> F-series/topic profiles `95f0487xcb01003` (Geo **1585**, 134,238), `95f0494xcb01001`
+> (Geo **5108**, 248,780), `100801` (Geo **5602**, 1,844,241), `95f0338xcb01006`
+> (Geo **5108**, 528,575), `95F0377XCB01005` (Geo **1581**, 3,048,793); the 2006
+> crosstab `97-554-XCB2006027` (Geo **1601**, 362,761); and the two sweep-4 gaps
+> `95f0491xcb01003` (Geo **1581**, 105,001) + `97F0007XCB2001042` (Geo **5108** ×
+> Characteristics **508**, 9,021,645). All `geo_name_NA = 0`, all in the ledger
+> (`strict_clean = FALSE`), corpus FAIL 0. Same commit fixed a genuine NA-subscript
+> crash in `ivt_f2_inline_name_subtract()` (NA member `code` → NA in the `empty`
+> index) hit by the `0x02` census profiles `b28ea47` / `95f0205xdb96003`.
+>
+> **Still UNSUPPORTED after this sweep (documented, not yet onboarded):** the
+> provincial Business-Register SIC/NAIC tables (`PRNAIC6dec2000`, `PROVSIC2june1998`,
+> `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1` — sparse/over-walked
+> directory, span/overshoot preflight fail, the `CDNAIC*_LOC` family); two tables
+> whose `@558` directory anchor does not resolve (`103`, `Table-080` — `ivt_idx0()`
+> falls to the default constant → no dir entries); and small tables failing the
+> layout extent/overshoot guard (`02560006`, `701`, `Table_6_c-2009`). These span
+> three distinct format issues (directory relocation, sparse-directory modelling,
+> layout geometry) and are the next onboarding backlog.
+
 Byte-coverage figures below are measured on the family-2 reference table
 **98-10-0023** (142,016,485 bytes); cross-checked against family-1 (98-10-0241)
 and the legacy 1991 table (1003011).

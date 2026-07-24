@@ -262,6 +262,37 @@ tables, and viewer/CSV-validated on the wider corpus:
   genuine NAICS×location combined dim, so the type byte alone cannot separate them.
   Plus a sparse fragmented directory (4306 markers, finder `n_pages = 1`). Needs a
   descriptor-count fix + directory relocation — deferred as the sweep's HARDEST.
+- **`04`-gen chunked geography/classification generalised — the metadata-harvest
+  sweep** (2026-07-23). A range-based metadata-harvest sweep (`dev/range-harvest.R`,
+  100 Borealis + 100 StatCan random files) surfaced a cluster of `04 00 20 00`
+  tables preflight-rejected for the **same 256-chunk cap** the gen02 fix above had
+  solved — but on the GENERIC descriptor path (byte 0 == `0x04`), where the count
+  comes from the slot-directory member block and stops at the first 256-member
+  chunk. `ivt_f2_slot_chunked_count()` already recovered the true count; it was
+  simply not wired into the generic path. Fix: `ivt_f2_dim_count_reconcile()`
+  (dimdir.R) now probes it for **any** dimension read as exactly 256 and adopts the
+  chunk-run count when `>256` (LOUD `canivt_chunked_count`; the probe returns NA for
+  a single-chunk 256-member dim, so a genuine 256 is untouched — corpus byte-
+  identical, FAIL 0 PASS 288 on the pre-existing rows). This one fix onboarded **8
+  files**: the 2001 F-series profiles `95f0487xcb01003` (Geography 256→**1585**,
+  134,238 cells), `95f0494xcb01001` (Profile 409 × Geography **5108**, 248,780),
+  `100801` (Census Div 529 × Geography **5602**, 1,844,241); the 2001 topic tables
+  `95f0338xcb01006` (Geography **5108** × Sex × Various-notes(76) × Age, 528,575),
+  `95F0377XCB01005` (Geography **1581** × Sex × Marital × Age × Labour-force,
+  3,048,793); the 2006 crosstab `97-554-XCB2006027` (Geography **1601** × Housing-
+  tenure × Household × Structural, 362,761); PLUS the two 2001 census tables flagged
+  (but not fixed) in sweep 4 — `95f0491xcb01003` (Geography **1581**, 105,001) and
+  `97F0007XCB2001042` (Geography **5108** × Sex × Characteristics **508** ×
+  Mother-tongue, 9,021,645 — BOTH capped dims recovered, the predicted `0x09`-width
+  route unneeded). Every one decodes with **all geographies named** (`geo_name_NA =
+  0`). All 8 added to the corpus ledger (`strict_clean = FALSE`). The SAME sweep also
+  found — and this fix's companion commit closed — a genuine NA-subscript crash in
+  `ivt_f2_inline_name_subtract()` (codebook-f2.R): when a member's uid `code` is NA
+  the `out == code` comparison put an NA into the `empty` logical index and
+  `out[empty] <- code[empty]` threw *"NAs are not allowed in subscripted
+  assignments"* (hit on the `02`-gen 1996 census profiles `b28ea47` /
+  `95f0205xdb96003`, whose chunk-recovered 2298-member geography carries some NA
+  codes). Guarded with `!is.na(code)`; both now decode.
 - **Health at a Glance line generalised** (2026-07-19): sampling 20 more files from
   the GPVU3L dataset showed the single-file title-block bound was too tight for the
   multi-dimension tables (records spill past the FACET01 title). Two metadata-driven

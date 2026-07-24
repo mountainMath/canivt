@@ -2274,7 +2274,10 @@ ivt_f2_inline_name_subtract <- function(s, code) {
   out <- sub("\\s*\\([^)]*%\\)\\s*$", "", out, perl = TRUE)
   out <- sub("\\s+[0-9]+\\s*$", "", out, perl = TRUE)
   out <- trimws(gsub("\\s+", " ", out))
-  empty <- !is.na(out) & (!nzchar(out) | out == code)     # code-only geography
+  # code-only geography: the whole string collapsed to nothing (or to the bare
+  # code). Guard `out == code` against NA codes -- a member without a uid can't be
+  # a code-only geography, and an NA in the logical index throws on assignment.
+  empty <- !is.na(out) & !is.na(code) & (!nzchar(out) | out == code)
   out[empty] <- code[empty]
   out
 }
