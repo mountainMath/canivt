@@ -72,6 +72,20 @@ but semantics unproven · `[ ]` not parsed / unknown.
 > crash in `ivt_f2_inline_name_subtract()` (NA member `code` → NA in the `empty`
 > index) hit by the `0x02` census profiles `b28ea47` / `95f0205xdb96003`.
 >
+> **2026-07-24 second harvest sweep — chunked reconcile no longer needs a `256`
+> count (1 file onboarded).** A 200+200 harvest surfaced the 1991 enumeration-area
+> census tables (`04 00 20 00`, www12 full-download), e.g. **PID=128 / catalogue
+> `1006454`** (N9101 labour-force by age/marital/sex, Canada … EAs). Its geography
+> descriptor reads `count 52` — but **52 is the CHUNK count**, true member count
+> **13372** (52 full 256-chunks + a 60 tail). The `2026-07-23` fix only probed
+> `ivt_f2_slot_chunked_count()` when the count was *exactly 256*, so this slipped
+> through and the file preflight-rejected. `ivt_f2_dim_count_reconcile()` now runs
+> the (self-gating, authoritative) chunk-run probe on **every** dimension and adopts
+> its count whenever it exceeds the descriptor's. Decodes to **8,308,875** cells over
+> 13,372 EAs, `geo_name_NA = 0`, Canada Total-Sex = M + F exactly (the fractional
+> values are the real Labour-Force *rate* members). Corpus FAIL 0 PASS 312; ledger
+> row `1006454` (`strict_clean = FALSE`).
+>
 > **Still UNSUPPORTED after this sweep (documented, not yet onboarded):** the
 > provincial Business-Register SIC/NAIC tables (`PRNAIC6dec2000`, `PROVSIC2june1998`,
 > `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1` — sparse/over-walked

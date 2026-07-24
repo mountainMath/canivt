@@ -562,24 +562,33 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   if (is.null(slots)) return(dims)
   dims <- ivt_f2_dim_slot_expand(raw, dims, slots)
   # A CHUNKED dimension (a >256-member geography / profile / classification) reads
-  # capped at exactly 256 on the generic descriptor path -- the codebook stores it
-  # as 256-member chunks and the count read stops at the first block. Recover the
-  # true count from the chunk-run geometry (`ivt_f2_slot_chunked_count()`, which
-  # returns NA for any single-chunk dim, so a genuine 256-member dimension is never
-  # touched). This is the generic-path analogue of the same recovery already wired
-  # into `ivt_f2_descriptor_02()` for the byte-0 == 0x02 generation; without it the
-  # layout under-spans the page directory and the file preflight-rejects (the 2001
-  # F-series 95F03xx/95f04xx, the 2006 97-554 crosstabs). LOUD (canivt_chunked_count).
+  # WRONG on the generic descriptor path -- the codebook stores it as 256-member
+  # chunks and the descriptor either caps at the first block (count == 256: the 2001
+  # F-series 95F03xx/95f04xx, the 2006 97-554 crosstabs) OR reports the CHUNK COUNT
+  # in place of the member count (the 1991 enumeration-area census tables, byte-0
+  # == 0x04: N9101/PID=128 geography descriptor count 52 == its 52 full 256-member
+  # chunks, true member count 13372). Recover the true count from the chunk-run
+  # geometry (`ivt_f2_slot_chunked_count()`), which is AUTHORITATIVE and SELF-GATING:
+  # it returns NA unless the codebook physically stores >= 2 full 256-member arrays
+  # plus a consistent trailing partial, so a single-chunk (<= 256-member) dimension
+  # is never touched and no count is fabricated -- the members it counts are all
+  # present in the file. Trust it over the descriptor whenever it exceeds the stated
+  # count (never when it is equal or smaller: a correctly-read chunked count, or a
+  # descriptor OVER-count, is left to the double-01 reconcile below). This is the
+  # generic-path analogue of the recovery already wired into `ivt_f2_descriptor_02()`
+  # for the byte-0 == 0x02 generation; without it the layout under-spans the page
+  # directory and the file preflight-rejects. LOUD (canivt_chunked_count).
   for (k in seq_along(dims)) {
-    if (is.na(dims[[k]]$count) || !identical(as.integer(dims[[k]]$count), 256L)) next
+    c0 <- as.integer(dims[[k]]$count)
+    if (is.na(c0) || isTRUE(dims[[k]]$double01)) next
     dir <- ivt_f2_dim_dir(raw, k, slots)
     cc <- tryCatch(ivt_f2_slot_chunked_count(raw, dir), error = function(e) NA_integer_)
-    if (!is.na(cc) && cc > 256L) {
+    if (!is.na(cc) && cc > c0) {
       nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
       ivt_fallback(sprintf(paste(
-        "Dimension %d (\"%s\") has a chunked codebook capped at one 256-member",
-        "block; its true member count (%d) was recovered from the chunk-run",
-        "geometry."), k, nm, cc), class = "canivt_chunked_count")
+        "Dimension %d (\"%s\") descriptor count %d is contradicted by a chunked",
+        "codebook; its true member count (%d) was recovered from the chunk-run",
+        "geometry."), k, nm, c0, cc), class = "canivt_chunked_count")
       dims[[k]]$count <- as.integer(cc)
     }
   }

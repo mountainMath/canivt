@@ -293,6 +293,31 @@ tables, and viewer/CSV-validated on the wider corpus:
   assignments"* (hit on the `02`-gen 1996 census profiles `b28ea47` /
   `95f0205xdb96003`, whose chunk-recovered 2298-member geography carries some NA
   codes). Guarded with `!is.na(code)`; both now decode.
+- **`04`-gen chunked count — the reconcile no longer requires a `256` descriptor
+  count** (2026-07-24). A second range-based metadata-harvest sweep (200 Borealis +
+  200 StatCan) surfaced the 1991 enumeration-area census tables (`04 00 20 00`,
+  full-download from www12 `Download.cfm`) — e.g. **PID=128 / catalogue 1006454**,
+  "N9101 – Population 15+ by Age Groups (17) and Marital Status (6), showing Labour
+  Force Activity (8) and Sex (3), Canada … enumeration areas". Its geography reads
+  `type 0x0e count 52` on the descriptor — and **52 is the CHUNK count, not the
+  member count**: the codebook stores 52 full 256-member chunks + a 60-member tail,
+  true count **13372**. The `2026-07-23` generic-path fix above only invoked
+  `ivt_f2_slot_chunked_count()` when the descriptor count was *exactly 256*, so this
+  variant (count 52) slipped through and the file preflight-rejected — the extent
+  guard (`ivt_page_preflight()`, decode.R) correctly refused to decode 52/13372 of
+  the table (a real float64 page sits at the doubled-corner of the modelled
+  cartesian). Fix: `ivt_f2_dim_count_reconcile()` (dimdir.R) now runs the chunk-run
+  probe on **every** dimension and adopts its count whenever it EXCEEDS the
+  descriptor's — the probe is authoritative and self-gating (returns NA unless the
+  codebook physically holds ≥2 full 256-arrays + a consistent trailing partial, so a
+  ≤256-member dim is never touched and no count is fabricated). Decodes to
+  **8,308,875 non-zero cells** across 13,372 EAs, `geo_name_NA = 0`; validated
+  internally (Canada Total-Sex 21,304,740 = Male 10,422,145 + Female 10,882,595
+  exactly; counts random-rounded to base 5, and the fractional values are the real
+  Labour-Force *rate* members — Participation/Unemployment/Employment-population
+  ratio — stored as float64). Corpus regression **FAIL 0 PASS 312** on the
+  pre-existing rows (no count changed); ledger row `1006454` added
+  (`strict_clean = FALSE`, `canivt_chunked_count`).
 - **Health at a Glance line generalised** (2026-07-19): sampling 20 more files from
   the GPVU3L dataset showed the single-file title-block bound was too tight for the
   multi-dimension tables (records spill past the FACET01 title). Two metadata-driven
