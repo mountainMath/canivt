@@ -21,6 +21,13 @@ RH_PY  <- file.path(RH_DEV, "rh_inflate.py")
 RH_CACHE_ROOT <- file.path(RH_DEV, "harvest-cache")
 `%||%` <- function(a, b) if (is.null(a) || length(a) == 0) b else a
 
+# per-file wall-clock deadline, checked INSIDE rh_get so the timeout is a normal
+# catchable error raised in the tryCatch-protected network region -- unlike
+# setTimeLimit(elapsed=), whose error can fire at any interpreter checkpoint
+# (between files, inside an error handler) and ESCAPE the per-file handler, halting
+# the whole sweep. NULL when not harvesting (probe / ad-hoc rh_get).
+RH_STATE <- new.env(parent = emptyenv()); RH_STATE$deadline <- NULL
+
 rh_cache_dir <- function(id) {
   d <- file.path(RH_CACHE_ROOT, gsub("[^A-Za-z0-9._-]", "_", id))
   dir.create(d, recursive = TRUE, showWarnings = FALSE); d
@@ -28,8 +35,11 @@ rh_cache_dir <- function(id) {
 
 # ---- low-level HTTP range GET (follows redirects, forwards Range) ----------
 rh_get <- function(url, from0, to0) {
+  if (!is.null(RH_STATE$deadline) && Sys.time() > RH_STATE$deadline)
+    stop("rh: per-file deadline exceeded", call. = FALSE)   # catchable, in the protected region
   h <- new_handle(followlocation = TRUE, useragent = RH_UA,
-                  range = sprintf("%.0f-%.0f", from0, to0))
+                  range = sprintf("%.0f-%.0f", from0, to0),
+                  connecttimeout = 20L, timeout = 90L)  # fast, catchable network cap
   r <- curl_fetch_memory(url, handle = h)
   hd <- curl::parse_headers_list(r$headers)
   list(status = r$status_code, content = r$content, headers = hd, final = r$url)
@@ -227,10 +237,10 @@ rh_harvest_one <- function(id, source, url, size_hint = NA, out_dir = NULL,
   t0 <- Sys.time()
   row <- list(id = id, source = source, url = url, fetched_at = format(t0, "%Y-%m-%dT%H:%M:%S"))
   res <- tryCatch({
+    RH_STATE$deadline <- t0 + timeout           # a pathological file can't stall the sweep
+    on.exit({ RH_STATE$deadline <- NULL; canivt:::ivt_memo_clear() }, add = TRUE)
     src <- rh_open(url, size_hint, id = id, cache = cache)
-    on.exit({ setTimeLimit(); canivt:::ivt_memo_clear() }, add = TRUE)
     warns <- character(0)
-    setTimeLimit(elapsed = timeout, transient = TRUE)  # a pathological file can't stall the sweep
     out <- withCallingHandlers(
       canivt:::ivt_quietly({
         fam  <- canivt:::ivt_family(src)
@@ -243,7 +253,7 @@ rh_harvest_one <- function(id, source, url, size_hint = NA, out_dir = NULL,
 
   if (!is.null(res$err)) {
     row$status <- if (grepl("needs-full-fetch", res$err)) "NEEDS-FULL-FETCH"
-                  else if (grepl("reached elapsed time limit|reached CPU", res$err)) "TIMEOUT"
+                  else if (grepl("per-file deadline|reached elapsed time limit|reached CPU|Timeout was reached|resolve host", res$err)) "TIMEOUT"
                   else "ERROR"
     row$error <- substr(res$err, 1, 200)
     if (!is.null(res$src)) {
@@ -300,7 +310,7 @@ rh_harvest_one <- function(id, source, url, size_hint = NA, out_dir = NULL,
 
 # ---- harvest a whole catalogue ---------------------------------------------
 rh_harvest_catalogue <- function(source = c("borealis", "statcan"), out_dir,
-                                 limit = NULL, keys = NULL, ...) {
+                                 limit = NULL, keys = NULL, resume = TRUE, ...) {
   source <- match.arg(source)
   cat_path <- file.path(path.expand("~/data/ivt_data"),
                         if (source == "borealis") "borealis_ivt_catalogue.parquet"
@@ -314,12 +324,24 @@ rh_harvest_catalogue <- function(source = c("borealis", "statcan"), out_dir,
   } else {
     cat$ivt_base <- sub("\\.zip$", "", basename(cat$ivt_url))
     cat <- cat[!duplicated(cat$ivt_base), ]
-    rows <- data.frame(id = cat$catalogue, url = cat$download_url,
+    # id = ivt_base (unique per file); cat$catalogue repeats across a cube's members
+    rows <- data.frame(id = cat$ivt_base, url = cat$download_url,
                        size_hint = NA, stringsAsFactors = FALSE)
   }
   if (!is.null(keys)) rows <- rows[rows$id %in% keys, , drop = FALSE]
   if (!is.null(limit)) rows <- head(rows, limit)
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  # RESUME: a per-file meta rds is written only on a SUCCESSFUL harvest, so skipping
+  # keys that already have one re-runs a batch cheaply and retries ONLY the failures
+  # (ERROR/TIMEOUT/NEEDS-FULL-FETCH wrote no meta). Set resume = FALSE to force all.
+  if (isTRUE(resume)) {
+    done <- file.exists(file.path(out_dir, "meta",
+                                  paste0(gsub("[^A-Za-z0-9._-]", "_", rows$id), ".rds")))
+    if (any(done))
+      message(sprintf("resume: skipping %d/%d already-harvested %s files",
+                      sum(done), nrow(rows), source))
+    rows <- rows[!done, , drop = FALSE]
+  }
   inv <- vector("list", nrow(rows))
   for (i in seq_len(nrow(rows))) {
     message(sprintf("[%d/%d] %s %s", i, nrow(rows), source, rows$id[i]))

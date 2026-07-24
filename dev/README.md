@@ -56,8 +56,16 @@ rh_harvest_catalogue("statcan",  "~/data/ivt_harvest", keys = c("98-10-0211-01",
 rh_harvest_one("id", "borealis", "https://…", out_dir = "~/data/ivt_harvest")
 ```
 
-Per-file `timeout` (default 120 s, `setTimeLimit`) keeps one pathological file
-from stalling a catalogue sweep.
+Per-file `timeout` (default 120 s) keeps one pathological file from stalling a
+sweep: it is a wall-clock **deadline checked inside `rh_get`**, so a slow/hung file
+trips a normal, catchable error in the network region and becomes an inventory row
+— it never escapes the per-file handler and halts the batch (the failure mode of
+the earlier `setTimeLimit(elapsed=)` approach). A catalogue run is also
+**resume-safe**: `rh_harvest_catalogue(..., resume = TRUE)` (the default) skips keys
+whose `meta/<id>.rds` already exists — a per-file meta is written only on success —
+so a re-run retries **only** the failures (network drop, deadline) and re-serves
+everything else from the read-through cache at zero network. `resume = FALSE` forces
+a full re-harvest.
 
 ## Validated
 
