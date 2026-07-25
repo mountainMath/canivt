@@ -1,242 +1,26 @@
-# onboarding-backlog.md — staged onboarding of new `.ivt` candidates
+# onboarding-backlog.md — the per-table onboarding recipe
 
-The corpus was "fully supported" as of the 2026-07 sweep. A fresh random sample
-of 20 catalogue tables (10 StatCan + 10 Borealis, none previously in the corpus)
-surfaced **7 tables that do not read strict-clean** — 5 unsupported (fail the
-family gate) and 2 that read only via loud fallbacks. All 7 raw `.ivt`s are now
-in the ivt cache (`CANIVT_IVT_CACHE`, one folder per table) so they can be worked
-systematically. This doc is the backlog + the repeatable onboarding workflow.
+**The backlog is CLEARED.** Four random sweeps (2026-07-21 … 07-23) plus two
+metadata-harvest sweeps flagged 20-odd tables; all are onboarded or ledgered as
+deliberately UNSUPPORTED. What survives here is the **repeatable recipe** for the
+next sweep. Per-table narratives live in [`decode-history.md`](decode-history.md);
+current status in [`coverage.md`](coverage.md); refusals in
+[`unsupported-formats.md`](unsupported-formats.md).
 
-**Progress (2026-07-21): ALL 7 landed.** The Stage-1 pass cleared 4 (one fix +
-cascade); Stages 3–5 then landed the remaining 3 — `97-563-XCB2006058` (uid-less
-custom geography routed to the data-style reader), `table_6_c-ivt-2007` (UCR
-inverted descriptor rebuilt from the slot table), and `PRSIC1dec1999` (earlier
-`02`-gen, now **strict-clean**). See the Done section at the bottom.
+**Sampling log — [`sampled-tables.csv`](sampled-tables.csv).** Every table drawn in
+a random sweep is recorded there (one row per `sweep_date`/`source`/`key` with
+`outcome` ∈ {`decoded_clean`, `decoded_fallback`, `onboarded_fixed`,
+`http_403_blocked`, `error`} + `n_cells`/`note`) so later sweeps **dedup against it**
+instead of re-drawing. Only onboarded tables land in the corpus ledger; this log is
+the fuller record of what has been *tried*.
 
-**Backlog REOPENED (2026-07-22).** A new sweep flagged 4 Borealis tables — 3 that
-fail the family gate and 1 that decodes but drops 20k pages — all imported into the
-ivt cache for investigation. **ALL 4 NOW ONBOARDED (2026-07-22).** The two Census
-of Agriculture 2016 tables (`00040200`/`00040207`) landed via the `01 02`
-`Date`-facet descriptor framing + square-bracket inline geography. The NAICS-by-
-location `SP3_PAWNKX_CDNAIC3_LOC-1` (Stage 3) landed: its 20,523 "skipped pages"
-were a **verified false alarm** (sparse-directory over-walk onto codebook bytes,
-none a real page) — 133,217 cells, byte-exact-additivity-validated, skip tripwire
-now geometry-validated. The 7-dim adult-criminal-court survey `SP3_MRVVPK_accs-…`
-(Stage 2), previously deferred as `Table-024`-class, is **DONE**: its "doubled
-directory" was a **DELETED MEMBER SLOT** in Sex (6 physical slots, 5 members, slot
-3 deleted), NOT an un-modelled straddle sub-level. Onboarded via three small,
-general fixes (bare-`02` descriptor separator + `0x08` dense-array marker +
-codebook-driven `ivt_f2_dim_slot_expand()`) → **4,573,026 cells, additivity-exact**,
-clean pow2 geometry (no `survey_double`). This **rules the accs table OUT of the
-`Table-023`/`Table-024` doubled-window class** — the two are different phenomena
-(accs = interior deleted slot / missing entry; Table-023 = present-but-empty window
-padding pages). See the row + Done section. `Table-023`'s window over-allocation
-remains the only open doubled-window case.
-[**New backlog — 2026-07-22 sweep**](#new-backlog--2026-07-22-sweep-borealis--flagged-not-yet-onboarded)
-below.
-
-**Sweep 3 partial (2026-07-23).** The third sweep flagged 4 preflight-rejected
-Borealis tables. **2 onboarded, 2 deferred.** ONBOARDED: the `02 00 20 00`
-CHUNKED-geography 1996 tables `SP3_PPDO7R_b34csd_1` (census, Geography **5544**,
-2,240,847 cells) and `SP3_H7WG5V_EDDTAB16` (Census of Agriculture, Geography
-**2315**, 60,468 cells) — both capped at one 256-member chunk because the gen02
-descriptor is rebuilt from the codebook; `ivt_f2_slot_chunked_count()` recovers
-the true count as the inverse of the chunk layout (`canivt_chunked_count`,
-`strict_clean = FALSE`). DEFERRED (hard, documented in `decode-history.md`):
-`SP3_NAZQV2_Table-210` (LFHR 6-dim — stale `@558`, irregular directory packing +
-off-by-one in-page, the unsolved `Table-023`/`16 00`-flags geometry) and
-`SP_IE56KT_CDCSDNAIC3dec2006` (Business Patterns Dec 2006 — SUB-SECTORS 26628
-misread + fragmented directory). Corpus FAIL 0.
-
-**Sweep 4 (2026-07-23, seed `20260723`).** 10 StatCan + 10 Borealis, none seen
-before. 18/20 decode (11 strict-clean, 7 known fallbacks). **2 Borealis tables fail
-the family gate** — both 2001 census tables where a footnote bleeds into the
-descriptor so it is rebuilt from the slot table, u8-capping a chunked >256-member
-dimension at 256 → layout can't span. Imported to the ivt cache, FLAGGED for
-onboarding (details in
-[New backlog — 2026-07-23 sweep 4](#new-backlog--2026-07-23-sweep-4-borealis--flagged-not-yet-onboarded)).
-Not in the ledger yet.
-
-**Second random sweep (2026-07-21).** A fresh 10 StatCan + 10 Borealis sample
-(none in the corpus): all 10 StatCan decoded; of the 10 Borealis, 5 decoded, 3
-were 403-blocked (access-restricted OCDMVE dataset, not a decode gap), and two
-`04`-gen survey tables failed and are now onboarded (ledger + `decode-history.md`
-"Second random sweep") — `SP3_THNM6I_00040231` (Census of Agriculture overview:
-`@32`→identity block, real descriptor recovered by a FORWARD master-directory
-variant of the inverted retry) and `SP3_Q2JJJO_table_5_c-ivt-2008` (UCR crime:
-`[used][allocated]` directory entries + a `b3==08` allocation-padding tail, both
-`04`-gen adaptations of allowances the `02`-gen already had). Corpus FAIL 0.
-
-**Focused investigation — cells validated, GEOMETRY STILL OPEN (2026-07-22): the
-`04`-gen doubled-window survey directory (LFHR multi-dim).** A later sweep drew
-`SP3/NAZQV2/Table-023` (Labour Force Historical Review 2009, 6 dims incl. a
-276-month Timeseries) — the first *multi-dimensional, long-series* member of the
-survey lineage (LFHR `Table-051`/UCR/justice). Onboarded (**5,771,932 cells**,
-LFS-validated: sex & geo additivity exact, 11 provinces in order) via two loud
-`strict_clean = FALSE` fallbacks: (1) `ivt_f2_time_members()` reads `alloc` as a
-full u16 (Table-023's alloc = 512 tripped the `alloc < 256` guard); (2)
-`ivt_survey_double()` (decode.R) detects STRUCTURALLY that this lineage *appears*
-to pad the innermost paged (straddle-window) dimension to **double** its nextpow2
-→ strides `[1,8,512,2048,8192]` not pow2 `[1,4,256,1024,4096]`, read off the
-page-directory **size signature** (padding pages are the minimal allocation —
-container metadata, no presence decode). **The geometry is NOT understood** — the
-doubling wastes half the directory (suspicious; likely an un-modelled nested level,
-cf. the sibling `Table-024`'s `ipc` mismatch) and has no DECLARED metadata marker
-(if real, a header/descriptor field must declare it, and the parser should key off
-that, not an inferred directory-structure probe). Full "Open concerns" +
-marker-hunt candidates in [`coverage.md`](coverage.md). Table-024 is not in the
-corpus and the extent guard in `ivt_page_preflight()` honest-rejects that shape.
-
-**Sampling log — [`sampled-tables.csv`](sampled-tables.csv).** Every table drawn
-in a random sweep is now recorded there (one row per `sweep_date`/`source`/`key`
-with `outcome` ∈ {`decoded_clean`, `decoded_fallback`, `onboarded_fixed`,
-`http_403_blocked`, `error`} + `n_cells`/`note`), so future sweeps can DEDUP
-against it instead of re-drawing the same tables. Only tables we onboard land in
-the corpus ledger; this log is the fuller record of what has been *tried* (incl.
-the ones that just worked and the access-blocked ones). The 2026-07-21 second
-sweep seeds it with its 20 rows (8 clean / 7 fallback / 2 fixed / 3 403-blocked);
-back-fill earlier sweeps opportunistically.
-
-Companion docs: format ref [`ivt-format.md`](ivt-format.md); marker catalog
-[`markers.md`](markers.md); coverage [`coverage.md`](coverage.md); the narrative
-of how each earlier table was cracked [`decode-history.md`](decode-history.md).
-
-## The candidates
-
-Diagnostics captured from `ivt_f2_descriptor()` / `ivt_layout()` /
-`ivt_page_preflight()` (all under `ivt_quietly()`); cell counts from a successful
-fallback `read_ivt()` where one exists.
-
-| cache folder | source | sig | today | descriptor (recovered) | root-cause hypothesis | stage |
-|---|---|---|---|---|---|---|
-| `SP3_NIQKF5_95f0490xcb01006` | Borealis | `04` | unsupported | Values(1)×Profile(**256**)×Geography(**256**) | both dims pinned at 256 → true counts >256, need the u16 descriptor count (slot-dir blocks cap at 256) | 1 |
-| `SP3_BJFWAP_95f0378xcb01004` | Borealis | `04` | unsupported | Geography(164)×Sex(3)×Age(5)×Marital(7)×PresenceOfChildren(11)×LabourForce(8) | descriptor looks complete → preflight rejects on layout/page-extent, not counts | 2 |
-| `97-555-XCB2006058` | StatCan | `04` | unsupported | Geography(166)×Age(8)×Sex(3)×Selected-demographic(830, type `0x0a`)×MotherTongue(4) | descriptor plausible → preflight rejects; suspect the 830-member straddle / page width. Twin lineage `97-563-XCB2006072` is supported | 2 |
-| `SP3_NIQKF5_95f0489xcb01007` | Borealis | `04` | **WARN** (86,696 cells) | Values(1)×Profile(336)×Geography(315) | reads via `canivt_descriptor_lenient` accept-all walk → make the primary doubled-name walk recover all 3 dims (strict-clean) | 3 |
-| `SP3_AAV9RM_97-563-XCB2006058` | Borealis | `04` | ✅ **DONE** (75,913 cells, `canivt_geo_datadim`) | 8 dims (Geo(1)×Age(7)×…×Year(2)) | ~~geo block dir didn't resolve DGUIDs~~ — no DGUID exists (uid-less custom field dict); routed to data-style geo reader | 3 |
-| `SP3_HHP4CZ_table_6_c-ivt-2007` | Borealis | `04` | ✅ **DONE** (1,952 cells, `canivt_descriptor_from_slots`) | Geo(1)×ClearanceType(19)×Offences(187)×Year(1) | UCR survey lineage: INVERTED descriptor (records before an `80 01` signature) rebuilt from the header slot table | 4 |
-| `SP_XWJR2W_PRSIC1dec1999` | Borealis | `02` | ✅ **DONE** (2,652 cells, **strict-clean**) | PROV/CAN(14)×DIVISIONS(19)×EMP.SIZE(11) | earlier `02`-gen: dir with interior null holes + `81 01` dense member array (`0x10` marker) + `English Label` schema vocabulary | 5 |
-
-## Staged plan
-
-Stages are ordered by ascending risk/effort and grouped by shared machinery, so
-each stage builds momentum and (mostly) reuses the previous fix. Stages are
-independent — a later stage does not depend on an earlier one landing.
-
-- **Stage 1 — descriptor count refinement (well-trodden).** ✅ **DONE
-  (2026-07-21)** `95f0490xcb01006`. The root cause was NOT a u8/u16 count read
-  (the byte walk already computed 621/1041 from the framing) — it was the
-  geography prose-bleed name recovery being gated to `first_record`, while the
-  profile lineage stores geography LAST, so the record was dropped and the
-  descriptor rebuilt from the slot table (which caps at the first 256-member
-  chunk). Fix + cascade in the Done section.
-- **Stage 2 — layout/preflight for full-descriptor crosstabs.** ✅ **DONE
-  (2026-07-21, cascaded)** `95f0378xcb01004`, `97-555-XCB2006058`. Both were
-  rejected by the exact-fit pre-flight gate on `b3 == 09` pages that carry an
-  allocation/mask tail; relaxing exact-fit to `b3 == 08`-only cleared both.
-- **Stage 3 — promote fallback reads to strict-clean.** `95f0489xcb01007`
-  ✅ **DONE (2026-07-21, cascaded)** — the descriptor-name geotype fix removed
-  its lenient fallback (cell count unchanged). `97-563-XCB2006058`
-  ✅ **DONE (2026-07-21)** — the "geo block dir didn't resolve DGUIDs" hypothesis
-  was wrong: this single-area custom extract's geography field dictionary declares
-  only name columns (`English Desc / Desc française / short name`), **no UID**, so
-  there is no DGUID to resolve. The double warning was the dispatcher running the
-  DGUID byte-scan (step 5) before the data-style reader (step 5b). Gated step 5 on
-  `enc != "custom" || ivt_f2_geo_field_has_uid()`, so a uid-less custom dictionary
-  routes straight to `ivt_f2_geo_datadim`. Now a single documented
-  `canivt_geo_datadim` fallback (`strict_clean = FALSE`, cells unchanged 75,913).
-- **Stage 4 — new modern descriptor variant.** `table_6_c-ivt-2007`
-  ✅ **DONE (2026-07-21)**. Not a new framing — the UCR survey lineage (sibling of
-  the onboarded `ucr2.2_3-2006`) stores its descriptor records INVERTED before a
-  signature ending `80 01` (not `80 03`/`80 ff`), off an `81 02 04 00` sub-header
-  the `81 02 03 00` inverted-retry misses; its 1-member `Year` reference-period
-  dimension the name-keyed member counter cannot size, so both the forward walk
-  and `ivt_f2_dims_from_slots()` come up empty. Fix: `ivt_f2_descriptor_impl()`
-  now falls back to `ivt_f2_descriptor_from_slots()` (name-independent slot member
-  counter) when the walks come up short, plus a `56 00` survey-name-marker cleaner
-  in `ivt_f2_dim_marker_name()`. Reads Geo(1)×ClearanceType(19)×Offences(187)×
-  Year(1) → **1,952 cells** (`canivt_descriptor_from_slots`, `strict_clean = FALSE`,
-  as with the other survey-lineage tables). Validated: the clearance-status
-  accounting identities (Total = Not cleared + Cleared by charge + Cleared
-  Otherwise; the nested Cleared-Otherwise / Other-Clearances subtotals) hold
-  EXACTLY across all 177 offences.
-- **Stage 5 — earlier container generation.** `PRSIC1dec1999` (`02 00 20 00`)
-  ✅ **DONE (2026-07-21, strict-clean)**. Three small, general fixes — NOT a
-  bespoke gen02 path: (1) `ivt_f2_dim_dir()` now accepts a directory that is
-  complete but sparse (its `want` declared slots are all either well-formed
-  entries or explicit `(0,0)` null holes) — the "Employment size ranges" dimension
-  has 5 interior holes across 19 slots, beyond the old 4-null tolerance, which
-  blocked BOTH `ivt_f2_descriptor_02()` and the slot rebuild; (2) the `81 01`
-  dense member-array reader (`ivt_f2_dir_entry_members()`) accepts a `0x10`
-  pre-records marker byte (this generation's dense arrays; was `0x80`/`0x01`),
-  recovering the 11-member size-range array; (3) `ivt_f2_dim_dict_en_first()`
-  anchors on the `English Label` phrase (the EN field name is followed by binary
-  bleed that broke `\bLabel\b`). Reads PROV/CAN(14)×DIVISIONS(19)×EMP.SIZE(11) →
-  **2,652 cells strict-clean**. Validated: Canada = Σ provinces, DIVISIONS Total =
-  Σ divisions, and the employment-size hierarchy (Total(A) = Indeterminate(B) +
-  Subtotal(A−B); Subtotal = Σ 8 ranges) all hold EXACTLY.
-
-## New backlog — 2026-07-22 sweep (Borealis) — FLAGGED, not yet onboarded
-
-A fresh 10 StatCan + 10 Borealis random draw (seed `20260722`; logged in
-[`sampled-tables.csv`](sampled-tables.csv)). All 10 StatCan decoded (8 clean, 2
-via known fallbacks). Of the 10 Borealis, 7 decoded via fallbacks; **3 fail the
-family gate** and **1 decodes but silently drops pages**. All four raw `.ivt`s are
-now imported into the ivt cache (`CANIVT_IVT_CACHE`, one folder per key) for
-investigation. None is in the corpus ledger yet.
-
-Diagnostics from `ivt_f2_descriptor()` / `ivt_layout()` / `ivt_f2_decodable()`
-(under `ivt_quietly()`):
-
-| cache folder | source | sig | today | descriptor (recovered) | root-cause hypothesis | stage |
-|---|---|---|---|---|---|---|
-| `SP3_WLOGGX_00040200` | Borealis | `04` | ✅ **DONE** (92,584 cells, `canivt_geo_datadim`) | Geography(2568)×NorthAmerican(43)×Date(2) | ~~geo count u8-capped at 256~~ — the descriptor's **`Date (2)` facet** uses the `[type][count] 01 02` double-marker framing the `01`-only anchor skipped, so the walk found 2/3 dims and fell to the slot rebuild (which caps chunked geo at one 256 chunk). Admitted the `01 02` framing (small-count gated); geo then reads its real u16 2568. Square-bracket inline codes split to `geo_uid` | 1 |
-| `SP3_WLOGGX_00040207` | Borealis | `04` | ✅ **DONE** (55,020 cells, `canivt_geo_datadim`) | Geography(2568)×FarmsReporting(11)×UnitOfMeasure(3)×Date(2) | same as `00040200` (Census of Ag 2016, `01 02` Date facet) | 1 |
-| `SP3_MRVVPK_accs-…-decision-1994-1995-to-2009-2010` | Borealis | `04` | ✅ **DONE** (4,573,026 cells, `canivt_deleted_slot`;`canivt_descriptor_lenient`) | 7 dims: FiscalYear(16)×Charge/Case(5)×AgeGroup(7)×**Sex(5→6 slots)**×Offences(40)×Geography(17)×Decision(6) | adult criminal court survey (15 MB). The "doubled directory" (`k = 0 … 63 916`, double the pow2 32 768) was **NOT** a `Table-024`-class straddle sub-level — it was a **DELETED MEMBER SLOT** in Sex: the codebook member-label array holds **6** records (`Total/Males/Females/Company/Unknown` + a deleted "Company") while the descriptor declares 5, so Sex's physical slot EXTENT is 6 and the deleted interior slot 3 leaves **no directory entry** (occupancy `{0,8,16,32,40}` per 64-block, 24 absent). Using the extent-6 nesting gives clean pow2 strides `[1,8,64,512,4096]`, `survey_double = FALSE`, and additivity is exact (Males+Females+Company+Unknown = Total; Σ age = Total; Single+Multiple cases = Total Cases). Fixed by: bare-`02` descriptor name-separator (Fiscal year `10 04 02`); `0x08` dense-array marker so the 6-record label array parses; and `ivt_f2_dim_slot_expand()` (codebook-driven extent expansion, loud `canivt_deleted_slot`). **Rules accs OUT of the Table-023/Table-024 doubled-window class** (different root cause; Table-023 has present-but-empty padding pages, all counts exact). See [`decode-history.md`](decode-history.md) | 2 |
-| `SP3_PAWNKX_CDNAIC3_LOC-1` | Borealis | `04` | ✅ **DONE** (133,217 cells, `canivt_descriptor_lenient`;`canivt_geo_datadim`) | Geography(314, only 21 populated)×SUB-SECTORS(26628)×EMP.SIZE(11) — Canadian Business Patterns Dec 2010, 3-digit NAICS × location × employment size | The `canivt_skipped_pages` (20,523) was a **verified false alarm**: a sparse directory (282 real pages) over-walked by the 209×314 cartesian resolves absent coordinates onto 644 distinct codebook/text offsets, **none a real page** (all 644 checked). Decode is complete+correct — **byte-exact employment-size additivity** (`Subtotal = Σ(1-4…500+)` 21681/21681 exact). Fixed the tripwire generically (`ivt_skip_is_lost_page()`, decode.R): a skipped entry counts only when its target validates as a page by GEOMETRY (presence record + tightest value run fit the entry size), deduped by offset → 0 false skips, doctored-2016203 test preserved. `SUB-SECTORS = 26628` is correct (NAICS3 × ~266 locations). Known minor: EMP.SIZE labels shifted (values correct; deferred — shared-reader regression risk) | 3 |
-
-## New backlog — 2026-07-23 sweep 4 (Borealis) — ONBOARDED (2026-07-23)
-
-A fresh 10 StatCan + 10 Borealis random draw (seed `20260723`, drawn from the
-cached catalogues excluding the corpus + all three prior sweeps). **18/20 decode**
-(11 strict-clean, 7 via known loud fallbacks — no new failures there). **2 Borealis
-tables fail the family gate** and are the actionable onboarding candidates; both are
-now imported into the ivt cache (one folder per key).
-
-Both failed for the **same root cause**: a **>256-member dimension whose count is
-capped at 256** when the count is read from the codebook (a footnote bleeds into
-the real descriptor block, so the generic descriptor walk reads the geography/
-classification dim from its slot-directory member block, which caps at one
-256-member chunk). With the capped count the `ivt_layout()` cartesian can't span
-the page directory → `ivt_page_preflight()` FALSE → `ivt_family()` NA. This is the
-**family-1 / `04`-gen analogue** of the gen02 chunked-geography cap already solved
-for `b34csd`/`EDDTAB16` by `ivt_f2_slot_chunked_count()` (sweep 3).
-
-**RESOLVED (2026-07-23).** The recovery was extended to the generic descriptor
-path: `ivt_f2_dim_count_reconcile()` (dimdir.R) now probes
-`ivt_f2_slot_chunked_count()` for any dimension read as exactly 256 and adopts the
-chunk-run count when it recovers >256 (LOUD `canivt_chunked_count`; the recovery
-returns NA for a genuine single-chunk 256-member dim, so a real 256 is never
-touched). This is the same recovery `ivt_f2_descriptor_02()` already applied for
-the byte-0 == `0x02` generation — now shared by both paths. Both tables decode
-with **every geography named** (`geo_name_NA = 0`) and are in the corpus ledger
-(`strict_clean = FALSE`, the chunk-recovery fallback). The SAME one fix also
-onboarded **6 files from the metadata-harvest sweep** (2001 F-series 95F03xx/
-95f04xx profiles + the 2006 `97-554` crosstabs — see the harvest-sweep entry in
-`decode-history.md`).
-
-| cache folder | source | today | descriptor (recovered) | root-cause hypothesis | stage |
-|---|---|---|---|---|---|
-| `SP3_NIQKF5_95f0491xcb01003` | Borealis (2001 Profiles, FSA-level) | ✅ **ONBOARDED** — 105,001 cells | Values(1)×Profile(69)×**Geography(1581)** | Geography chunk-recovered from 256 by `ivt_f2_slot_chunked_count()` in the generic reconcile path; layout now spans | done |
-| `SP3_AVQOPM_97F0007XCB2001042` | Borealis (2001 Language topic-based, 82 MB) | ✅ **ONBOARDED** — 9,021,645 cells | **Geography(5108)**×Sex(3)×**Characteristics(508)**×MotherTongue(4) | **BOTH** capped dims recovered by the same chunk-run recovery (Geography 256→5108, Characteristics 256→508) — the predicted `0x09`-width route was unnecessary; the chunk geometry pins both | done |
-
-## The per-table onboarding workflow (repeatable recipe)
+## The per-table onboarding workflow
 
 Do one table at a time; land it fully (fix + validation + ledger + notes) in a
 single commit before starting the next.
 
-1. **Reproduce & pinpoint the rejection.** `devtools::load_all(".")`, read the
-   raw, and run the gate stages under `ivt_quietly()` to see *where* it fails:
+1. **Reproduce & pinpoint the rejection.** `devtools::load_all(".")`, read the raw,
+   and run the gate stages under `ivt_quietly()` to see *where* it fails:
    ```r
    f   <- "<cache>/<folder>/<file>.ivt"; raw <- readBin(f, "raw", file.info(f)$size)
    d   <- ivt_quietly(ivt_f2_descriptor(raw)); str(lapply(d$dims, `[`, c("type","count","name")))
@@ -245,30 +29,23 @@ single commit before starting the next.
    ```
    Classify: **descriptor** (wrong dim count/name/missing dim), **layout**
    (straddle/geo choice), or **preflight** (page extent / exact-fit / capacity /
-   span). This decides which R file to touch (`dimdir.R` / `codebook-f2.R` /
-   `decode.R`).
-2. **Get ground truth.** Prefer the file's own metadata; validate against an
-   external source you do **not** hard-code a path to:
-   - the Beyond 20/20 HTML viewer via internal `R/ground-truth.R`
-     (`ivt_ground_truth(catalogue)` → per-cell values + member positions), or
-   - the published CSV / WDS `getCubeMetadata` for true dim counts and spot cells.
-   Record the expected total non-zero cell count and 2–3 spot cells.
-3. **Fix generically (metadata-driven).** Per CLAUDE.md: no name/type branches, no
-   hidden hard-coded parsing paths — drive off structural markers, counts, the
-   2048-bit cap. If you decode/widen a byte marker, update `markers.md` **in the
-   same commit** as the recognizer. Any new content-heuristic path must be wired
-   through `ivt_fallback()` (loud, strict-upgradable) — never a silent read.
-4. **Validate.** `read_ivt(f)` → cell count matches step 2; spot cells match.
-   Then `withr::with_options(list(canivt.strict = TRUE), read_ivt(f))` must be
-   clean, **or** the remaining fallback is justified and recorded as
-   `strict_clean = FALSE`.
-5. **Record.** Add/append in the same commit:
-   - a row in `tests/testthat/fixtures/corpus-ledger.csv`
-     (`key,supported,strict_clean,n_cells`),
-   - a coverage bump in `coverage.md`, and a `decode-history.md` entry (what the
-     file was, how it was cracked, the invariant behind the fix),
-   - move the table's row here to a "Done" list.
-6. **Regress.** Run the opt-in corpus ledger (it now includes these 7 folders):
+   span). That decides the file to touch (`dimdir.R` / `codebook-f2.R` / `decode.R`).
+2. **Get ground truth.** Prefer the file's own metadata; validate against an external
+   source you do **not** hard-code a path to — the B20/20 HTML viewer via internal
+   `R/ground-truth.R` (`ivt_ground_truth(catalogue)`), or the published CSV / WDS
+   `getCubeMetadata`. Record the expected non-zero cell count and 2–3 spot cells.
+3. **Fix generically (metadata-driven).** No name/type branches, no hidden hard-coded
+   paths — drive off structural markers, counts, the 2048-bit cap. If you decode or
+   widen a byte marker, update `markers.md` **in the same commit** as the recognizer.
+   Any new content-heuristic path goes through `ivt_fallback()` — never a silent read.
+4. **Validate.** `read_ivt(f)` → cell count and spot cells match step 2. Then
+   `withr::with_options(list(canivt.strict = TRUE), read_ivt(f))` must be clean, **or**
+   the surviving fallback is justified and recorded as `strict_clean = FALSE`.
+5. **Record**, in the same commit: a row in
+   `tests/testthat/fixtures/corpus-ledger.csv` (`key,supported,strict_clean,n_cells`),
+   a coverage bump in `coverage.md`, and a `decode-history.md` entry (what the file
+   was, how it was cracked, the invariant behind the fix).
+6. **Regress.**
    ```sh
    CANIVT_CORPUS_TESTS=1 CANIVT_IVT_CACHE=~/data/ivt_raw \
      Rscript -e 'devtools::test(filter = "corpus")'
@@ -282,64 +59,20 @@ single commit before starting the next.
 - Strict mode is clean, **or** the surviving path is a single documented loud
   `canivt_*` fallback with `strict_clean = FALSE` in the ledger and a reason.
 - Ledger row + `coverage.md` + `decode-history.md` updated in the landing commit.
-- The corpus regression (`test-corpus.R`) and marker sweep both stay green.
+- `test-corpus.R` and the marker sweep stay green.
 
-## Definition of done (backlog)
+When a table cannot be onboarded honestly, ledger it `supported = FALSE` (with the
+reason in `unsupported-formats.md`) rather than emitting unvalidated values.
 
-All 7 tables have ledger rows and read at their validated cell counts; the sample
-sweep that produced this list re-run clean. When that holds, fold the residue
-back into `coverage.md`'s "fully supported" statement and retire this doc.
+## What the sweeps taught (recurring root causes)
 
-## Done
+Check these first — most rejections in the last four sweeps were one of them:
 
-**2026-07-21 — Stage 1 pass (one fix, four tables).** Two small, general changes
-in `R/codebook-f2.R` and `R/decode.R`:
-
-1. **Geography prose-bleed name recovery for a geography-LAST record.**
-   `ivt_f2_descriptor_name()` gained a `type` parameter; its "longest reoccurring
-   title-case prefix" fallback (case e) now fires for any u16-count **geotype**
-   record, not only `first_record`. The profile lineage stores its (large)
-   geography dimension last, and 95F0490's two "Geography" name copies are
-   interleaved with French prose (`Geographyens (pGeographytut de r`), so the
-   strict walk was dropping the record and rebuilding the descriptor from the
-   slot table — which caps at the **first 256-member chunk** (Profile's real 621,
-   Geography's real 1041 are chunked codebooks). With the name recovered, the
-   byte-walk's framing counts (`6d 02 0a 01` → 621; `11 04 0b 01` → 1041) stand.
-2. **Exact-fit pre-flight only for `b2 == 0 && b3 == 08`** (no head, no tail).
-   `b3 >= 09` pages may append an allocation/suppression-mask tail after the dense
-   value run (95F0490's `b3 == 09` pages carry 8–80 byte tails; the 2006 vintage
-   does it on `b3 >= 0a`). Decoding is presence-authoritative, so the tail is
-   inert. Relaxing exact→`<=` for `b3 == 09` cannot break a table that was exact.
-
-Landed (ledger rows flipped, corpus `test-corpus.R` green, FAIL 0):
-
-| table | verdict | cells | validation |
-|---|---|---|---|
-| `SP3_NIQKF5_95f0490xcb01006` | strict-clean | 538,064 | 2001 labour-force accounting identities hold across all 1041 geos to ±10 (base-5 random rounding) |
-| `97-555-XCB2006058` | strict-clean | 4,166,909 | Sex Total=M+F within ±11 on 96.7% of count cells; the residual is exactly the non-additive income medians/averages/SEs (members 795–830) |
-| `SP3_BJFWAP_95f0378xcb01004` | fallback (`canivt_descriptor_from_slots`; a footnote bleeds into its descriptor) | 859,903 | Sex Total=M+F within ±11 on 99.6% of count cells |
-| `SP3_NIQKF5_95f0489xcb01007` | strict-clean (was `canivt_descriptor_lenient`) | 86,696 | cell count unchanged from the prior validated fallback read; only the warning removed |
-
-**2026-07-22 — Census of Agriculture 2016 (`00040200` / `00040207`).** Both failed
-the family gate because the `01`-only descriptor anchor skipped their **`Date (2)`
-facet** record, framed `[type][count] 01 02 <doubled name>` (`13 02 01 02 DateDate`,
-a `02` name-copy marker vs the `01 01`-terminated "Year"). The dropped dimension
-forced the slot-table rebuild, whose largest-single-array count u8-capped the chunked
-geography at one 256 chunk (2568 → 256) and the layout could not span. Two small,
-general changes in `R/codebook-f2.R`:
-
-1. **Admit the `01 02` reference-period framing** in `ivt_f2_descriptor()`'s
-   `anchorA`, gated on a plausible small facet count (`count < 0x20`). The same
-   marker appears mid-prose where a doubled name butts a previous name's tail
-   (sibling `00040231`'s single-date "…business" + `01 02 DateDate`, count byte
-   `s`=0x73); the gate rejects it, so 00040231's genuine 1-member `Date` stays folded
-   and its 6,216-cell decode is preserved. With all 3 records found, geography reads
-   its real u16 count 2,568 (`08 0a 0c`, type 0x0c) directly from the descriptor.
-2. **Square-bracket inline geography** (`IVT_F2_INLINE_PAT3`, "`<name> [<code>]`"):
-   `ivt_f2_parse_inline()` now parses it, and `ivt_f2_geo_datadim()` splits it into
-   clean bilingual `geo_name` + `geo_uid` when ≥ 90 % of labels carry a bracketed code.
-
-| table | verdict | cells | validation |
-|---|---|---|---|
-| `SP3_WLOGGX_00040200` | fallback (`canivt_geo_datadim`) | 92,584 | Canada total farms 2011=205,730 / 2016=193,492 (published Census-of-Ag totals); Beef+Dairy=Cattle |
-| `SP3_WLOGGX_00040207` | fallback (`canivt_geo_datadim`) | 55,020 | Canada manure-applied 2016=66,227=Σ 10 provinces exactly; 2,483,220 acres × 0.4047 = 1,004,912 ha ≈ decoded 1,004,923 |
+| symptom | usual cause | fix that landed |
+|---|---|---|
+| a dimension read as exactly **256** | count taken from a slot-directory member block, which caps at one 256-member chunk | `ivt_f2_slot_chunked_count()` via `ivt_f2_dim_count_reconcile()` (`canivt_chunked_count`) — recovers the true chunked count on both the generic and `02`-gen paths |
+| descriptor short by one dimension | an unadmitted record framing (`01 02` reference-period facet; bare-`02` name separator; INVERTED records before the signature; prose bleeding into names) | widen `ivt_f2_descriptor()`'s anchors; last resort `ivt_f2_descriptor_from_slots()` |
+| preflight rejects a plausible descriptor | exact-fit demanded on a page with a head block / allocation tail | exact fit only for `b2 == 0 && b3 == 08`; `≤` otherwise |
+| directory looks "doubled" | the dimension's **declared slot allocation** exceeds `nextpow2(count)`, or an interior **deleted member slot** leaves gaps | `ivt_f2_dim_slot_alloc()` pads to the declaration; `ivt_f2_dim_slot_expand()` for deleted slots (`canivt_deleted_slot`) |
+| large `canivt_skipped_pages` count | sparse directory over-walked by the cartesian, resolving onto codebook bytes | `ivt_skip_is_lost_page()` — an entry counts only if its target validates as a page by geometry |
+| geography has no DGUID | uid-less custom field dictionary — there is nothing to resolve | route to the data-style reader (`canivt_geo_datadim`) |
