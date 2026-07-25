@@ -444,6 +444,47 @@ Milestones that were once on the "likely next tasks" list and are now done.
 Kept for the record; the current architecture they produced is described in
 `CLAUDE.md`.
 
+- **Type-00 sub-A provincial Business-Patterns cluster — reconciliation-gated
+  decode with PROVISIONAL labels (2026-07-24; `R/suba.R`).** The older Canadian
+  Business Patterns provincial SIC tabulations (`byte 0 == 0x02`, NO geography,
+  `PROV/CAN|CA/CMA × INDUSTRY × EMPCLASS`) resisted the unified layout for two
+  reasons NOT present in any declared allocation. (1) The outer directory stride is
+  a physical CONSTANT — 16 windows for the industry straddle — the same whether a
+  geography uses one window (PROVIND: 13 provinces, one window each, still stride
+  16) or five (PROVSIC3: windows {0,1,2,3,13}), and independent of geo count (13 or
+  141); the declared industry allocation (1024) predicts 8. Three candidate rules
+  (constant 16, `nextpow2(empclass)`, `nextpow2(⌈entries/geo⌉)`) are
+  indistinguishable on the corpus, so the stride is **measured** from the page
+  directory (an arithmetic-progression scan of the geography window-0 entries,
+  robust to the spurious far entries that a max()-based estimate trips on). (2) The
+  industry codebook UNDER-declares its count (161 of 321), lays the detail members
+  in a contiguous run at a file-specific offset (right-aligned for multi-chunk,
+  left-aligned for single-chunk — no unified rule), and stores a grand-"Total"
+  member whose slot varies by vintage: FAR at a high window (OWUF3P
+  `PROVSIC3june1997`, slot 1671), CONTIGUOUS-FIRST (PAWNKX `PROVSIC3-1`, member 1),
+  or dense-first (`PROVIND`). There is **no ground truth** (Borealis and Odesi carry
+  only the `.ivt`; the open Canadian Business Counts CSVs are modern NAICS, a
+  different vintage AND classification — confirmed by web search + Dataverse API on
+  DOIs SP3/PAWNKX, SP/OWUF3P, SP/VB0LLW). So the cell VALUES are validated
+  GROUND-TRUTH-FREE by a reconciliation identity — the industry-`Total` page equals
+  the sum of the detail industries per geography × employment-size (and the geography
+  `Canada` total equals the sum of the provinces) — which `ivt_f2_suba_annotate()`
+  ENFORCES as the decode gate: it measures the stride, recovers the count/slot map
+  from the codebook chunks, tries each candidate total placement, and COMMITS only
+  the one that reconciles exactly (else the file stays UNSUPPORTED). The recovered
+  member count + slot map feed the existing `slot_pos` decode path; the measured
+  stride is honoured via `attr(d, "suba")$stride` in `ivt_layout_impl()`. What
+  reconciliation CANNOT verify is the industry LABEL assignment (a uniform relabel
+  leaves the sums unchanged), so the industry axis labels are surfaced PROVISIONAL —
+  the standard B2020 storage-order convention, unverified — via the LOUD
+  `canivt_suba` / `canivt_suba_labels` fallbacks. Onboarded `PROVINDjune1997` (dense
+  DIVISIONS, 2031 cells), `PROVSIC3june1997` (chunked total-far, 22581),
+  `PROVSIC3-1` (chunked total-first, 29463); left honestly UNSUPPORTED (and ledgered
+  `FALSE` so the gate cannot silently start engaging them): `CACMA3-2` (hierarchical,
+  330 codes over 415 slots — no clean flat detail+total), `PROVSIC4-2` (SIC-4, 1254
+  classes the flat model cannot hold), `PROVSIC4dec1997` (a separate `idx0`
+  mis-detection). No corpus regression.
+
 - **Paging geometry is DECLARED metadata — the doubled-window mystery closed
   (2026-07-23).** Hunting for the declaration the Table-023 "doubled-window"
   fallback was missing (coverage.md had flagged: "if the layout is real there

@@ -185,6 +185,12 @@ ivt_layout_impl <- function(raw, d = NULL) {
   ws <- ivt_f2_nextpow2(win)
   if (!is.na(alloc[straddle]))
     ws <- max(ws, alloc[straddle] %/% ipc_straddle)
+  # The type-00 sub-A Business-Patterns cluster carries a non-declared physical
+  # outer stride (`suba.R`); when the descriptor annotation measured it from the
+  # page directory, honour it (the DIVISIONS files use one window per geography
+  # but still stride by the full allocation).
+  suba <- attr(d, "suba")
+  if (!is.null(suba) && !is.null(suba$stride)) ws <- max(ws, as.integer(suba$stride))
   ent_idx <- straddle; ent_counts <- win; ent_pad <- ws
   if (straddle > 1L) for (j in (straddle - 1L):1L) {
     ent_idx <- c(ent_idx, j); ent_counts <- c(ent_counts, ext[j])

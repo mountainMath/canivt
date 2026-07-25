@@ -191,6 +191,15 @@ ivt_f2_dimensions <- function(raw) {
       if (is.null(m)) m <- ivt_f2_varlist_match(vlm, dim)  # plaintext Variables:
       m
     }
+    # The type-00 sub-A cluster recovers a chunked industry axis the positional
+    # readers under-read; its PROVISIONAL member labels (suba.R) are built in the
+    # recovered slot-map order, so prefer them whenever they cover the whole axis --
+    # this GUARANTEES the labels align with the decoded member ids (the positional
+    # reader may order its labels differently from the reconciled slot map).
+    suba <- attr(d, "suba")
+    if (!is_geo && !is.null(suba) && !is.null(suba$labels) &&
+        length(suba$labels) == dim$count)
+      members <- suba$labels
     # French member labels + the French dimension name come from the slot
     # directory's second (Desc Francais) block; the scan fallbacks are English
     # only, so these are NULL/NA on a dimension the directories miss.

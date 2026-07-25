@@ -5,6 +5,31 @@ format. **Update this when a gap is closed or a new one is found.** Status keys:
 `[x]` decoded & exposed · `[~]` read but not surfaced (recoverable) · `[?]` read
 but semantics unproven · `[ ]` not parsed / unknown.
 
+> **2026-07-24 — type-00 sub-A provincial Business-Patterns cluster PARTIALLY
+> onboarded (reconciliation-gated, PROVISIONAL industry labels).** The older
+> Canadian Business Patterns provincial SIC tables (`byte 0 == 0x02`, NO geography,
+> `PROV/CAN|CA/CMA × INDUSTRY × EMPCLASS`) carry two facts absent from any declared
+> allocation: the outer directory stride is a physical constant (16 windows for the
+> industry straddle — the declared 1024 alloc predicts 8; PROVIND uses ONE window
+> yet still strides 16), and the industry codebook UNDER-declares its count (161 of
+> 321) with a file-specific detail offset + a grand-"Total" member whose slot varies
+> (first / contiguous-last / a far window). There is NO ground truth (Borealis/Odesi
+> carry only `.ivt`; the open CBC CSVs are a different vintage AND classification —
+> web-searched + Dataverse-API-checked 2026-07-24). New self-contained module
+> `R/suba.R` (`ivt_f2_suba_annotate()`, hooked into the descriptor memo): MEASURES
+> the stride from the page directory, recovers the count from the codebook chunks,
+> maps the members, and **commits only if the decode RECONCILES** (industry-`Total`
+> == Σ detail per geo×empclass, or geo-`Canada` == Σ provinces) — else the file is
+> left honestly UNSUPPORTED. Values are validated ground-truth-free; the industry
+> **labels are PROVISIONAL** (`canivt_suba` / `canivt_suba_labels`, LOUD): a uniform
+> relabel leaves the sums unchanged, so the SIC-code→member assignment (standard
+> B2020 storage order) is unverified. Onboarded: `PROVINDjune1997` (dense DIVISIONS,
+> 2031), `PROVSIC3june1997` (chunked, total-far, 22581), `PROVSIC3-1` (chunked,
+> total-first, 29463). Left UNSUPPORTED (do not reconcile / idx0 bug — ledgered so
+> the gate stays honest): `CACMA3-2` (hierarchical, 330 codes), `PROVSIC4-2` (SIC-4,
+> 1254 classes), `PROVSIC4dec1997` (idx0 mis-detection). No corpus regression
+> (`FAIL 0 | PASS 315`→ +6). Memory: `ivt-type00-sub-a-provincial-sic`.
+
 > **Onboarding backlog CLEARED (2026-07-21):** a fresh catalogue re-sample found 7
 > tables that did not read strict-clean; **all 7 are now onboarded**. The Stage 1
 > pass landed 4 (95F0490 profile lineage + cascaded 97-555-XCB2006058, 95F0378,

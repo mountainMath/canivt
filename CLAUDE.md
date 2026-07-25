@@ -38,10 +38,16 @@ This folder is self-contained. Companion docs under `inst/notes/`:
 
 ## What works today
 
-**Every `.ivt` in the corpus decodes** — the 2026-07-21 onboarding backlog (7
-newly-sampled tables) is fully cleared (see
+**Almost every `.ivt` in the corpus decodes** — the 2026-07-21 onboarding backlog
+(7 newly-sampled tables) is fully cleared (see
 [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) /
-[`decode-history.md`](inst/notes/decode-history.md)).
+[`decode-history.md`](inst/notes/decode-history.md)). The only ledgered exceptions
+are a handful of **deliberately-UNSUPPORTED guard files** — three type-00 sub-A
+Business-Patterns tables (`CACMA3-2`, `PROVSIC4-2`, `PROVSIC4dec1997`) that the
+reconciliation gate correctly refuses (their layout/idx0 is not yet modelled), kept
+in the ledger as `supported = FALSE` so the gate can never silently start emitting
+their unvalidated values (see the sub-A note in `coverage.md` / `decode-history.md`
+and `R/suba.R`).
 A single, descriptor-driven, name/type-agnostic decoder (`decode.R`:
 `ivt_layout()` + `ivt_decode()`) handles all of them, plus one shared metadata
 path (`ivt_f2_metadata()`). The historical "family 1 / family 2" split is **not

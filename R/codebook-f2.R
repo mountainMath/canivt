@@ -3677,7 +3677,8 @@ ivt_f2_descriptor_02 <- function(raw) {
 }
 
 ivt_f2_descriptor <- function(raw)
-  ivt_memo(raw, "descriptor", function() ivt_f2_descriptor_impl(raw))
+  ivt_memo(raw, "descriptor",
+           function() ivt_f2_suba_annotate(raw, ivt_f2_descriptor_impl(raw)))
 
 ivt_f2_descriptor_impl <- function(raw) {
   n <- length(raw)
