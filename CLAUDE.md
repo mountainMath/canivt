@@ -141,7 +141,11 @@ The *rules*; the measurements and original bugs behind them are in
   detection gate. The pre-flight checks extent within the entry size, exact fit for
   `b2 == 0` pages, presence count ≤ the page's real cell capacity, and that the
   directory **spans the outer entry cartesian**. A rejection often means **the
-  descriptor was misread**, not that the container is alien.
+  descriptor was misread**, not that the container is alien. **The gate always
+  returns a verdict**: entry indices are computed in double and screened by
+  `ivt_entry_addressable()` (entries are 8 bytes at `idx0 + 8L·k`, so anything
+  above `(int.max − idx0) %/% 8` is unrepresentable ⇒ misread descriptor ⇒ clean
+  `FALSE`), never an integer-overflow `NA` that surfaces as an error.
 - **`ivt_f2_descriptor()` anchors dimension records on the doubled name**, not a
   fixed `<type> 01 <upper>` marker: each record stores its name twice after a `0x01`,
   the **first copy may be truncated** (~14 chars; longest matching prefix wins), and

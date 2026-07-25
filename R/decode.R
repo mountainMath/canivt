@@ -44,6 +44,19 @@ IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 # cartesian past this is not merely absent from the file, it is unrepresentable.
 IVT_MAX_DIR_ENTRIES <- .Machine$integer.max %/% 8L
 
+# Is entry index `k` reachable as a byte offset from directory base `idx0`? The
+# same bound as `IVT_MAX_DIR_ENTRIES`, less the base the offset is measured from.
+# `k` must be passed as a DOUBLE: the index a layout addresses is a product of
+# member counts and strides, and on a misread descriptor that product exceeds
+# 2^31 -- computed in integer it silently becomes NA (warning "NAs produced by
+# integer overflow"), which then propagates into the directory read as
+# "NA/NaN argument" and turns the detection gate's verdict into an ERROR.
+# Alternative.cfm_PID_1195_EXT_IVT is the case in point: its descriptor reads out
+# to an outer cartesian of 113,514,643,456 entries, ~440x the addressable extent.
+ivt_entry_addressable <- function(k, idx0) {
+  is.finite(k) && k >= 0 && k <= (.Machine$integer.max - idx0) %/% 8L
+}
+
 # Bytes between the end of the presence record and the dense value run, derived
 # structurally from the marker's third and fourth bytes (`b2`, `b3`), which
 # ENCODE it:
@@ -406,8 +419,15 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   if (!length(gt1)) return(TRUE)
   j <- max(gt1)
   ostride <- lay$estride[j]; ocount <- lay$ent_counts[j]
+  # The top of that range is computed in DOUBLE and checked for addressability
+  # before use: a descriptor misread into a cartesian past 32-bit byte addressing
+  # cannot be a directory this container holds, so it is a clean unsupported
+  # verdict -- not an integer-overflow NA propagating into `ivt_dir_entry()`.
+  ktop <- as.numeric(ocount) * as.numeric(ostride) - 1
+  if (!ivt_entry_addressable(ktop, idx0)) return(FALSE)
+  ktop <- as.integer(ktop)
   hi_k <- -1L
-  for (k in (ocount * ostride - 1L):max(0L, ocount * ostride - 65536L)) {
+  for (k in ktop:max(0L, ktop - 65535L)) {
     en <- ivt_dir_entry(raw, idx0 + 8L * k, n)
     if (!is.null(en) && en$marker) { hi_k <- k; break }
   }
@@ -422,9 +442,15 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
   # cartesian by a DECLARED slot allocation already carries those slots in
   # `estride`, so its doubled-again corner is past the real directory and stays
   # clear).
-  kp <- (ocount - 1L) * 2L * ostride
-  ov <- ivt_dir_entry(raw, idx0 + 8L * kp, n)
-  if (!is.null(ov) && ov$marker) return(FALSE)
+  # The doubled corner is by construction past the modelled cartesian, so it can
+  # itself be unaddressable on a legitimately large layout; that is not evidence
+  # against the nesting -- it means there is no entry there, exactly as a NULL
+  # read below.
+  kp <- 2 * (as.numeric(ocount) - 1) * as.numeric(ostride)
+  if (ivt_entry_addressable(kp, idx0)) {
+    ov <- ivt_dir_entry(raw, idx0 + 8L * as.integer(kp), n)
+    if (!is.null(ov) && ov$marker) return(FALSE)
+  }
   TRUE
 }
 
@@ -474,6 +500,15 @@ ivt_decode <- function(raw, lay = NULL) {
   n <- length(raw); idx0 <- ivt_idx0(raw)
   m <- lay$n_dim; straddle <- lay$straddle; ipc1 <- lay$ipc[1L]
   ne <- length(lay$ent_counts)
+
+  # Same addressability check the pre-flight makes, before the cartesian is
+  # materialised: `ivt_decode()` is reachable without the gate (directly, or via
+  # a caller that supplies `lay`), and an unaddressable layout would otherwise
+  # coerce to NA in `eidx` below and read the directory at an NA offset.
+  if (!ivt_entry_addressable(
+        sum((as.numeric(lay$ent_counts) - 1) * as.numeric(lay$estride)), idx0))
+    stop("page-directory cartesian exceeds the addressable directory extent ",
+         "-- descriptor misread")
 
   # Every directory-entry coordinate (cartesian over the paged dimensions,
   # innermost-first): its entry index (-> byte offset) and the member id it

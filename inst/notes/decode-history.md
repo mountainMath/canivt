@@ -491,6 +491,47 @@ this lineage):
 cleanly by the new integer-overflow guard in `ivt_layout()` rather than throwing,
 and is ledgered `supported = FALSE` as a gate guard.
 
+### The detection gate must always return a verdict (2026-07-25)
+
+`ivt_layout()`'s guard covers the stride *accumulator*; it does not cover the
+places that later multiply a stride back out by a member count. A header-cache
+parse sweep over 1 005 harvested files surfaced the second site — the outer
+entry cartesian in `ivt_page_preflight()`'s directory-span check:
+
+```r
+for (k in (ocount * ostride - 1L):max(0L, ocount * ostride - 65536L))
+```
+
+On `Alternative.cfm_PID_1195_EXT_IVT` (a 53 KB body whose descriptor reads out to
+four dimensions of 3 386 / 3 373 / 3 383 members, striding 33 554 432 entries) the
+product is **113 514 643 456** — about 440× the addressable extent. In integer
+arithmetic it is silently `NA` ("NAs produced by integer overflow"), and the `NA`
+reached `ivt_dir_entry()` as `"NA/NaN argument"`, so **`ivt_is_supported()` threw
+instead of returning `FALSE`**. A detection gate that errors is worse than one
+that rejects: callers sweeping a catalogue cannot tell "not an IVT we model" from
+"canivt is broken".
+
+The rule, now shared by all three sites that turn an entry index into a byte
+offset (`ivt_entry_addressable()`): entries are 8 bytes and are reached as
+`idx0 + 8L * k`, so any index above `(.Machine$integer.max - idx0) %/% 8L` is not
+merely absent from the file — it is unrepresentable, hence a misread descriptor.
+Indices are computed in **double** and checked before coercion.
+
+- **span check** — unaddressable top ⇒ `FALSE` (clean unsupported verdict).
+- **doubled-corner overshoot probe** — unaddressable corner ⇒ *skip the probe*.
+  That corner is deliberately outside the modelled cartesian, so on a legitimately
+  large layout it can exceed the range on its own; no entry there is exactly what
+  a `NULL` read means, and treating it as evidence against the nesting would
+  reject good files.
+- **`ivt_decode()`** — checked once before the cartesian is materialised, since
+  decode is reachable without the gate (directly, or with a caller-supplied
+  `lay`).
+
+The search window is unchanged (`ktop:max(0L, ktop - 65535L)` is the same 65 536
+entries as the old expression, verified for every top value). Gates after the
+fix: corpus ledger FAIL 0 / PASS 346 with cell counts unchanged, geo snapshot
+FAIL 0 / PASS 238, unit suite FAIL 0 / PASS 1110.
+
 ## Milestones — how the architecture arrived
 
 ### Unified cell decode & metadata

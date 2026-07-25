@@ -43,6 +43,29 @@ test_that("the value trailer is derived structurally from the marker's b2/b3 byt
   expect_error(ivt_value_trailer(0x84L, 0x00L, 0x10L), class = "canivt_unknown_marker")
 })
 
+test_that("an entry index past 32-bit byte addressing is rejected, not overflowed", {
+  # Every page-directory entry is 8 bytes and is reached as `idx0 + 8L * k`, so
+  # the addressable ceiling is the integer range less the directory base.
+  idx0 <- 1024L
+  lim <- (.Machine$integer.max - idx0) %/% 8L
+  expect_true(ivt_entry_addressable(0, idx0))
+  expect_true(ivt_entry_addressable(lim, idx0))
+  expect_false(ivt_entry_addressable(lim + 1, idx0))
+  expect_false(ivt_entry_addressable(-1, idx0))
+  # the offset the caller then forms must itself stay representable
+  expect_false(is.na(idx0 + 8L * as.integer(lim)))
+
+  # A misread descriptor multiplies out past the ceiling. Computed in INTEGER
+  # that product is silently NA ("NAs produced by integer overflow"), and the NA
+  # reached `ivt_dir_entry()` as "NA/NaN argument" -- an ERROR out of the
+  # detection gate rather than an unsupported verdict. The real case is
+  # Alternative.cfm_PID_1195_EXT_IVT: 3383 outer members x stride 33554432.
+  expect_warning(3383L * 33554432L, "integer overflow")
+  expect_false(ivt_entry_addressable(as.numeric(3383) * 33554432, idx0))
+  expect_false(ivt_entry_addressable(NA_real_, idx0))
+  expect_false(ivt_entry_addressable(as.integer(NA), idx0))
+})
+
 test_that("ivt_fallback warns with a classed condition", {
   expect_warning(ivt_fallback("test fallback engaged"), class = "canivt_fallback")
   expect_warning(ivt_fallback("pages missing", class = "canivt_skipped_pages"),
