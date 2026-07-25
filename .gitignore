@@ -44,3 +44,4 @@ vignettes//figure/*.png
 
 # range-harvest read-through cache (dev prototype)
 dev/harvest-cache/
+.posit/assistant

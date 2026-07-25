@@ -13,3 +13,4 @@
 ^scratchpad$
 ^figure$
 ^dev$
+^\.posit/assistant$
