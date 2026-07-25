@@ -19,7 +19,7 @@ IVT_MARKER_SET <- list(
   file_sig_tail     = c(0x00L, 0x20L, 0x00L),
   page_b0           = c(0x82L, 0x84L, 0x88L, 0xa2L, 0xa4L, 0xa8L),  # plain + mask
   page_b0_dense     = c(0x02L, 0x04L, 0x08L),                       # high nibble 0
-  page_b3           = c(0x08L, 0x09L, 0x0aL, 0x0cL),
+  page_b3           = c(0x08L, 0x09L, 0x0aL, 0x0bL, 0x0cL, 0x0dL, 0x0eL),
   widths            = c(2L, 4L, 8L),
   descriptor_b9     = c(0x03L, 0xffL),
   # NAME markers (§E) are `81 02 {01,02,03} 00`, but the `81 02` prefix is a

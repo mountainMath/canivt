@@ -54,7 +54,7 @@ IVT_F2_GEOS_PER_PAGE <- 4L
 IVT_MARKER_WIDTHS <- c(2L, 4L, 8L)
 ivt_f2_marker_b0 <- as.integer(outer(IVT_MARKER_WIDTHS, c(0x80L, 0xa0L), "+"))
 ivt_f2_marker_b0_dense <- IVT_MARKER_WIDTHS
-ivt_f2_marker_b3 <- c(0x08L, 0x09L, 0x0aL, 0x0cL)
+ivt_f2_marker_b3 <- c(0x08L, 0x09L, 0x0aL, 0x0bL, 0x0cL, 0x0dL, 0x0eL)
 ivt_f2_is_marker_byte0 <- function(b) b %in% ivt_f2_marker_b0
 
 # Whole-marker test at a 0-based page offset.

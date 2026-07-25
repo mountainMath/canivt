@@ -205,12 +205,10 @@ ivt_f2_dimensions <- function(raw) {
     # only, so these are NULL/NA on a dimension the directories miss.
     members_fr <- if (is_geo) NULL else dl$fr
     name_fr <- if (is_geo || is.null(dl)) NA_character_ else dl$name_fr
-    # `ivt_f2_total_name()` (dl$name_fr) recovers the French dimension name from a
-    # "Total - <name>" member; the facet/quantity dimensions of the 02-gen survey
-    # tables have no such member, so fall back to the doubled-name marker's combined
-    # "<EN><FR>" run (e.g. "Quantifier"/"Quantificateur").
-    if (!is_geo && (is.null(name_fr) || is.na(name_fr)))
-      name_fr <- ivt_f2_dim_name_fr_marker(raw, dim$name)
+    # `dl$name_fr` already covers both sources: the "Total - <name>" member and,
+    # where that is absent (the 02-gen survey facet/quantity dimensions), the
+    # doubled-name marker entry read from the dimension's own slot directory
+    # (dim-members.R). No whole-file marker scan is needed here.
     ordinal <- if (!is_geo && !is.null(dirord) && length(dirord) >= i)
       dirord[[i]] else NULL
     # per-member `_Description` prose (the indicator definition), when the dimension

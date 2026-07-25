@@ -850,9 +850,10 @@ test_that("directory entries with unrecognised page markers are skipped LOUDLY",
   # (its "Selected characteristics" dimension is 825 members; the u8 misread 57
   # mis-nested the layout, which is what had made its b2 == 0 pages look
   # non-exact-fit) -- viewer-validated cell-exact. To exercise the loud-skip
-  # machinery, doctor one page's b3 to the genuinely unknown 0x0b: the entry
+  # machinery, doctor one page's b3 to a genuinely unknown head code: the entry
   # must be dropped with a classed warning -- silently missing cells read as
-  # zeros downstream.
+  # zeros downstream. (0x0f, ABOVE the recognised {08..0e} span; this was 0x0b
+  # until the SLID-era income lineage showed 0x0b/0x0d/0x0e are real heads.)
   p <- locate_sample_ivt("", "98-400-X2016203", "98-400-X2016203.IVT")
   skip_if(p == "", "no 98-400-X2016203 sample in the ivt cache")
   raw <- readBin(p, "raw", n = file.info(p)$size)
@@ -871,7 +872,7 @@ test_that("directory entries with unrecognised page markers are skipped LOUDLY",
   }
   expect_false(is.na(off))
   doctored <- raw
-  doctored[off + 4L] <- as.raw(0x0b)
+  doctored[off + 4L] <- as.raw(0x0f)
   expect_warning(cells2 <- ivt_decode(doctored), class = "canivt_skipped_pages")
   expect_lt(nrow(cells2), nrow(cells))
   withr::local_options(canivt.strict = TRUE)

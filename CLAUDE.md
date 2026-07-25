@@ -63,7 +63,7 @@ Key semantics:
 | `fallback.R` | **loud fallbacks**: `ivt_fallback(msg, class)` raises a classed `canivt_fallback` warning whenever a heuristic supplies values or pages are skipped; `options(canivt.strict = TRUE)` upgrades to an error. `ivt_quietly()` muffles both for detection probes. Wire every new fallback through this. |
 | `container.R` | page-directory anchor `ivt_idx0()` (`u16@558`, validated against the first page marker; `IVT_IDX0_DEFAULT` is the fallback). |
 | `decode.R` | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit cap, computes in-page/straddle/paged roles, the bit grid and the 8-byte directory strides — every level padded to the declared slot allocation (`ivt_f2_dim_slot_alloc()`). `ivt_decode()` walks the paged cartesian and decodes each page (`ivt_f2_record_present()` + `ivt_value_trailer()`; dense pages via `ivt_decode_page_dense()`) → cell tibble (`geo` + one slug column per data dim). |
-| `container-f2.R` | family-2 page-directory finder + the marker byte model (`ivt_f2_is_marker()`: `b0` width/variant nibbles, `b3 ∈ {08,09,0a,0c}` head codes); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
+| `container-f2.R` | family-2 page-directory finder + the marker byte model (`ivt_f2_is_marker()`: `b0` width/variant nibbles, `b3 ∈ {08..0e}` head codes); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
 | `decode-f2.R` | shared presence-bitmap primitives (the `ivt_f2_` prefix is historical — used by every family): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()`, `ivt_f2_cell_grid()`, `ivt_f2_record_present()` (byte-pair-swap, MSB-first). |
 | `dimdir.R` | **bilingual labels, dimension names, header directory slot table.** `ivt_f2_dim_dir_label1()` → `list(en, fr, name_fr)`, EN/FR chosen structurally (`ivt_f2_dim_dict_en_first()`; `ivt_f2_frscore()` is the loud fallback). **Header `@824 + 14·(k−1)`** holds a 14-byte record per descriptor dimension (`[u32 dir_ptr][u32 ?][u32 n_entries][2B]`) — the primary codebook anchor: `ivt_f2_dim_slots()` reads it, `ivt_f2_dim_dir(raw, k)` resolves dimension `k`'s block directory (`[u32 off][u16 len][u16 len]`, two indirection depths for big chunked geo dirs), self-validated against `n_entries`. Each directory lists that dimension's codebook in logical order (dictionary/schema, member-id table, ordinals, the `81 02 02 00` doubled-name marker, EN then FR member blocks, footnotes). Readers: `ivt_f2_dim_dir_labels()`, `ivt_f2_dim_dir_ordinals()`, `ivt_f2_dir_footnotes()` (with `scope`/`dimension`/`member_id`; member notes flagged by an `84 01` bitmap, `ivt_f2_footnote_bitmap()`), `ivt_f2_table_footnotes()`. Other header slots: `ivt_f2_master_dir()` (`@544` → master directory at 992) and `ivt_f2_dqf_legend()` (`@712`, `[82 01]`-framed EN/FR per code A–E/R/P). |
 | `codebook-f2.R` | **the unified codebook.** `ivt_f2_geo_read(raw, full)` is the single geography dispatcher; `ivt_f2_geo_light()` (metadata default) and `ivt_f2_geographies()` (`geo_attributes = TRUE`) are thin wrappers. Stage 1 `ivt_f2_geo_entries()` locates the geo block directory once and exposes lazy memoized `records`/`strict`/`values` accessors shared by all six readers. Then an ordered specializer chain: flow → inline → schema → custom → bare; a complete uid array wins for big chunked DGUID tables; else Stage 3 `ivt_f2_geo_combined()` is the last-resort net (`canivt_geo_unparsed`, loud). Column identity is **metadata-driven** where declared — the `81 02` field dictionary (`ivt_f2_geo_field_schema()` + `ivt_f2_geo_field_roles()`) maps runs to `geo_name`/`geo_name_fr`/`geo_uid` by the file's own field names; only without a matching dictionary does it fall to content heuristics. Readers: `ivt_f2_geo_simple()` (cheap names+DGUIDs, schema-addressed), `ivt_f2_geo_attributes()` / `ivt_f2_geo_attrs_dir()` (the **primary** attribute reader — every attribute read positionally, per group `[display + schema fields]` × EN-then-FR runs, ordinals dropped, per-member footnote text blobs skipped via `ivt_f2_dir_is_text_block()`; stride path `ivt_f2_geo_root_dir()` retained but unreached), `ivt_f2_geo_inline()` (schema-absent 1991/2006/2011/2016 combined blocks `"name (code) [type] flag [(pct%)]"`), `ivt_f2_geo_flow_dir()` / `ivt_f2_flow_sides()` (**origin-destination commuting flows**, geo type `0x0f`: a flow decodes as **two** geographies — the file's POR/POW schema → `geo_res_*`/`geo_work_*`, pair kept as `geo_uid`; anchored on the uid array, labels joined back by code), `ivt_f2_dim_member_labels()` (data-dim labels via the doubled-name marker). Two loud name fills guarantee a `geo_name` for every member: `ivt_f2_inline_name_subtract()` and `ivt_f2_geo_fill_label()` (both fill NAs only). Snapshot-guarded by `fixtures/geo-snapshot.csv`. **Slugs** (`ivt_dim_slug()`) are generic: lower-cased leading word of the dimension name, made unique. |
@@ -116,7 +116,7 @@ The *rules*; the measurements and original bugs behind them are in
 - **Value run start** = `4 + presence_len + trailer(b2) + 32·(b3 − 8)`
   (`presence_len = rec_bytes × geos_per_page`), from the marker
   (`ivt_value_trailer(b0, b2, b3)`): trailer = `b2 == 0x00` → 0, else
-  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)`; head = `32·(b3 − 8)`, `b3 ∈ {08,09,0a,0c}`.
+  `2·(b2 >> 4) + 2·(low nibble(b2) > 0)`; head = `32·(b3 − 8)`, `b3 ∈ {08..0e}`.
   Unknown markers **abort** (`canivt_unknown_marker`); valid entries pointing at them
   are skipped loudly (`canivt_skipped_pages`). Every page is extent-checked against
   its directory entry's u16 size, with **equality only when `b2 == 0` and `b3 == 08`**
@@ -156,6 +156,16 @@ The *rules*; the measurements and original bugs behind them are in
   placeholder (`00 20 01 01`, real count 1). The dimension's slot-directory member
   block decides; the same reconcile adopts a chunk-run count wherever it exceeds the
   descriptor's (chunked >256-member dims).
+- **The declared slot allocation is the SECOND count witness.** On every validated
+  table `alloc <= 2·nextpow2(count)`; a dimension allocating **more than
+  `4·nextpow2(count)`** is declaring more members than the descriptor was read to
+  hold. `ivt_f2_dim_count_reconcile()` then adopts the codebook member array's own
+  length (`ivt_f2_dir_member_count()`) when it lies strictly between the descriptor
+  count and the allocation — the array LENGTH, never the allocation, so a merely
+  over-allocated dim (accs "Offences": 40 members, 64 slots) never fires. LOUD
+  (`canivt_underdeclared_count`). Runs before the double-01 pass and covers
+  double-01 records (the SLID-era income lineage's `1e 05 01 01` geography, real
+  count 30).
 - **Geography is the first descriptor dimension EXCEPT the profile lineage**
   (`ivt_f2_geo_dim_index()` — 97-570-X1981004 / 98F0172X / 95F0170X put a 1-member
   "Values" placeholder first and geography LAST). Dim 1 is the fast path; only when

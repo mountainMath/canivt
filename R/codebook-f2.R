@@ -46,16 +46,33 @@ IVT_F2_DGUID_RE <- "^[0-9]{4}[A-Z][0-9A-Z.]+$"
 # in the value pages cannot masquerade as a DGUID. Returns a character vector
 # (length = number of geographies).
 ivt_f2_geo_dguids <- function(raw) {
-  v <- as.integer(raw)
-  n <- length(v)
+  n <- length(raw)
+  if (n < 5L) return(character(0))
+  # The marker region is computed BEFORE the byte scan so only that window is
+  # materialised: every hit the region filter keeps lies inside it, so scanning the
+  # window is identical to scanning the file and filtering afterwards -- but it
+  # avoids an `as.integer()` over the whole (up to 500 MB) file. The window is
+  # widened by one byte below (the Pascal length byte at `hit - 1`) and 24 above
+  # (the longest DGUID a hit at `region[2] - 1` can span).
+  region <- ivt_f2_geo_marker_region(raw)
+  lo <- 1L; hi <- n
+  if (!is.null(region)) {
+    lo <- max(1L, as.integer(region[1]) - 1L)
+    hi <- min(n, as.integer(region[2]) + 24L)
+    if (hi - lo < 4L) return(character(0))
+  }
+  v <- as.integer(raw[lo:hi])
+  n <- length(v)                                    # indices below are WINDOW-local
   if (n < 5L) return(character(0))
   dig <- function(x) x >= 0x30L & x <= 0x39L        # ASCII '0'..'9'
   # positions where four digits are followed (the level letter check comes below)
   hit <- which(dig(v[1:(n - 4L)]) & dig(v[2:(n - 3L)]) &
                dig(v[3:(n - 2L)]) & dig(v[4:(n - 1L)]))
   if (!length(hit)) return(character(0))
-  region <- ivt_f2_geo_marker_region(raw)
-  if (!is.null(region)) hit <- hit[hit >= region[1] & hit < region[2]]
+  if (!is.null(region)) {
+    abs_hit <- hit + (lo - 1L)                      # back to whole-file positions
+    hit <- hit[abs_hit >= region[1] & abs_hit < region[2]]
+  }
   if (!length(hit)) return(character(0))
   len <- v[hit - 1L]            # Pascal length byte
   c5  <- v[hit + 4L]            # 5th character (a level letter, e.g. A/S)
@@ -182,19 +199,25 @@ ivt_f2_geo_dguids_dir <- function(raw) {
 # data-dim markers; geography sits earlier in the 18 MB codebook), 98-10-0662,
 # 98-10-0129 and 1003011.
 ivt_f2_codebook_dim_markers <- function(raw, search_start) {
-  v <- as.integer(raw); n <- length(v)
+  n <- length(raw)
   if (search_start >= n - 4L) return(data.frame(offset = integer(0), name = character(0)))
-  # v is 1-indexed; clamp the low end so a 0 search_start (small files, where
-  # length(raw) - tail_bytes underflows) does not put index 0 in reg and drop an
-  # element, which would misalign the v[reg] / v[reg + 1L] comparison.
-  reg <- max(1L, as.integer(search_start)):(n - 4L)
-  off <- reg[v[reg] == 0x81L & v[reg + 1L] == 0x02L &
-             v[reg + 2L] == 0x02L & v[reg + 3L] == 0x00L]
-  if (!length(off)) return(data.frame(offset = integer(0), name = character(0)))
+  # Materialise only the searched region. `search_start` is 1-indexed; clamp the low
+  # end so a 0 search_start (small files, where length(raw) - tail_bytes underflows)
+  # does not put index 0 in the window and drop an element, which would misalign the
+  # v[j] / v[j + 1L] comparison. Offsets are mapped back to whole-file positions, so
+  # this is identical to scanning `raw` entire -- the callers that pass a bounded
+  # start (the unbounded geo-marker / label scans) no longer convert the whole file.
+  s0 <- max(1L, as.integer(search_start))
+  v <- as.integer(raw[s0:n]); m <- length(v)
+  if (m < 5L) return(data.frame(offset = integer(0), name = character(0)))
+  j <- which(v[1:(m - 4L)] == 0x81L & v[2:(m - 3L)] == 0x02L &
+             v[3:(m - 2L)] == 0x02L & v[4:(m - 1L)] == 0x00L)
+  if (!length(j)) return(data.frame(offset = integer(0), name = character(0)))
+  off <- j + (s0 - 1L)                       # whole-file (1-based) marker positions
   # the name is the first printable run (length >= 3) after the marker + framing;
   # it stops at the 0x01 separator before the doubled copy, so it is a single name.
-  nm <- vapply(off, function(m) {
-    seg <- v[(m + 4L):min(n, m + 120L)]
+  nm <- vapply(j, function(m0) {
+    seg <- v[(m0 + 4L):min(m, m0 + 120L)]
     pr <- seg >= 32L & seg <= 126L
     r <- rle(pr); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
     for (k in which(r$values))
@@ -213,6 +236,9 @@ ivt_f2_codebook_dim_markers <- function(raw, search_start) {
 # Guarded so the modern doubled-EN markers ("SexSex") are rejected (`fr == en`): this
 # only supplies a name_fr that DIFFERS from the English, so it never corrupts a
 # correctly-doubled name and only fills what `ivt_f2_total_name()` left NA.
+# `raw` is the dimension's own doubled-name DIRECTORY ENTRY window (located by
+# `ivt_f2_dir_marker_entry()`; see `ivt_f2_dim_members_from_dir()`), not the whole
+# file -- the marker is a directory row, so there is nothing to search the file for.
 ivt_f2_dim_name_fr_marker <- function(raw, en_name) {
   if (is.null(en_name) || is.na(en_name) || nchar(en_name) < 3L) return(NA_character_)
   v <- as.integer(raw); n <- length(v)

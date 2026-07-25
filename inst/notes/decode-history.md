@@ -432,6 +432,65 @@ the sums unchanged — so the industry axis labels are surfaced PROVISIONAL via 
   10,882,595 exactly (counts random-rounded to base 5; the fractional values are the real
   Labour-Force *rate* members stored as float64).
 
+### Under-declared member counts — allocation as the second count witness (2026-07-25)
+
+The SP3/RHUXA9 income lineage (Borealis, "Income in Canada" / SLID-era tables
+`103`, `404`, `405`, `501`, `701`, `703`) read a geography count of **5** or **4**
+from a `[type][count][01][01]` descriptor record — the *double-01* shape that
+`ivt_f2_dim_count_reconcile()` already treats as ambiguous, because it is shared by
+the reference-period record and the profile "Values" placeholder. Here the "5" of
+`1e 05 01 01` is not a member count at all.
+
+The signal that resolves it is **metadata already in the file**: the dimension's
+`81 02 <alloc-u16> 16 00` member-code block declares its slot allocation. On every
+validated table the allocation is the `nextpow2` of the member count — measured
+corpus-wide, `alloc <= 2 * nextpow2(count)` without exception. A dimension that
+declares **4× that** is declaring more members than the descriptor was read to
+hold. `ivt_f2_dim_count_reconcile()` now, for any dimension whose allocation
+exceeds `4 * nextpow2(count)`, reads the codebook member array's own length
+(`ivt_f2_dir_member_count()`) and adopts it when it lies strictly between the
+descriptor count and the allocation (LOUD `canivt_underdeclared_count`). The
+replacement is the *array length*, never the allocation, so a dimension that merely
+over-allocates is untouched — the accs "Offences" case (40 members, 64 stored
+labels, alloc 64) stays below the 4× gate and never fires. The loop runs *before*
+the double-01 pass, which then sees a count consistent with its slots and leaves it
+alone. Geography recovers 5→**30** (`103`, `404`) and 4→**13** (`405`, `501`,
+`701`, `703`).
+
+**The page-head model widened at the same time.** With the corrected geography
+count, `404` still decoded only 473,932 cells and skipped 395 pages loudly
+(`canivt_skipped_pages`) on markers `a4 01 08 0b` and `a2 01 dc 0d`: `b3` values of
+`0x0b`/`0x0d`/`0x0e`, outside the then-catalogued `{08,09,0a,0c}`. The head is a
+contiguous run of 32-byte blocks (`32·(b3−8)`), so that set was the observed span,
+not a closed enumeration; on this lineage the head grows with the geography
+dimension's slot allocation. `ivt_f2_marker_b3` is now `{08 … 0e}`.
+
+That widening cannot be validated by the page-size equation on these files — *every*
+page here, including the already-accepted `b3 ∈ {0a, 0c}` ones, carries 1,528–2,344
+bytes of allocation slack, so only `≤` applies. It is validated at the data level
+instead, and decisively: `404`'s age axis reconciles **14,520/14,520** groups
+("All age groups" == Σ of the six detail groups) with max |d| = 3, exactly the
+bound for six values rounded to thousands, 7,370 of them exact. The single sharpest
+datum is one previously-*skipped* page: its "25 to 34 years" cell decodes as
+**1956**, precisely the `7975 − 6019` residual the published "All age groups" total
+requires. Cells 473,932 → **807,273**, no skipped pages.
+
+Per-table validation, all metadata-internal (no external ground truth exists for
+this lineage):
+
+| table | cells | check | result |
+|-------|-------|-------|--------|
+| `404` | 807,273 | All age groups == Σ 6 age groups | 14,520/14,520 (max \|d\| = 3) |
+| `405` | 12,000 | Σ 5 quintiles == Total of quintiles | 1,199/1,199 |
+| `501` | 21,412 | Σ 5 quintiles == Total of quintiles | 1,162/1,162 |
+| `701` | 42,884 | Σ 5 quintiles == Total of quintiles | 3,444/3,444 |
+| `703` | 43,224 | Σ 5 quintiles == Total of quintiles | 3,597/3,597 |
+| `103` | 9,326 | Both sexes == M + F; All earners == Σ 3 work-activity; Canada == selected CMAs + other areas | 3,096/3,096; 959/959; 312/312 (all max \|d\| = 1, values in thousands) |
+
+`801` in the same collection stays honestly **UNSUPPORTED** — it is rejected
+cleanly by the new integer-overflow guard in `ivt_layout()` rather than throwing,
+and is ledgered `supported = FALSE` as a gate guard.
+
 ## Milestones — how the architecture arrived
 
 ### Unified cell decode & metadata

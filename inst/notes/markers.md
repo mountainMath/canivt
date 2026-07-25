@@ -62,8 +62,13 @@ The 4-byte header opening every data page. **Byte 1 is always `0x01`.**
   - plain/mask set: **`{0x82, 0x84, 0x88, 0xa2, 0xa4, 0xa8}`**
   - dense set (high nibble 0): **`{0x02, 0x04, 0x08}`**
 - **`b3` — auxiliary head block** (`ivt_f2_marker_b3`): head length = `32·(b3−8)`,
-  `b3 ∈ {0x08, 0x09, 0x0a, 0x0c}`. (`b3 ≥ 0x0a` pages append per-(geo,outer-dim)
-  suppression-mask records after the value run.)
+  `b3 ∈ {0x08 … 0x0e}`. (`b3 ≥ 0x0a` pages append per-(geo,outer-dim)
+  suppression-mask records after the value run.) The head is a *contiguous run of
+  32-byte blocks*, so the set is the observed span, not a sparse enumeration:
+  `0x0b`/`0x0d`/`0x0e` were added for the SP3/RHUXA9 income lineage, where the
+  head grows with the geography dimension's slot allocation. Those pages carry
+  allocation slack, so the size equation only bounds them (`≤`); the head length
+  was confirmed by data reconciliation instead — see `decode-history.md`.
 - **`b2` — trailer** (`ivt_value_trailer`): `0` when `b2 == 0x00`, else
   `2·(b2 >> 4) + 2·(low nibble(b2) > 0)`. Realised as a 0xFF pad run.
 - **Dense variant** (`b0` high nibble `0x0`): bytes 3–4 are a **u16 value count**,

@@ -76,6 +76,25 @@ ivt_f2_dim_members <- function(raw, k, slots = NULL, d = NULL, include_notes = T
   ivt_f2_dim_members_from_dir(raw, d$dims[[k]], dir, include_notes = include_notes)
 }
 
+# One dimension's FRENCH NAME, read from its own block directory. The doubled-name
+# marker (`81 02 02 00`) is a directory ROW, located positionally by
+# `ivt_f2_dir_marker_entry()`, and stores the name as a combined "<EN><FR>" run
+# ("ANNUAL2ANNUAL ANNUELLE") that `ivt_f2_dim_name_fr_marker()` splits on the English
+# prefix. Reading it from that one entry replaces a `81 02 02 00` scan over the WHOLE
+# file (~34% of all metadata-read time across the corpus, and 99% of it on the biggest
+# tables), which could in principle land on another dimension's marker. Returns
+# NA_character_ when the marker does not resolve or carries no distinct French half.
+ivt_f2_dim_name_fr_dir <- function(raw, nm, dir, mk = NULL) {
+  if (is.null(dir) || is.null(nm) || is.na(nm) || !nzchar(nm)) return(NA_character_)
+  if (is.null(mk)) mk <- ivt_f2_dir_marker_entry(raw, nm, dir)
+  if (is.na(mk) || mk < 1L || mk > nrow(dir)) return(NA_character_)
+  off <- dir[mk, "off"]; len <- dir[mk, "len"]
+  if (is.na(off) || is.na(len) || off < 0L || len <= 0L || off >= length(raw))
+    return(NA_character_)
+  fr <- ivt_f2_dim_name_fr_marker(raw[(off + 1L):min(length(raw), off + len)], nm)
+  if (is.null(fr)) NA_character_ else fr
+}
+
 # The reader core, addressed by an already-resolved (dimension descriptor, block
 # directory) pair -- so the label adapter (`ivt_f2_dim_dir_label1()`) and the
 # k-addressed entry point above share ONE path. `include_notes = FALSE` skips the
@@ -88,6 +107,24 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   named <- !is.null(nm) && !is.na(nm) && nzchar(nm)
   fields <- ivt_f2_dim_field_schema(raw, dir)
   mk <- if (named) ivt_f2_dir_marker_entry(raw, nm, dir) else 0L
+  # The French DIMENSION name, stamped on EVERY return path below (the survey
+  # generations' reference-period dimensions leave through `alt_members()` or the
+  # value-block branch, never reaching the tail). Primary source: a "Total - <name>"
+  # first member (`ivt_f2_total_name()`, the census dimensions). The facet / quantity
+  # dimensions of the `02 00 20 00` survey generation carry no such member -- their
+  # French name lives only in the doubled-name marker, stored as a combined "<EN><FR>"
+  # run ("ANNUAL2ANNUAL ANNUELLE"). That marker is `mk`, ALREADY located positionally
+  # from this dimension's own slot directory, so read it from that entry's bytes
+  # instead of scanning the whole file for `81 02 02 00` -- which cost ~34% of all
+  # metadata-read time across the corpus and could match another dimension's marker.
+  finish <- function(out, label_fr = NULL) {
+    if (is.null(out)) return(NULL)
+    name_fr <- if (!is.null(label_fr)) ivt_f2_total_name(label_fr) else NA_character_
+    if (named && (is.null(name_fr) || is.na(name_fr)))
+      name_fr <- ivt_f2_dim_name_fr_dir(raw, nm, dir, mk)
+    attr(out, "name_fr") <- if (is.null(name_fr)) NA_character_ else name_fr
+    out
+  }
   # Member sources for a dimension with NO `[01 01]`/`[81 01]` label array --
   # both the file's own member records, in member order (the survey
   # generations' reference-period dimensions):
@@ -117,9 +154,9 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   if (named && mk >= nrow(dir) && mk > 0L) {
     vb <- ivt_f2_dim_value_block_labels(raw, dir, setdiff(seq_len(nrow(dir)), mk))
     if (length(vb) == cnt)
-      return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
-                            label_en = vb))
-    return(alt_members())
+      return(finish(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
+                                   label_en = vb)))
+    return(finish(alt_members()))
   }
   # A named dimension whose doubled-name marker does NOT resolve (mk == 0) is not
   # necessarily unreadable: the `02 00 20 00` survey reference-period dimension
@@ -131,7 +168,7 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
 
   # --- collect the clean member-value runs (length cnt) ---
   runs <- ivt_f2_dim_member_runs(raw, dir, cnt, mk)
-  if (!length(runs)) return(alt_members())
+  if (!length(runs)) return(finish(alt_members()))
 
   # --- classify each run by role ---
   ord <- NULL; text_runs <- list()
@@ -178,8 +215,7 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
     }
   }
   attr(out, "fields") <- fields
-  attr(out, "name_fr") <- if (!is.null(label_fr)) ivt_f2_total_name(label_fr) else NA_character_
-  out
+  finish(out, label_fr)
 }
 
 # The sparse, bitmap-gated member-notes column (`_Description` / `_ItemNotes`) for one

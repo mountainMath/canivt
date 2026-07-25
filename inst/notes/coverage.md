@@ -75,7 +75,7 @@ exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
   ordinals are the identity.
 - [x] **Page-marker bytes `b2`/`b3` as size fields**: `b2` → the pad/`0xFF`
   trailer (`2·(b2>>4) + 2·(lo>0)`, 0 when `b2==0`), `b3` → an auxiliary head block
-  of `32·(b3−8)` bytes (`b3 ∈ {08,09,0a,0c}`); value run starts at
+  of `32·(b3−8)` bytes (`b3 ∈ {08..0e}`); value run starts at
   `4 + presence_len + trailer + head` (`ivt_value_trailer()`).
 
 ## [~] Read but not surfaced (recoverable, just not exposed)
@@ -134,9 +134,14 @@ every supported table:
   like per-width constants because b2 never varied within a marker family before
   0013. Unknown width codes / high nibbles abort (`canivt_unknown_marker`).
 - **b3 head formula** — `32·(b3 − 8)` bytes before the value run,
-  `b3 ∈ {08,09,0a,0c}`. Generalises the former "+32 on `0xa2` pages" constant and
-  is what unlocked the 2006 vintage (b3 = 0a/0c, 64/128-byte heads). Unknown b3
-  aborts.
+  `b3 ∈ {08..0e}`. Generalises the former "+32 on `0xa2` pages" constant and
+  is what unlocked the 2006 vintage (b3 = 0a/0c, 64/128-byte heads). The head is a
+  contiguous run of 32-byte blocks, so the set is the observed *span*: `0b/0d/0e`
+  were added for the SLID-era income lineage (2026-07-25), where the head grows
+  with the geography dimension's slot allocation. Those pages carry allocation
+  slack, so only the `≤` extent bound applies to them — the head length was
+  confirmed by data reconciliation instead (14,520/14,520 age-additivity groups on
+  `SP3_RHUXA9_404`). Unknown b3 aborts.
 - **Extent check** — `4 + presence + trailer + head + nv·width ≤ size` always,
   with **equality only when `b2 == 0 && b3 == 08`** (pages with a head block may
   append an absent-cell mask / allocation slack after the dense run). Overrun
@@ -329,6 +334,7 @@ each lineage (narrative + validation records in
 | 2016 Census of Agriculture (00040200, 00040207) | the `[type][count] 01 02 <doubled name>` facet framing (gated on facet count `< 0x20`); inline `[code]` geography |
 | type-00 sub-A provincial Business Patterns (PROVINDjune1997, PROVSIC3june1997, PROVSIC3-1) | `R/suba.R` — stride MEASURED from the directory, count from codebook chunks, **commits only if the decode reconciles**; labels provisional |
 | 2021 postal/electoral (98100019 FSA, 98100010 FED, 98100013 ADA) | no code change for cells; full attribute read needed `ivt_f2_dir_is_text_block()` (per-member footnote text blocks in the directory tail) |
+| SLID-era income (SP3_RHUXA9 103/404/405/501/701/703) | under-declared count reconcile — the declared slot allocation is the second count witness (`> 4·nextpow2(count)` ⇒ take the codebook member array's length, `canivt_underdeclared_count`); page-head codes widened to `b3 ∈ {08..0e}` |
 
 ## [x] The `04`-gen "doubled-window" survey directory — RESOLVED (2026-07-23)
 

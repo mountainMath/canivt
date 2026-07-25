@@ -39,6 +39,11 @@ NULL
 IVT_PRES_BITS  <- 2048L
 IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 
+# The highest page-directory entry index any container can address: every entry is
+# 8 bytes and is reached as `idx0 + 8L * k` in 32-bit integer arithmetic, so a
+# cartesian past this is not merely absent from the file, it is unrepresentable.
+IVT_MAX_DIR_ENTRIES <- .Machine$integer.max %/% 8L
+
 # Bytes between the end of the presence record and the dense value run, derived
 # structurally from the marker's third and fourth bytes (`b2`, `b3`), which
 # ENCODE it:
@@ -62,9 +67,19 @@ IVT_PRES_BYTES <- IVT_PRES_BITS %/% 8L
 # (64/128-byte heads) on 0x82/0x84 markers, byte-verified against the page-size
 # equation on all 14,381 of its pages. Those pages also append per-(geo,
 # outer-dim) suppression-mask records AFTER the value run, so they are not
-# exact-fit; see ivt_page_preflight() and ivt-format.md. An unrecognised width
-# code, high nibble or b3 aborts: decoding with a guessed value-run start would
-# silently yield garbage values.
+# exact-fit; see ivt_page_preflight() and ivt-format.md.
+#
+# `ivt_f2_marker_b3` is the observed SPAN of that 32-byte-block count, not a
+# sparse enumeration: 0x0b/0x0d/0x0e were added for the SLID-era income lineage
+# (SP3_RHUXA9 103/404/405/501/701/703), where the head grows with the geography
+# dimension's slot allocation. Those files over-allocate every page (1,528-2,344
+# bytes of slack on b3 = 0x0a/0x0c pages too), so the page-size equation only
+# BOUNDS them -- the head length is validated at the data level instead: on
+# SP3_RHUXA9_404 all 14,520 age-additivity groups reconcile, and a cell decoded
+# only because of this widening supplies exactly the residual the published
+# total requires (decode-history.md). An unrecognised width code, high nibble or
+# b3 aborts: decoding with a guessed value-run start would silently yield
+# garbage values.
 ivt_value_trailer <- function(b0, b2, b3 = 0x08L) {
   w <- bitwAnd(b0, 0x0FL)
   hi <- bitwAnd(b0, 0xF0L)
@@ -196,8 +211,22 @@ ivt_layout_impl <- function(raw, d = NULL) {
     ent_idx <- c(ent_idx, j); ent_counts <- c(ent_counts, ext[j])
     ent_pad <- c(ent_pad, pad[j])
   }
-  estride <- integer(length(ent_counts)); eb <- 1L
-  for (t in seq_along(ent_counts)) { estride[t] <- eb; eb <- ivt_f2_nextpow2(ent_pad[t] * eb) }
+  # Entry strides are accumulated in DOUBLE precision and checked against the
+  # addressable directory extent before use. A misread descriptor (a garbage member
+  # count on an alien container) can multiply out past 2^31, where the integer
+  # product silently becomes NA -- the NA stride then reached `ivt_page_preflight()`
+  # and aborted the whole detection gate with "NA/NaN argument" instead of returning
+  # a clean unsupported verdict. Only strides that are actually USED are checked
+  # (the accumulator's final value is discarded), so every layout that resolved
+  # before still resolves to the identical strides.
+  estride <- integer(length(ent_counts)); eb <- 1
+  for (t in seq_along(ent_counts)) {
+    if (!is.finite(eb) || eb > IVT_MAX_DIR_ENTRIES)
+      stop("page-directory cartesian exceeds the addressable directory extent ",
+           "(", format(eb, scientific = FALSE), " entries) -- descriptor misread")
+    estride[t] <- as.integer(eb)
+    eb <- 2^ceiling(log2(max(as.numeric(ent_pad[t]) * eb, 1)))
+  }
 
   list(counts = cnt, slugs = slugs, n_dim = m, geo_dim = gd,
        straddle = straddle, ipc = ipc, window_count = win,
@@ -411,7 +440,7 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
 # offsets, NONE a real page; verified via byte-exact employment-size additivity).
 # The four marker bytes alone cannot separate them: a codebook `84 01 00 02`
 # shares b0/b1 with an int32 value page, and BOTH a codebook block and a page with
-# a novel/doctored head byte have a b3 outside {08,09,0a,0c}. So validate the PAGE
+# a novel/doctored head byte have a b3 outside {08..0e}. So validate the PAGE
 # GEOMETRY instead -- the target must be a value page in b0 (recognised width
 # nibble, page high nibble) and b1, whose fixed presence record AND its tightest
 # possible value run (trailer/head = 0) fit the entry's allocated size. A real

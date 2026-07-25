@@ -29,11 +29,17 @@ test_that("the value trailer is derived structurally from the marker's b2/b3 byt
   expect_equal(ivt_value_trailer(0x84L, 0x00L, 0x0aL), 64L)
   expect_equal(ivt_value_trailer(0x84L, 0x00L, 0x0cL), 128L)
   expect_equal(ivt_value_trailer(0x82L, 0x00L, 0x0cL), 128L)
+  # the head is a contiguous run of 32-byte blocks, so 0x0b/0x0d/0x0e fill the
+  # span between the census vintages' 0x0a/0x0c (SLID-era income lineage)
+  expect_equal(ivt_value_trailer(0x84L, 0x00L, 0x0bL), 96L)
+  expect_equal(ivt_value_trailer(0x82L, 0x00L, 0x0dL), 160L)
+  expect_equal(ivt_value_trailer(0x84L, 0x00L, 0x0eL), 192L)
   # unknown width code, high nibble or b3: abort rather than decode garbage
   expect_error(ivt_value_trailer(0x86L, 0x01L), class = "canivt_unknown_marker")
   expect_error(ivt_value_trailer(0x81L, 0x01L), class = "canivt_unknown_marker")
   expect_error(ivt_value_trailer(0x48L, 0x01L), class = "canivt_unknown_marker")
-  expect_error(ivt_value_trailer(0x84L, 0x00L, 0x0bL), class = "canivt_unknown_marker")
+  expect_error(ivt_value_trailer(0x84L, 0x00L, 0x07L), class = "canivt_unknown_marker")
+  expect_error(ivt_value_trailer(0x84L, 0x00L, 0x0fL), class = "canivt_unknown_marker")
   expect_error(ivt_value_trailer(0x84L, 0x00L, 0x10L), class = "canivt_unknown_marker")
 })
 

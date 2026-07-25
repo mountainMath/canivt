@@ -20,7 +20,7 @@ test_that("page-marker recognizer matches the documented [b0] 01 [b2] [b3]", {
     expect_true(ivt_f2_is_marker(as.raw(c(b0, 0x01L, 0x05L, 0x00L)), 0L))
   # near-misses
   expect_false(ivt_f2_is_marker(mk_page(0x83L, 0x00L, 0x08L), 0L))  # bad width nibble
-  expect_false(ivt_f2_is_marker(mk_page(0x84L, 0x00L, 0x0bL), 0L))  # b3 not in set
+  expect_false(ivt_f2_is_marker(mk_page(0x84L, 0x00L, 0x0fL), 0L))  # b3 above the set
   expect_false(ivt_f2_is_marker(as.raw(c(0x84L, 0x02L, 0x00L, 0x08L)), 0L)) # byte1 != 01
   expect_false(ivt_f2_is_marker(as.raw(c(0x04L, 0x01L, 0x00L, 0x00L)), 0L)) # dense count 0
 })
@@ -31,7 +31,8 @@ test_that("ivt_value_trailer decodes the documented b2/b3 formula and aborts on 
   expect_equal(ivt_value_trailer(0x88L, 0x20L, 0x08L), 4L)          # 2*(2) + 0
   expect_equal(ivt_value_trailer(0x82L, 0x00L, 0x0aL), 64L)         # head 32*(0x0a-8)
   expect_error(ivt_value_trailer(0x83L, 0x00L, 0x08L), class = "canivt_unknown_marker")
-  expect_error(ivt_value_trailer(0x82L, 0x00L, 0x0bL), class = "canivt_unknown_marker")
+  expect_error(ivt_value_trailer(0x82L, 0x00L, 0x0fL), class = "canivt_unknown_marker")
+  expect_error(ivt_value_trailer(0x82L, 0x00L, 0x07L), class = "canivt_unknown_marker")
 })
 
 test_that("descriptor-signature recognizer accepts b9 in {03, ff} only", {

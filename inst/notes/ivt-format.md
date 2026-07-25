@@ -195,7 +195,7 @@ fully decoded):
   its bounded `relaxed` mode (`ivt_f2_dim_dir()`, capped to the slot's declared
   entry count). The content length is always the first field.
 - **Per-page header bytes.** The page marker is `[b0] 01 [b2] [b3]` with the value-
-  width in `b0`'s low nibble and `b3 ∈ {08,09,0a,0c}` (a ZERO high nibble in `b0`
+  width in `b0`'s low nibble and `b3 ∈ {08..0e}` (a ZERO high nibble in `b0`
   is the dense variant — bytes 3–4 are then a u16 value count, see "Dense pages"
   below); **`b2` encodes the trailer**:
   `b2 == 0x00` means "no trailer", otherwise

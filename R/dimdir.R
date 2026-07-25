@@ -592,6 +592,42 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
       dims[[k]]$count <- as.integer(cc)
     }
   }
+  # UNDER-DECLARED counts, caught by the dimension's own DECLARED SLOT ALLOCATION.
+  # The `81 02 <alloc> 16 00` member-code block states how many slots the container
+  # allocated for the dimension, and the whole page geometry is padded to it: the
+  # allocation is `nextpow2(members)` on every validated table, never wildly larger
+  # (measured across the corpus: `alloc <= 2 * nextpow2(count)` everywhere). So an
+  # allocation FOUR times the power-of-two capacity the descriptor count needs is
+  # not slack -- it is the file declaring more members than the descriptor record
+  # was read to hold (the SP3/RHUXA9 profile lineage: Geography read as 5 members,
+  # allocated 32, with 30 labels in its codebook). The replacement count is the
+  # codebook member array's own length (`ivt_f2_dir_member_count()`), not the
+  # allocation: the array is the members themselves. Gated hard -- the allocation
+  # must be 4x over, the codebook must hold MORE members than declared, and they
+  # must fit the allocation -- so a merely generous allocation, a deleted slot
+  # (handled above by `ivt_f2_dim_slot_expand()`) or an over-long label array (the
+  # accs "Offences" block, 64 label records for 40 members, allocated 64) never
+  # fires. This runs BEFORE the double-01 reconcile below and covers those records
+  # too: the SP3/RHUXA9 geography record is itself double-01 framed (`1e 05 01 01`),
+  # and its "5" is not a member count at all -- the allocation is what exposes it,
+  # where the double-01 rule alone keeps any positive count the slot table can hold.
+  # LOUD (canivt_underdeclared_count).
+  for (k in seq_along(dims)) {
+    c0 <- as.integer(dims[[k]]$count)
+    if (is.na(c0) || c0 < 1L) next
+    dir <- ivt_f2_dim_dir(raw, k, slots)
+    if (is.null(dir)) next
+    alloc <- ivt_f2_dim_slot_alloc(raw, k, c0, slots)
+    if (is.na(alloc) || alloc < 4L * ivt_f2_nextpow2(c0)) next
+    mc <- ivt_f2_dir_member_count(raw, dims[[k]]$name, dir)
+    if (is.na(mc$count) || mc$count <= c0 || mc$count > alloc) next
+    nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
+    ivt_fallback(sprintf(paste(
+      "Dimension %d (\"%s\") declares %d members but allocates %d slots; its",
+      "codebook member array holds %d members -- using that count."),
+      k, nm, c0, alloc, mc$count), class = "canivt_underdeclared_count")
+    dims[[k]]$count <- as.integer(mc$count)
+  }
   amb <- which(vapply(dims, function(d)
     isTRUE(d$double01) || identical(as.integer(d$count), 0L), logical(1)))
   if (!length(amb)) return(dims)
@@ -913,7 +949,17 @@ ivt_f2_dim_dir_labels <- function(raw) {
   for (k in setdiff(seq_along(d$dims), gd)) {
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) next
-    out[[k]] <- ivt_f2_dim_dir_label1(raw, d$dims[[k]], dir)
+    lab <- ivt_f2_dim_dir_label1(raw, d$dims[[k]], dir)
+    # A dimension whose member ARRAYS do not resolve can still declare its French
+    # NAME in the doubled-name marker entry of that same directory (the Business
+    # Patterns / sub-A code-named dimensions, 801's profile dimensions). Keep that
+    # name -- the consumers gate members on `$en`, which stays NULL here, so this
+    # only ever adds the name.
+    if (is.null(lab)) {
+      fr <- ivt_f2_dim_name_fr_dir(raw, d$dims[[k]]$name, dir)
+      if (!is.na(fr)) lab <- list(name_fr = fr)
+    }
+    out[[k]] <- lab
   }
   out
 }
