@@ -33,8 +33,8 @@ age_col <- "Age (in single years)"
 
 test_that("ivt_members builds the full level table in ordinal order", {
   m <- ivt_members(fake_ivt())
-  # data column defaults to the structural slug; geography columns unchanged
-  expect_setequal(unique(m$column), c("age", "geo_name", "geo_uid"))
+  # data column defaults to the structural slug; geography is not levelled
+  expect_setequal(unique(m$column), "age")
   age <- m[m$column == "age", ]
   expect_equal(age$member_id, 1:3)
   expect_equal(age$ordinal, 1:3)
@@ -46,12 +46,9 @@ test_that("ivt_members builds the full level table in ordinal order", {
   expect_equal(age$depth, c(0L, 1L, 1L))
   # the two indented members roll up to the depth-0 "Total" (member 1)
   expect_equal(age$parent_id, c(NA_integer_, 1L, 1L))
-  geo <- m[m$column == "geo_uid", ]
-  expect_equal(geo$level, c("2021A000011124", "2021A000235"))
-  expect_equal(unique(geo$dimension), "Geography")
   # dim_names = "label" names the data column by the full dimension label
   expect_setequal(unique(ivt_members(fake_ivt(), dim_names = "label")$column),
-                  c(age_col, "geo_name", "geo_uid"))
+                  age_col)
 })
 
 test_that("ivt_label_parent turns indentation into a parent/child tree", {
@@ -68,6 +65,22 @@ test_that("ivt_label_parent turns indentation into a parent/child tree", {
   expect_equal(ivt_label_parent(skip_lab), c(NA_integer_, 1L))
   # a flat list (no indentation) has no parents
   expect_equal(ivt_label_parent(c("a", "b", "c")), rep(NA_integer_, 3))
+})
+
+test_that("ivt_label_indent_unit reads spaces-per-level off the labels", {
+  two <- c("Total", "  A", "    B")
+  expect_equal(ivt_label_indent_unit(ivt_label_indent(two)), 2L)
+  # the census-of-agriculture geography axis indents ONE space per level, where
+  # a fixed unit of 2 collapses Canada/province/CAR/CD/CCS into three levels
+  one <- c("Canada", " Newfoundland", "  CAR 1", "   Division No. 1",
+           "    Division No. 1, Subdivision C")
+  expect_equal(ivt_label_indent_unit(ivt_label_indent(one)), 1L)
+  expect_equal(ivt_label_depth(one), c(0L, 0L, 1L, 1L, 2L))       # fixed unit
+  expect_equal(ivt_label_depth(one, unit = 1L), 0:4)              # inferred
+  expect_equal(ivt_label_parent(one, unit = 1L), c(NA, 1L, 2L, 3L, 4L))
+  # a flat set declares no unit, and unit 0 means no hierarchy
+  expect_equal(ivt_label_indent_unit(ivt_label_indent(c("a", "b"))), 0L)
+  expect_equal(ivt_label_depth(c("a", " b"), unit = 0L), c(0L, 0L))
 })
 
 test_that("ivt_label_depth/parent treat NA and empty labels as top-level", {
@@ -106,11 +119,34 @@ test_that("collect_ivt on an ivt object yields factors with ALL member levels", 
                c("Total - Age", "0 to 14 years", "15 years and over"))
   expect_equal(as.character(df$age),
                c("Total - Age", "0 to 14 years", "Total - Age"))
-  # geography stays character by default, converts on request
+  # geography is an identity axis, never levelled -- it stays character
   expect_type(df$geo_name, "character")
-  df2 <- collect_ivt(x, geography = TRUE)
-  expect_s3_class(df2$geo_name, "factor")
-  expect_equal(levels(df2$geo_name), c("Canada", "Ontario"))
+  expect_false(any(vapply(df[grep("^geo", names(df))], is.factor, logical(1))))
+})
+
+test_that("ivt_members emits no geography rows", {
+  m <- ivt_members(fake_ivt())
+  expect_false("Geography" %in% m$dimension)
+  expect_false(any(grepl("^geo", m$column)))
+  expect_true("age" %in% m$column)
+})
+
+test_that("collect_ivt ignores the geography rows of an older sidecar", {
+  # a member table written before geography was dropped: geo_uid must not
+  # become a factor just because a stale cache still levels it
+  x <- fake_ivt()
+  m <- ivt_members(x)
+  old <- rbind(m, tibble::tibble(
+    column = "geo_name", dimension = "Geography", dimension_fr = NA_character_,
+    member_id = 1:2, ordinal = 1:2, label = c("Canada", "Ontario"),
+    level = c("Canada", "Ontario"), level_fr = NA_character_,
+    depth = 0L, parent_id = NA_integer_,
+    description = NA_character_, description_fr = NA_character_))
+  df <- collect_ivt(x, members = old)
+  expect_type(df$geo_name, "character")
+  expect_s3_class(df$age, "factor")
+  # and the attached table is the one actually used, geography stripped
+  expect_false("Geography" %in% attr(df, "members", exact = TRUE)$dimension)
 })
 
 test_that("collect_ivt language = 'fr' yields French levels (and French labels)", {

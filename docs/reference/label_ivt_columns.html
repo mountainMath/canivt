@@ -92,6 +92,10 @@ is an Arrow object, else a data frame).</p>
 explicit <code>members</code> table, e.g. from <code><a href="ivt_members.html">ivt_members()</a></code>). The language is taken
 from the file name marker via <code><a href="ivt_parquet_language.html">ivt_parquet_language()</a></code> unless given, so the
 labels match the language the Parquet was written in.</p>
+<p>It can be called either side of <code><a href="collect_ivt.html">collect_ivt()</a></code>: before, on the connection
+(nothing is read until the collect), or after, on the collected data frame –
+which carries the member table it used as an attribute. Either order gives
+the same labelled, fully-levelled result, and <code>collect_ivt(dim_names = "label")</code> is the one-call shorthand for it.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -107,8 +111,6 @@ labels match the language the Parquet was written in.</p>
 <span class="r-in"><span>  <span class="va">labelled</span> <span class="op">&lt;-</span> <span class="fu">label_ivt_columns</span><span class="op">(</span><span class="va">df</span>, members <span class="op">=</span> <span class="fu"><a href="ivt_members.html">ivt_members</a></span><span class="op">(</span><span class="va">ivt</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">labelled</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
-<span class="r-wrn co"><span class="r-pr">#&gt;</span> <span class="warning">Warning: </span>Unknown or uninitialised column: `files`.</span>
-<span class="r-wrn co"><span class="r-pr">#&gt;</span> <span class="warning">Warning: </span>Unknown or uninitialised column: `.data`.</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] "geo"                                                                                    </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [2] "Type of collective dwelling"                                                            </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [3] "Collective dwellings occupied by usual residents and population in collective dwellings"</span>

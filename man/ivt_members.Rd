@@ -29,7 +29,7 @@ languages; only the label-derived \code{column} names follow \code{language}.}
 }
 \value{
 A tibble with columns \code{column} (the tidy column name), \code{dimension}
-(the full English dimension name; \code{"Geography"} for the geography columns),
+(the full English dimension name),
 \code{dimension_fr} (the French dimension name, \code{NA} when none -- used by
 \code{\link[=label_ivt_columns]{label_ivt_columns()}}), \code{member_id} (1-based StatCan member id), \code{ordinal}
 (the codebook
@@ -46,13 +46,21 @@ quantity dimension of the older survey tables, e.g. a total fertility rate's
 value's units; \code{NA} for the many dimensions/tables that carry none).
 }
 \description{
-Returns one row per (column, member) for every labelled column that
-\code{\link[=ivt_tidy]{ivt_tidy()}} emits: each data dimension (with its stored member-ordinal
-order) and the geography columns. This is the level table \code{\link[=collect_ivt]{collect_ivt()}}
-uses to convert dimension columns into factors whose levels cover \strong{all}
-members -- including members filtered out of the data -- and it is written
-next to the cached Parquet by \code{\link[=ivt_write_parquet]{ivt_write_parquet()}} / \code{\link[=get_statcan_ivt]{get_statcan_ivt()}}
-(as \verb{<name>_members.parquet}).
+Returns one row per (column, member) for every labelled \strong{data} dimension
+\code{\link[=ivt_tidy]{ivt_tidy()}} emits, in its stored member-ordinal order. This is the level
+table \code{\link[=collect_ivt]{collect_ivt()}} uses to convert dimension columns into factors whose
+levels cover \strong{all} members -- including members filtered out of the data --
+and it is written next to the cached Parquet by \code{\link[=ivt_write_parquet]{ivt_write_parquet()}} /
+\code{\link[=get_statcan_ivt]{get_statcan_ivt()}} (as \verb{<name>_members.parquet}).
+}
+\details{
+The geography columns are \strong{not} levelled. Geography is an identity axis
+rather than a category: \code{geo_uid} is the language-neutral key you join on, the
+member list runs to tens of thousands of entries on the large tables, and its
+ordinal is a hierarchy traversal rather than an analytic order. Per-member
+geography context -- names, identifiers, quality flags, and the label
+hierarchy as \code{geo_depth}/\code{geo_parent_id} -- lives in \code{metadata$geographies}
+instead.
 }
 \examples{
 path <- system.file("extdata", "98100044.ivt", package = "canivt")

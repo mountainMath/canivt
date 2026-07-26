@@ -51,6 +51,14 @@ The language is taken from the file name marker via
 unless given, so the labels match the language the Parquet was written
 in.
 
+It can be called either side of
+[`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md):
+before, on the connection (nothing is read until the collect), or after,
+on the collected data frame – which carries the member table it used as
+an attribute. Either order gives the same labelled, fully-levelled
+result, and `collect_ivt(dim_names = "label")` is the one-call shorthand
+for it.
+
 ## See also
 
 [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md),
@@ -66,8 +74,6 @@ if (requireNamespace("dplyr", quietly = TRUE)) {
   labelled <- label_ivt_columns(df, members = ivt_members(ivt))
   names(labelled)
 }
-#> Warning: Unknown or uninitialised column: `files`.
-#> Warning: Unknown or uninitialised column: `.data`.
 #> [1] "geo"                                                                                    
 #> [2] "Type of collective dwelling"                                                            
 #> [3] "Collective dwellings occupied by usual residents and population in collective dwellings"

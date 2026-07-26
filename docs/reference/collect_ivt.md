@@ -44,13 +44,17 @@ collect_ivt(
 
 - dim_names:
 
-  For `ivt` objects, how to name the data-dimension columns (passed to
+  How to name the data-dimension columns: `"slug"` (default, the terse
+  structural slug the Parquet is written with) or `"label"`, the full
+  dimension name. For `ivt` objects this is passed to
   [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md)
   and
-  [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)):
-  `"slug"` (default) or `"label"`. Ignored for the Arrow / Parquet
-  forms, where the column names are already fixed by how the Parquet was
-  written.
+  [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md);
+  for the Arrow / Parquet forms – whose columns are named by how the
+  Parquet was written – `"label"` applies
+  [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md)
+  after the factor conversion, so the result carries both the full
+  labels and the full member levels.
 
 - language:
 
@@ -70,7 +74,11 @@ collect_ivt(
 
 ## Value
 
-A tibble with the dimension columns converted to factors.
+A tibble with the dimension columns converted to factors, carrying the
+member table it used as a `members` attribute (and the source Parquet as
+`path`) so
+[`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md)
+can still be applied afterwards.
 
 ## Details
 

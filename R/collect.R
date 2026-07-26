@@ -5,13 +5,20 @@
 
 #' Member levels of an IVT table
 #'
-#' Returns one row per (column, member) for every labelled column that
-#' [ivt_tidy()] emits: each data dimension (with its stored member-ordinal
-#' order) and the geography columns. This is the level table [collect_ivt()]
-#' uses to convert dimension columns into factors whose levels cover **all**
-#' members -- including members filtered out of the data -- and it is written
-#' next to the cached Parquet by [ivt_write_parquet()] / [get_statcan_ivt()]
-#' (as `<name>_members.parquet`).
+#' Returns one row per (column, member) for every labelled **data** dimension
+#' [ivt_tidy()] emits, in its stored member-ordinal order. This is the level
+#' table [collect_ivt()] uses to convert dimension columns into factors whose
+#' levels cover **all** members -- including members filtered out of the data --
+#' and it is written next to the cached Parquet by [ivt_write_parquet()] /
+#' [get_statcan_ivt()] (as `<name>_members.parquet`).
+#'
+#' The geography columns are **not** levelled. Geography is an identity axis
+#' rather than a category: `geo_uid` is the language-neutral key you join on, the
+#' member list runs to tens of thousands of entries on the large tables, and its
+#' ordinal is a hierarchy traversal rather than an analytic order. Per-member
+#' geography context -- names, identifiers, quality flags, and the label
+#' hierarchy as `geo_depth`/`geo_parent_id` -- lives in `metadata$geographies`
+#' instead.
 #'
 #' @param x An `ivt` object from [read_ivt()].
 #' @param trim_labels Trim the hierarchy-indentation whitespace from `level`
@@ -25,7 +32,7 @@
 #'   English `level` and the French `level_fr`, so a single sidecar serves both
 #'   languages; only the label-derived `column` names follow `language`.
 #' @return A tibble with columns `column` (the tidy column name), `dimension`
-#'   (the full English dimension name; `"Geography"` for the geography columns),
+#'   (the full English dimension name),
 #'   `dimension_fr` (the French dimension name, `NA` when none -- used by
 #'   [label_ivt_columns()]), `member_id` (1-based StatCan member id), `ordinal`
 #'   (the codebook
@@ -89,22 +96,14 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
       description = desc_col(d$members, d$description),
       description_fr = desc_col(d$members, d$description_fr))
   }
-  # geography columns, as ivt_tidy emits them (uids are never trimmed there)
-  geo <- meta$geographies
-  geo_fr <- c(geo_label = "geo_label_fr", geo_name = "geo_name_fr")
-  for (col in c("geo_label", "geo_name", "geo_uid", "geo_level")) {
-    v <- geo[[col]]
-    if (is.null(v)) next
-    out[[length(out) + 1L]] <- tibble::tibble(
-      column = col, dimension = "Geography", dimension_fr = NA_character_,
-      member_id = as.integer(seq_along(v)), ordinal = as.integer(seq_along(v)),
-      label = v, level = if (col == "geo_uid") v else fix(v),
-      level_fr = if (col %in% names(geo_fr)) fr_level(v, geo[[geo_fr[[col]]]])
-                 else rep(NA_character_, length(v)),
-      depth = ivt_label_depth(v), parent_id = ivt_label_parent(v),
-      description = rep(NA_character_, length(v)),
-      description_fr = rep(NA_character_, length(v)))
-  }
+  # Geography is deliberately NOT levelled here. It is an identity axis, not a
+  # category: `geo_uid` is the language-neutral join key, the member list runs to
+  # tens of thousands on the big tables (it was 99.7% of this table and of the
+  # `_members.parquet` sidecar), and its ordinal is a hierarchy traversal rather
+  # than the analytic order that makes a data dimension worth factorizing. The
+  # per-member geography context lives in `metadata$geographies` -- including the
+  # label hierarchy as `geo_depth`/`geo_parent_id`, one row per geography instead
+  # of one per geography per geo column.
   if (!length(out)) return(tibble::tibble(
     column = character(0), dimension = character(0), dimension_fr = character(0),
     member_id = integer(0), ordinal = integer(0), label = character(0),
@@ -122,6 +121,11 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #' still visible as factor levels, and members always sort in their StatCan
 #' order rather than alphabetically.
 #'
+#' The geography columns are left as character: they are identifiers to join on,
+#' not categories (see [ivt_members()]). A member table written by an older
+#' version that still carries geography rows is accepted, and its geography rows
+#' ignored.
+#'
 #' `x` can be an `ivt` object from [read_ivt()], the Arrow dataset returned by
 #' [get_statcan_ivt()] (optionally after `dplyr` verbs such as `filter()`), or
 #' a path to a Parquet written by [ivt_write_parquet()]. For the Arrow /
@@ -136,10 +140,6 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #' @param members A level table from [ivt_members()]; when `NULL` it is located
 #'   from `x` (an attached `members` attribute, or the Parquet's
 #'   `_members.parquet` sidecar).
-#' @param geography Also convert the geography columns (`geo_label`,
-#'   `geo_name`, `geo_uid`, `geo_level`) to factors. Default `FALSE`: large
-#'   tables carry tens of thousands of geographies, which makes for unwieldy
-#'   factor levels.
 #' @param dim_names How to name the data-dimension columns: `"slug"` (default,
 #'   the terse structural slug the Parquet is written with) or `"label"`, the
 #'   full dimension name. For `ivt` objects this is passed to [ivt_tidy()] and
@@ -165,7 +165,7 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #' fac <- names(df)[vapply(df, is.factor, logical(1))]
 #' head(levels(df[[fac[1]]]))
 #' @export
-collect_ivt <- function(x, members = NULL, geography = FALSE,
+collect_ivt <- function(x, members = NULL,
                         dim_names = c("slug", "label"), language = NULL, ...) {
   dim_names <- match.arg(dim_names)
   # auto-detect the language: "en" for ivt objects, else the file-name marker.
@@ -200,7 +200,10 @@ collect_ivt <- function(x, members = NULL, geography = FALSE,
            Parquet (e.g. {.code get_statcan_ivt(..., refresh = TRUE)}) so the
            {.file _members.parquet} sidecar is written."))
   }
-  df <- ivt_factorize(df, members, geography = geography, language = language)
+  # An older sidecar may still carry geography rows; drop them once here so the
+  # factorizing, the labelling and the attached table all see the same members.
+  members <- members[members$dimension != "Geography", , drop = FALSE]
+  df <- ivt_factorize(df, members, language = language)
   # On the ivt path the column names came from ivt_tidy(dim_names = ), which has
   # already applied this; the Arrow / Parquet forms are named by however the
   # Parquet was written, so honour it here instead of silently ignoring it.
@@ -433,10 +436,11 @@ ivt_member_col_map <- function(members, cols, language = "en") {
 # is left as is. `language = "fr"` uses the French `level_fr` where the column
 # has one (per column, so a column with no French copy -- which the tidy output
 # also left English -- keeps its English levels).
-ivt_factorize <- function(df, members, geography = FALSE, language = "en") {
-  if (!isTRUE(geography)) {
-    members <- members[members$dimension != "Geography", , drop = FALSE]
-  }
+ivt_factorize <- function(df, members, language = "en") {
+  # Geography is never levelled (see ivt_members()). The filter stays because a
+  # `_members.parquet` written by an older version still carries geography rows,
+  # and an existing cache must not start factorizing `geo_uid` behind the user.
+  members <- members[members$dimension != "Geography", , drop = FALSE]
   has_fr <- language == "fr" && "level_fr" %in% names(members)
   colmap <- ivt_member_col_map(members, names(df), language = language)
   for (col in unique(members$column)) {

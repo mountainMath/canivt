@@ -433,7 +433,8 @@ ivt_f2_attach_legacy_refs <- function(footnotes, dims, geo_names) {
 # does not store are skipped; decoded columns outside the set (the flow sides
 # geo_res_*/geo_work_*, has_data) follow in their own order.
 IVT_GEO_COLS <- c("member_id", "geo_label", "geo_name", "geo_uid",
-                  "geo_label_fr", "geo_name_fr", "geo_level", "geo_type",
+                  "geo_label_fr", "geo_name_fr", "geo_level", "geo_depth",
+                  "geo_parent_id", "geo_type",
                   "geo_type_abbr", "prov_abbr", "alt_geo_code", "pr_code",
                   "dqf_code", "dqf_note", "dqf_note_truncated", "tnr_short_form")
 
@@ -520,6 +521,31 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
     # all-NA (their presence is the path marker downstream consumers key on)
     if (!col %in% c("geo_name", "geo_uid") && all(is.na(v))) next
     geographies[[col]] <- v
+  }
+  # The label HIERARCHY, from the leading-space indentation the display label
+  # carries verbatim ("Canada" > "  British Columbia" > "    Vancouver"). This is
+  # the one piece of per-member geography context that the member-level table
+  # used to hold and nothing else did; it belongs here, one row per geography,
+  # rather than repeated once per geography column in the factor levels. Read off
+  # `geo_label` (the file's own display name, which keeps the indentation) and
+  # fall back to `geo_name` for the vintages that store no separate label.
+  # Skipped entirely when the axis is flat, like any other undecoded column --
+  # a table with no indented members gains no all-zero columns.
+  glab <- if (!is.null(geographies$geo_label)) geographies$geo_label
+          else geographies$geo_name
+  if (!is.null(glab)) {
+    # spaces-per-level from the labels themselves rather than the data
+    # dimensions' fixed 2 -- the census-of-agriculture geography axis indents one
+    # space per level, which a fixed unit collapses (see ivt_label_indent_unit)
+    unit <- ivt_label_indent_unit(ivt_label_indent(glab))
+    gdepth <- ivt_label_depth(glab, unit = unit)
+    if (any(gdepth > 0L)) {
+      geographies$geo_depth <- gdepth
+      geographies$geo_parent_id <- ivt_label_parent(glab, unit = unit)
+      # re-apply the canonical order so the two land next to geo_level rather
+      # than after the attribute set they are not part of
+      geographies <- geographies[ivt_geo_col_order(names(geographies))]
+    }
   }
   list(
     product_id        = info$product_id,

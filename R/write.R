@@ -174,14 +174,36 @@ ivt_data_cache_file <- function(x, suffix) {
   file.path(ivt_cache_dir("data"), paste0(pid, suffix))
 }
 
-# Hierarchy depth implied by the leading-space indentation of a member label.
-# An NA/empty label (e.g. an aggregate geography member that carries no name)
-# has no indentation and so is treated as top-level (depth 0), which keeps the
-# depth vector free of NAs for ivt_label_parent().
-ivt_label_depth <- function(labels) {
+# Leading-space count of each label (NA/empty -> 0, so the depth vector stays
+# free of NAs for ivt_label_parent()).
+ivt_label_indent <- function(labels) {
   lead <- nchar(labels) - nchar(sub("^ +", "", labels))
   lead[is.na(lead)] <- 0L
-  as.integer(lead %/% 2L)
+  as.integer(lead)
+}
+
+# Spaces per hierarchy level, read off the label set itself: the GCD of the
+# observed indents. Most vintages indent two spaces per level, but not all --
+# the census-of-agriculture geography axis (00040200/00040207/00040231) indents
+# ONE, running Canada / province / CAR / CD / CCS at 0..4 spaces, where a fixed
+# unit of 2 collapses five levels into three and makes each CD a sibling of the
+# CAR that contains it. Returns 0 for a flat set (no indent anywhere).
+ivt_label_indent_unit <- function(lead) {
+  lead <- lead[lead > 0L]
+  if (!length(lead)) return(0L)
+  g <- lead[1L]
+  for (x in lead[-1L]) { while (x) { t <- g %% x; g <- x; x <- t }; if (g == 1L) break }
+  as.integer(g)
+}
+
+# Hierarchy depth implied by the leading-space indentation of a member label.
+# `unit` is the spaces-per-level; the default of 2 is what every data dimension
+# validated against, and callers that would rather let the labels declare it
+# pass `ivt_label_indent_unit()`.
+ivt_label_depth <- function(labels, unit = 2L) {
+  lead <- ivt_label_indent(labels)
+  if (unit < 1L) return(integer(length(lead)))
+  as.integer(lead %/% as.integer(unit))
 }
 
 # Parent member (1-based member id) of each label in the hierarchy the
@@ -190,8 +212,8 @@ ivt_label_depth <- function(labels) {
 # turns the flat depth sequence into a structured parent/child tree -- the
 # family-2 analogue of the depth column, usable to roll members up to their
 # aggregate ("Under $10,000" -> "With income" -> "Total - Income groups").
-ivt_label_parent <- function(labels) {
-  d <- ivt_label_depth(labels)
+ivt_label_parent <- function(labels, unit = 2L) {
+  d <- ivt_label_depth(labels, unit = unit)
   parent <- rep(NA_integer_, length(d))
   last_at <- integer(0)                         # last_at[k] = latest member at depth k-1
   for (i in seq_along(d)) {

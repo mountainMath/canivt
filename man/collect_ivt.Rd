@@ -7,7 +7,6 @@
 collect_ivt(
   x,
   members = NULL,
-  geography = FALSE,
   dim_names = c("slug", "label"),
   language = NULL,
   ...
@@ -20,11 +19,6 @@ collect_ivt(
 \item{members}{A level table from \code{\link[=ivt_members]{ivt_members()}}; when \code{NULL} it is located
 from \code{x} (an attached \code{members} attribute, or the Parquet's
 \verb{_members.parquet} sidecar).}
-
-\item{geography}{Also convert the geography columns (\code{geo_label},
-\code{geo_name}, \code{geo_uid}, \code{geo_level}) to factors. Default \code{FALSE}: large
-tables carry tens of thousands of geographies, which makes for unwieldy
-factor levels.}
 
 \item{dim_names}{How to name the data-dimension columns: \code{"slug"} (default,
 the terse structural slug the Parquet is written with) or \code{"label"}, the
@@ -56,6 +50,11 @@ still visible as factor levels, and members always sort in their StatCan
 order rather than alphabetically.
 }
 \details{
+The geography columns are left as character: they are identifiers to join on,
+not categories (see \code{\link[=ivt_members]{ivt_members()}}). A member table written by an older
+version that still carries geography rows is accepted, and its geography rows
+ignored.
+
 \code{x} can be an \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}, the Arrow dataset returned by
 \code{\link[=get_statcan_ivt]{get_statcan_ivt()}} (optionally after \code{dplyr} verbs such as \code{filter()}), or
 a path to a Parquet written by \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}. For the Arrow /

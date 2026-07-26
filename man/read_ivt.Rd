@@ -27,7 +27,10 @@ vintage stores them: the bilingual display label (\code{geo_label},
 \code{geo_label_fr}) and name (\code{geo_name}, \code{geo_name_fr} -- on pre-DGUID tables
 the EN/FR halves of the stored bilingual label), \code{geo_uid} (DGUID, or the
 bare GEOUID on pre-DGUID tables), the aggregation level (\code{geo_level}), the
-geography type / municipal status (\code{geo_type}, \code{geo_type_abbr}), province
+label hierarchy (\code{geo_depth}, \code{geo_parent_id} -- the indentation the display
+label carries, turned into a depth and the \code{member_id} of each member's
+nearest shallower ancestor; both absent when the geography axis is flat),
+the geography type / municipal status (\code{geo_type}, \code{geo_type_abbr}), province
 abbreviation and codes (\code{prov_abbr}, \code{alt_geo_code}, \code{pr_code}), the
 data-quality flag (\code{dqf_code}, with \code{dqf_note} and the table-level
 \code{dqf_legend}), and the total non-response rate (\code{tnr_short_form}).

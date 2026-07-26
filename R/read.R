@@ -69,7 +69,10 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   `geo_label_fr`) and name (`geo_name`, `geo_name_fr` -- on pre-DGUID tables
 #'   the EN/FR halves of the stored bilingual label), `geo_uid` (DGUID, or the
 #'   bare GEOUID on pre-DGUID tables), the aggregation level (`geo_level`), the
-#'   geography type / municipal status (`geo_type`, `geo_type_abbr`), province
+#'   label hierarchy (`geo_depth`, `geo_parent_id` -- the indentation the display
+#'   label carries, turned into a depth and the `member_id` of each member's
+#'   nearest shallower ancestor; both absent when the geography axis is flat),
+#'   the geography type / municipal status (`geo_type`, `geo_type_abbr`), province
 #'   abbreviation and codes (`prov_abbr`, `alt_geo_code`, `pr_code`), the
 #'   data-quality flag (`dqf_code`, with `dqf_note` and the table-level
 #'   `dqf_legend`), and the total non-response rate (`tnr_short_form`).

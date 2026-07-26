@@ -90,10 +90,13 @@ factor levels.</p></dd>
 
 
 <dt id="arg-dim-names">dim_names<a class="anchor" aria-label="anchor" href="#arg-dim-names"></a></dt>
-<dd><p>For <code>ivt</code> objects, how to name the data-dimension columns
-(passed to <code><a href="ivt_tidy.html">ivt_tidy()</a></code> and <code><a href="ivt_members.html">ivt_members()</a></code>): <code>"slug"</code> (default) or
-<code>"label"</code>. Ignored for the Arrow / Parquet forms, where the column names are
-already fixed by how the Parquet was written.</p></dd>
+<dd><p>How to name the data-dimension columns: <code>"slug"</code> (default,
+the terse structural slug the Parquet is written with) or <code>"label"</code>, the
+full dimension name. For <code>ivt</code> objects this is passed to <code><a href="ivt_tidy.html">ivt_tidy()</a></code> and
+<code><a href="ivt_members.html">ivt_members()</a></code>; for the Arrow / Parquet forms – whose columns are named by
+how the Parquet was written – <code>"label"</code> applies <code><a href="label_ivt_columns.html">label_ivt_columns()</a></code> after
+the factor conversion, so the result carries both the full labels and the
+full member levels.</p></dd>
 
 
 <dt id="arg-language">language<a class="anchor" aria-label="anchor" href="#arg-language"></a></dt>
@@ -111,7 +114,9 @@ levels.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A tibble with the dimension columns converted to factors.</p>
+    <p>A tibble with the dimension columns converted to factors, carrying
+the member table it used as a <code>members</code> attribute (and the source Parquet
+as <code>path</code>) so <code><a href="label_ivt_columns.html">label_ivt_columns()</a></code> can still be applied afterwards.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
