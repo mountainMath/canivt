@@ -32,6 +32,11 @@ The slug -> label map comes from the \verb{<name>_members.parquet} sidecar (or a
 explicit \code{members} table, e.g. from \code{\link[=ivt_members]{ivt_members()}}). The language is taken
 from the file name marker via \code{\link[=ivt_parquet_language]{ivt_parquet_language()}} unless given, so the
 labels match the language the Parquet was written in.
+
+It can be called either side of \code{\link[=collect_ivt]{collect_ivt()}}: before, on the connection
+(nothing is read until the collect), or after, on the collected data frame --
+which carries the member table it used as an attribute. Either order gives
+the same labelled, fully-levelled result, and \code{collect_ivt(dim_names = "label")} is the one-call shorthand for it.
 }
 \examples{
 path <- system.file("extdata", "98100044.ivt", package = "canivt")

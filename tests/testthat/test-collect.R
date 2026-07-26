@@ -200,6 +200,106 @@ test_that("label_ivt_columns renames slug columns to full labels on the connecti
   expect_true("geo_name" %in% names(lab))
 })
 
+test_that("label_ivt_columns works either side of collect_ivt", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("dplyr")
+  x <- fake_ivt()
+  path <- withr::local_tempfile(fileext = ".parquet")
+  ivt_write_parquet(x, path = path)                 # slug columns
+  ds <- arrow::open_dataset(path)
+  attr(ds, "path") <- path
+
+  lvl <- c("Total - Age", "0 to 14 years", "15 years and over")
+  # before: rename lazily on the connection, then collect -- the member table
+  # still finds the column through the dimension name, so the levels survive
+  before <- collect_ivt(label_ivt_columns(ds))
+  expect_true(age_col %in% names(before))
+  expect_s3_class(before[[age_col]], "factor")
+  expect_equal(levels(before[[age_col]]), lvl)
+
+  # after: collect first, then rename the collected data frame
+  after <- label_ivt_columns(collect_ivt(ds))
+  expect_true(age_col %in% names(after))
+  expect_s3_class(after[[age_col]], "factor")
+  expect_equal(levels(after[[age_col]]), lvl)
+
+  expect_equal(as.data.frame(before), as.data.frame(after))
+})
+
+test_that("collect_ivt attaches the member table it used", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("dplyr")
+  x <- fake_ivt()
+  path <- withr::local_tempfile(fileext = ".parquet")
+  ivt_write_parquet(x, path = path)
+  df <- collect_ivt(path)
+  # the collected frame knows where its levels came from: no sidecar lookup and
+  # no connection needed to relabel it later
+  expect_s3_class(attr(df, "members", exact = TRUE), "data.frame")
+  expect_equal(attr(df, "path", exact = TRUE), path)
+  expect_equal(ivt_parquet_language(df), "en")
+  lab <- label_ivt_columns(df)
+  expect_true(age_col %in% names(lab))
+  # ... and the labelled result stays self-describing
+  expect_s3_class(attr(lab, "members", exact = TRUE), "data.frame")
+  # an ivt object carries the member table too (it has no Parquet path)
+  di <- collect_ivt(x)
+  expect_s3_class(attr(di, "members", exact = TRUE), "data.frame")
+  expect_null(attr(di, "path", exact = TRUE))
+})
+
+test_that("collect_ivt dim_names = 'label' applies to Arrow/Parquet too", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("dplyr")
+  x <- fake_ivt()
+  base <- withr::local_tempdir()
+  en <- file.path(base, "t_en.parquet")
+  fr <- file.path(base, "t_fr.parquet")
+  ivt_write_parquet(x, path = en, language = "en")
+  ivt_write_parquet(x, path = fr, language = "fr")
+
+  # the argument used to be silently ignored on this path
+  df <- collect_ivt(en, dim_names = "label")
+  expect_true(age_col %in% names(df))
+  expect_false("age" %in% names(df))
+  expect_s3_class(df[[age_col]], "factor")
+  expect_equal(levels(df[[age_col]]),
+               c("Total - Age", "0 to 14 years", "15 years and over"))
+  # default is unchanged
+  expect_true("age" %in% names(collect_ivt(en)))
+  # the label language follows the Parquet's own marker
+  dffr <- collect_ivt(fr, dim_names = "label")
+  expect_true("Âge" %in% names(dffr))
+  expect_equal(levels(dffr[["Âge"]]),
+               c("Total - Âge", "0 à 14 ans", "15 ans et plus"))
+  # and it is idempotent: already-labelled columns are left alone
+  ds <- arrow::open_dataset(en)
+  attr(ds, "path") <- en
+  twice <- collect_ivt(label_ivt_columns(ds), dim_names = "label")
+  expect_true(age_col %in% names(twice))
+  expect_equal(levels(twice[[age_col]]), levels(df[[age_col]]))
+})
+
+test_that("ivt_member_col_map falls back to the dimension name, without stealing", {
+  m <- ivt_members(fake_ivt())                       # column = "age"
+  # the written name wins
+  expect_equal(unname(ivt_member_col_map(m, c("age", "geo_uid"))[["age"]]), "age")
+  # renamed to the full label: recovered through `dimension`
+  expect_equal(unname(ivt_member_col_map(m, c(age_col, "geo_uid"))[["age"]]),
+               age_col)
+  # French label, recovered through `dimension_fr`
+  expect_equal(unname(ivt_member_col_map(m, "Âge", language = "fr")[["age"]]),
+               "Âge")
+  # neither present -> NA, and factorizing is then a no-op rather than an error
+  expect_true(is.na(ivt_member_col_map(m, c("something_else"))[["age"]]))
+  # a label match never claims a column an exact slug match already owns
+  m2 <- rbind(m, transform(m[m$column == "age", ], column = "other",
+                           dimension = "age"))
+  mp <- ivt_member_col_map(m2, c("age", "geo_uid"))
+  expect_equal(unname(mp[["age"]]), "age")
+  expect_true(is.na(mp[["other"]]))
+})
+
 test_that("ivt_parquet_language reads the file-name marker", {
   expect_equal(ivt_parquet_language("/x/98100241_en.parquet"), "en")
   expect_equal(ivt_parquet_language("/x/98100241_fr.parquet"), "fr")

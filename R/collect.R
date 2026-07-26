@@ -140,10 +140,13 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #'   `geo_name`, `geo_uid`, `geo_level`) to factors. Default `FALSE`: large
 #'   tables carry tens of thousands of geographies, which makes for unwieldy
 #'   factor levels.
-#' @param dim_names For `ivt` objects, how to name the data-dimension columns
-#'   (passed to [ivt_tidy()] and [ivt_members()]): `"slug"` (default) or
-#'   `"label"`. Ignored for the Arrow / Parquet forms, where the column names are
-#'   already fixed by how the Parquet was written.
+#' @param dim_names How to name the data-dimension columns: `"slug"` (default,
+#'   the terse structural slug the Parquet is written with) or `"label"`, the
+#'   full dimension name. For `ivt` objects this is passed to [ivt_tidy()] and
+#'   [ivt_members()]; for the Arrow / Parquet forms -- whose columns are named by
+#'   how the Parquet was written -- `"label"` applies [label_ivt_columns()] after
+#'   the factor conversion, so the result carries both the full labels and the
+#'   full member levels.
 #' @param language Factor-level language: `"en"` or `"fr"`. `NULL` (default)
 #'   auto-detects -- `"en"` for `ivt` objects, and for the Arrow / Parquet forms
 #'   the language marker in the file name (see [ivt_parquet_language()]). For
@@ -151,7 +154,9 @@ ivt_members <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
 #'   Parquet forms it selects the French `level_fr` from the sidecar as the factor
 #'   levels.
 #' @param ... For `ivt` objects, passed to [ivt_tidy()].
-#' @return A tibble with the dimension columns converted to factors.
+#' @return A tibble with the dimension columns converted to factors, carrying
+#'   the member table it used as a `members` attribute (and the source Parquet
+#'   as `path`) so [label_ivt_columns()] can still be applied afterwards.
 #' @examples
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")
 #' ivt <- read_ivt(path)
@@ -195,7 +200,20 @@ collect_ivt <- function(x, members = NULL, geography = FALSE,
            Parquet (e.g. {.code get_statcan_ivt(..., refresh = TRUE)}) so the
            {.file _members.parquet} sidecar is written."))
   }
-  ivt_factorize(df, members, geography = geography, language = language)
+  df <- ivt_factorize(df, members, geography = geography, language = language)
+  # On the ivt path the column names came from ivt_tidy(dim_names = ), which has
+  # already applied this; the Arrow / Parquet forms are named by however the
+  # Parquet was written, so honour it here instead of silently ignoring it.
+  # Renaming after factorizing keeps both the labels and the full member levels.
+  if (!inherits(x, "ivt") && dim_names == "label")
+    df <- label_ivt_columns(df, members = members, language = language)
+  # Carry the member table (and the data path it came from) on the result, so
+  # label_ivt_columns() and ivt_parquet_language() still work once the data has
+  # been collected and the Arrow connection is gone.
+  attr(df, "members") <- members
+  p <- ivt_data_path(x)
+  if (!is.na(p)) attr(df, "path") <- p
+  df
 }
 
 # The sidecar path for a data Parquet: <name>_members.parquet next to it. A
@@ -239,6 +257,8 @@ ivt_data_path <- function(x) {
   for (i in seq_len(32L)) {
     p <- attr(src, "path", exact = TRUE)
     if (is.character(p) && length(p) == 1L) return(p)
+    # a data frame has no query layers to walk, and `$files` on a tibble warns
+    if (is.data.frame(src)) break
     files <- tryCatch(src$files, error = function(e) NULL)
     if (is.character(files) && length(files) == 1L) return(files)
     nxt <- tryCatch(src$.data, error = function(e) NULL)
@@ -271,6 +291,7 @@ ivt_locate_members <- function(x) {
       m <- ivt_read_members(ivt_members_path(p))
       if (!is.null(m)) return(m)
     }
+    if (is.data.frame(src)) return(NULL)   # no query layers to walk
     nxt <- tryCatch(src$.data, error = function(e) NULL)
     if (is.null(nxt)) break
     src <- nxt
@@ -295,6 +316,12 @@ ivt_locate_members <- function(x) {
 #' explicit `members` table, e.g. from [ivt_members()]). The language is taken
 #' from the file name marker via [ivt_parquet_language()] unless given, so the
 #' labels match the language the Parquet was written in.
+#'
+#' It can be called either side of [collect_ivt()]: before, on the connection
+#' (nothing is read until the collect), or after, on the collected data frame --
+#' which carries the member table it used as an attribute. Either order gives
+#' the same labelled, fully-levelled result, and `collect_ivt(dim_names =
+#' "label")` is the one-call shorthand for it.
 #'
 #' @param x An Arrow dataset, a dplyr-on-Arrow query, or a data frame.
 #' @param members A level table from [ivt_members()]; when `NULL` it is located
@@ -341,7 +368,16 @@ label_ivt_columns <- function(x, members = NULL, language = NULL) {
   keep <- md$column %in% cols & md$column != lab & !is.na(lab) & nzchar(lab)
   if (!any(keep)) return(x)
   nv <- stats::setNames(md$column[keep], make.unique(lab[keep]))   # new = old
-  dplyr::rename(x, !!!nv)
+  out <- dplyr::rename(x, !!!nv)
+  # keep the lookup attributes collect_ivt attached, so the labelled result is
+  # no less self-describing than the one it was made from
+  if (is.data.frame(out)) {
+    for (a in c("members", "path")) {
+      v <- attr(x, a, exact = TRUE)
+      if (!is.null(v) && is.null(attr(out, a, exact = TRUE))) attr(out, a) <- v
+    }
+  }
+  out
 }
 
 # Column names of x (Arrow dataset / query / data frame), or character(0).
@@ -349,6 +385,43 @@ ivt_colnames <- function(x) {
   n <- tryCatch(names(x), error = function(e) NULL)
   if (is.null(n)) n <- tryCatch(colnames(x), error = function(e) NULL)
   if (is.null(n)) character(0) else n
+}
+
+# Map each member-table `column` onto the column that actually carries it in
+# `cols`. The member table records the name the data was written with (the
+# structural slug, or the full label when written with `dim_names = "label"`),
+# so that is the primary key. But a table that has been through
+# label_ivt_columns() carries the full dimension label instead -- and the member
+# table records that too, in `dimension`/`dimension_fr`, which makes the mapping
+# recoverable from the metadata rather than from the column name alone. Label
+# matches only claim columns no slug matched, so a dimension whose label happens
+# to equal another dimension's slug cannot steal it. Unmatched entries map to NA.
+ivt_member_col_map <- function(members, cols, language = "en") {
+  slugs <- unique(members$column)
+  out <- stats::setNames(rep(NA_character_, length(slugs)), slugs)
+  if (!length(slugs)) return(out)
+  first <- match(slugs, members$column)
+  dimen <- members$dimension[first]
+  dimfr <- if ("dimension_fr" %in% names(members)) members$dimension_fr[first]
+           else rep(NA_character_, length(slugs))
+  # pass 1: the name the data was written with
+  hit <- slugs %in% cols
+  out[hit] <- slugs[hit]
+  # pass 2: the full dimension label, in the same make.unique() form
+  # label_ivt_columns() writes it (uniquified over the data columns only, in
+  # member-table order), then the bare EN/FR names as a last resort
+  is_geo <- dimen == "Geography"
+  lab <- if (language == "fr")
+    ifelse(!is.na(dimfr) & nzchar(dimfr), dimfr, dimen) else dimen
+  uni <- rep(NA_character_, length(slugs))
+  d <- which(!is_geo)
+  if (length(d)) uni[d] <- make.unique(lab[d])
+  for (i in which(!hit & !is_geo)) {
+    cand <- unique(c(uni[i], lab[i], dimen[i], dimfr[i]))
+    cand <- cand[!is.na(cand) & nzchar(cand) & cand %in% cols & !cand %in% out]
+    if (length(cand)) out[i] <- cand[1L]
+  }
+  out
 }
 
 # Convert the columns listed in `members` into factors. Levels are the full
@@ -365,24 +438,26 @@ ivt_factorize <- function(df, members, geography = FALSE, language = "en") {
     members <- members[members$dimension != "Geography", , drop = FALSE]
   }
   has_fr <- language == "fr" && "level_fr" %in% names(members)
+  colmap <- ivt_member_col_map(members, names(df), language = language)
   for (col in unique(members$column)) {
-    if (!col %in% names(df)) next
+    target <- colmap[[col]]
+    if (is.na(target)) next
     m <- members[members$column == col, , drop = FALSE]
     m <- m[order(m$ordinal, m$member_id), , drop = FALSE]
     lev <- if (has_fr && !all(is.na(m$level_fr))) m$level_fr else m$level
     lvls <- unique(lev)
     lvls <- lvls[!is.na(lvls)]         # e.g. undecodable geo_name code partials
-    orig <- df[[col]]
+    orig <- df[[target]]
     v <- if (is.numeric(orig)) lev[match(orig, m$member_id)] else orig
     f <- factor(v, levels = lvls)
     dropped <- sum(!is.na(orig) & is.na(f))
     if (dropped > 0L) {
       cli::cli_warn(paste(
-        "{dropped} value{?s} in column {.field {col}} matched no member level",
+        "{dropped} value{?s} in column {.field {target}} matched no member level",
         "and became NA (were the data and the member table written with",
         "different {.arg trim_labels}?)."))
     }
-    df[[col]] <- f
+    df[[target]] <- f
   }
   df
 }

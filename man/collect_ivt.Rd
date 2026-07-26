@@ -26,10 +26,13 @@ from \code{x} (an attached \code{members} attribute, or the Parquet's
 tables carry tens of thousands of geographies, which makes for unwieldy
 factor levels.}
 
-\item{dim_names}{For \code{ivt} objects, how to name the data-dimension columns
-(passed to \code{\link[=ivt_tidy]{ivt_tidy()}} and \code{\link[=ivt_members]{ivt_members()}}): \code{"slug"} (default) or
-\code{"label"}. Ignored for the Arrow / Parquet forms, where the column names are
-already fixed by how the Parquet was written.}
+\item{dim_names}{How to name the data-dimension columns: \code{"slug"} (default,
+the terse structural slug the Parquet is written with) or \code{"label"}, the
+full dimension name. For \code{ivt} objects this is passed to \code{\link[=ivt_tidy]{ivt_tidy()}} and
+\code{\link[=ivt_members]{ivt_members()}}; for the Arrow / Parquet forms -- whose columns are named by
+how the Parquet was written -- \code{"label"} applies \code{\link[=label_ivt_columns]{label_ivt_columns()}} after
+the factor conversion, so the result carries both the full labels and the
+full member levels.}
 
 \item{language}{Factor-level language: \code{"en"} or \code{"fr"}. \code{NULL} (default)
 auto-detects -- \code{"en"} for \code{ivt} objects, and for the Arrow / Parquet forms
@@ -41,7 +44,9 @@ levels.}
 \item{...}{For \code{ivt} objects, passed to \code{\link[=ivt_tidy]{ivt_tidy()}}.}
 }
 \value{
-A tibble with the dimension columns converted to factors.
+A tibble with the dimension columns converted to factors, carrying
+the member table it used as a \code{members} attribute (and the source Parquet
+as \code{path}) so \code{\link[=label_ivt_columns]{label_ivt_columns()}} can still be applied afterwards.
 }
 \description{
 Like \code{dplyr::collect()}, but converts each labelled dimension column into a
