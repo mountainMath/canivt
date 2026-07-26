@@ -135,8 +135,66 @@ single dimension's block directory carries several of these, told apart by `b5`:
 |-------|------|---------|-----------|
 | `81 02 <n> 00 22 00 <field names>` | `0x22` | **field-schema dictionary** — the dimension's column vocabulary (`Code`, `Label`/`Etiquette`, …); the reference/time dimension names its sole field after itself ("Timeseries"), the naming fallback | `ivt_f2_02_schema_name()` |
 | `81 02 02 00 56 00 <EN><sep><desc><FR><sep><desc>` | `0x56` | **bilingual dimension-name marker** — the primary dimension-name source (a directory also holds a `.. 02 00 16 00` code array, so the generic doubled-name reader grabs a code; the `56` sub-byte uniquely tags the name) | `ivt_f2_02_name_marker()` |
-| `81 02 <alloc-u16> 16 00 …<tail Pascal codes>` | `0x16` | **member CODE array / member-slot table** — present in EVERY generation (each dimension of every corpus table carries this block or the `08 00` time table). The leading **u16 `alloc` is the dimension's DECLARED member-slot allocation**, the basis of the paging geometry (`ivt_f2_dim_slot_alloc()` → `ivt_layout()`): presence-bit nesting and page-directory strides pad each level to it. Almost always `nextpow2(count)`, but it can exceed it — LFHR Table-023's Hours allocates **32 slots for 10 members**, producing the "doubled-window" directory the retired `ivt_survey_double()` probe used to infer from page sizes. On chunked >alloc-member dimensions the u16 is a block-local allocation (observed 1024) below the member count — then it is NOT the slot capacity (fall back to nextpow2(extent)). Pascal member codes at the block tail after a per-slot binary section (structure undecoded — likely per-slot flags, cf. accs Offences' 64 stored labels for 40 members); a member/label source for a reference dimension with no label array (years "1979-80", SEX "0"/"1"/"2"). Trailing pad slots (empty/whitespace) dropped | `ivt_f2_code_array_members()`, `ivt_f2_dim_slot_alloc()` |
+| `81 02 <alloc-u16> 16 00 …<tail Pascal codes>` | `0x16` | **member CODE array / member-slot table** — present in EVERY generation (each dimension of every corpus table carries this block or the `08 00` time table). The leading **u16 `alloc` is the dimension's DECLARED member-slot allocation**, the basis of the paging geometry (`ivt_f2_dim_slot_alloc()` → `ivt_layout()`): presence-bit nesting and page-directory strides pad each level to it. Almost always `nextpow2(count)`, but it can exceed it — LFHR Table-023's Hours allocates **32 slots for 10 members**, producing the "doubled-window" directory the retired `ivt_survey_double()` probe used to infer from page sizes. On chunked >alloc-member dimensions the u16 is a block-local allocation (observed 1024) below the member count — then it is NOT the slot capacity (fall back to nextpow2(extent)). The mid-section between the marker and the codes is a **22-bit record per slot**, `alloc` of them, byte-pair-swapped and MSB-first, the run padded up to an EVEN byte count (`nb = ceil(alloc·22/8)`, rounded up to even) — see §E.1a. Pascal member codes follow at the block tail; a member/label source for a reference dimension with no label array (years "1979-80", SEX "0"/"1"/"2"). Trailing pad slots (empty/whitespace) dropped | `ivt_f2_dim_slot_table()`, `ivt_f2_code_array_members()`, `ivt_f2_dim_slot_alloc()` |
 | `81 02 <alloc-u16> 08 00 <alloc slot-flag bytes> … <u24 dates>` | `0x08` | **time-series member table** — `alloc` is a full **u16** slot-capacity (long monthly series need >255 slots: LFHR `NAZQV2/Table-023`'s 276-month Timeseries allocates 512; the older `08 00`-sub-marker guard, which assumed `alloc < 256` by requiring a `00` high byte, dropped it). `alloc` one-byte member-SLOT flags (**byte-pair-swapped** like every container bitmap; non-zero = populated slot, deleted members leave HOLES — tb611996's periods sit at slots {1,2,4}) + one 3-byte little-endian date per populated slot, right-aligned at the block end: **days since 0000-03-01** (proleptic Gregorian; the value lands on Jan 1 of the period's year for annual series, the ISO month-start for a monthly one). Count = non-zero flags; labels are GENERATED from the dates; a clipped leading date (h2530002 stores 36 of 37) is extrapolated backward by the median step. The presence bitmap and page directory address these members **by slot**, so the layout carries `dims[[k]]$slots` | `ivt_f2_time_members()` |
+
+### E.1a. The `16 00` mid-section — the per-slot record
+
+Between `[81 02][u16 alloc][16 00]` and the member-code array sits one
+**22-bit record per allocated slot**, `alloc` of them, packed with no padding
+between records, then **byte-pair-swapped** and read **MSB-first** like every
+other bitmap in the container. The run is padded up to an **even byte count**
+(the swap unit): `nb = ceil(alloc · 22 / 8)`, rounded up to even. Corpus-wide the
+936,317 slot records take only **34 distinct values**, and only four bit
+positions are ever used:
+
+| bit | meaning |
+|-----|---------|
+| 0 | **LIVE** — the slot holds a real member. A record that is non-zero but has bit 0 clear is a **DELETED** member: it keeps its codebook entry (label, code, ordinal) but addresses no cells |
+| 1..12 | **unary code length** — the count of consecutive 1s starting at bit 1 is the byte length of this slot's member code (observed 1..12) |
+| 18 | one **extra byte** follows this slot's code in the code array (empirically the aggregate / "total" members) |
+| 19 | a further per-slot flag, no byte cost, semantics undetermined (1028 slots corpus-wide) |
+| 13–17, 20, 21 | never set |
+
+An all-zero record is a slot that was never allocated.
+
+The member-code array is then walked per **USED** slot in slot order, and its
+byte-exact consumption is what **validates** the whole reading:
+
+```
+live slot     [u8 len][code]        len == the declared unary length
+deleted slot  <len code bytes>      NO length prefix
+              + 1 byte              whenever bit 18 is set
+```
+
+1335 of the corpus's 1347 `16 00` blocks consume their code array exactly, zero
+leftover; the 12 that do not are `alloc = 1024` chunked blocks whose codes live
+elsewhere. Restricted to the 459 dimensions that own exactly one such block,
+**459/459 parse byte-exactly**.
+
+What this DECLARES, consumed by `ivt_f2_dim_slot_declared()`:
+
+- the **member count** = the live count (a third, and the strongest, count
+  witness — it exposes SP3_RHUXA9_801's garbage descriptor counts 3338/3386/
+  3378/3338 as 1/5/2/7);
+- the **deleted slots** exactly, replacing the `ivt_f2_dim_slot_expand()` margin
+  heuristic: accs "Sex" is 5 members over 6 slots with slot **4** deleted
+  (confirmed empty in the decode), so the geometry keeps extent 6 via `$slots`
+  while the dimension no longer emits a phantom second "Company". CBP's
+  "NAT. INDUSTRIES" is 929 members over 949 used slots, 20 deleted — the old
+  count-only read cropped at 929 and **lost the 20 live members at slots
+  930..949**;
+- the **slot POSITIONS**, which need not start at 1 or be contiguous: LFHR
+  `Table-210`'s 10-member "Education level" occupies slots **10..19** of its 32,
+  and `table_5_c`'s 215 "Offences" skip slot **98**. The presence bitmap
+  addresses members by slot, so `1..n` mis-assigns every member above a hole.
+
+Not a fallback and therefore **not loud** — nothing is inferred; the values are
+read from a declaration in the file.
+
+`ivt_f2_dim_slot_expand()` (`canivt_deleted_slot`) survives as the fallback for
+dimensions with no readable declared table (chunked codebooks, code arrays that
+do not parse byte-exactly).
 
 The whole descriptor for this generation is rebuilt from the slot table
 (`ivt_f2_descriptor_02()`) — the designed, quiet read for `byte 0 == 0x02`
@@ -196,6 +254,17 @@ layout.
 
 ## Change log
 
+- **2026-07-25** — **The `16 00` mid-section is decoded** (new §E.1a): 22 bits
+  per slot, byte-pair-swapped, MSB-first, even-byte-padded — bit 0 LIVE, bits
+  1..12 the unary member-code length, bit 18 a trailing extra code byte, bit 19
+  an undetermined flag. Validated by walking the member-code array to a
+  byte-exact fit (459/459 single-block dimensions). `ivt_f2_dim_slot_table()` +
+  `ivt_f2_dim_slot_declared()`; the file now DECLARES its member count, its
+  deleted slots and its slot positions, so `ivt_f2_dim_slot_expand()` is demoted
+  to a fallback. Fixes: CBP2008DA/CBP2010DA recovered 20 lost industries each
+  (validated — the industry Total now equals the sum of the 928 six-digit NAICS
+  leaves in all 312,417 geography × emp-size groups), accs "Sex" no longer emits
+  a phantom deleted member.
 - **2026-07-23** — **The doubled-window directory is DECLARED metadata** (§E.1
   `16 00` row): the member-code block's leading u16 is the dimension's slot
   ALLOCATION and drives all paging geometry (`ivt_f2_dim_slot_alloc()`;

@@ -532,6 +532,71 @@ entries as the old expression, verified for every top value). Gates after the
 fix: corpus ledger FAIL 0 / PASS 346 with cell counts unchanged, geo snapshot
 FAIL 0 / PASS 238, unit suite FAIL 0 / PASS 1110.
 
+### The `16 00` mid-section — the file declares its members (2026-07-25)
+
+`81 02 <alloc-u16> 16 00` was known to declare the slot *allocation*
+(2026-07-23, below); what followed the four header bytes before the member-code
+array was not. It is **22 bits per allocated slot**, byte-pair-swapped and
+MSB-first like every other bitmap in the format, the run padded up to an even byte
+count. Bit 0 is LIVE; bits 1..12 are the member code's length in **unary** (`L`
+ones then a zero); bit 18 says one extra byte follows this slot's code; bit 19 is a
+rare flag of undetermined meaning (1 028 slots corpus-wide); bits 13..17, 20 and 21
+are never set on any file in the corpus; an all-zero record is a slot that was
+never allocated. Field table in [`markers.md`](markers.md) §E.1a.
+
+The decisive check is that the mid-section **predicts the byte layout of the array
+that follows it**. Walking the used slots in slot order — a live slot spends
+`[u8 len][code]` with `len == L`, a *deleted* slot spends `L` bare code bytes with
+**no length prefix**, then `+1` byte if bit 18 — consumes the member-code array
+byte-exactly, zero leftover, on **459 of 459** corpus dimensions that own exactly
+one such block. A wrong field width or a missed per-slot byte desynchronises within
+a few slots and cannot land on the block's end. `ivt_f2_dim_slot_table()` returns
+`codes_ok = FALSE` when it does not, and nothing downstream trusts a table that
+fails its own walk.
+
+So the count, the deleted slots and the slot *positions* are all **declared**, not
+inferred. `ivt_f2_dim_slot_declared()` adopts them and stays quiet — it is reading
+a declaration, which is not a fallback. `ivt_f2_dim_slot_expand()`, the margin
+heuristic that widened a count to the physical extent, is demoted to the fallback
+for dimensions with no readable declared table (chunked codebooks, arrays that do
+not walk byte-exactly). The heuristic kept the geometry right but could not tell a
+deleted slot from a member: accs "Sex" emitted a phantom sixth "Company" member and
+CBP's "EMP. SIZE RANGE" a 12th member `"19"`, both now declared deleted.
+
+The correctness payoff is a data bug it had been hiding. **CBP2008DA and CBP2010DA
+were losing 20 live industries each**: "NAT. INDUSTRIES" is 929 members over 949
+used slots, the 20 deleted ones scattered from slot 458 to 836, and a count-only
+read cropped the array at 929 — discarding the live members at slots 930..949. With
+the declared table the industry Total equals the sum of the 928 six-digit NAICS
+leaves in **all 312 417** geography × emp-size groups, and the recovered tail
+labels are real NAICS (454319 Other Fuel Dealers … 712115 History and Science
+Museums). Ledger cell counts 3 957 641 → **4 059 594** and 3 970 492 →
+**4 075 156**. Slot positions also need not start at 1 — LFHR `Table-210`'s
+10-member "Education level" sits at slots **10..19** of 32, and `table_5_c`'s 215
+"Offences" skip slot **98** — so the member arrays are now selected by slot rather
+than by a leading run.
+
+Two side findings. SP3_RHUXA9_801's garbage descriptor counts (3338/3386/3378/3338)
+read as 1/5/2/7 from the declared tables; the file stays UNSUPPORTED because its
+layout needs more than the counts, but the misread is now named rather than
+mysterious. And the accs "Offences" labels, long suspected of a slot misalignment,
+were never misaligned — the declared table shows 40 used == 40 live slots
+contiguous from 1. They came out in **French on the English path** for an unrelated
+and much older reason: a member label may carry a **trailing CR/LF** (one English
+record reads `"Criminal Code (without traffic)\r\n"` while the short French array is
+unterminated), and the member-run screen rejected any array containing a control
+character, so one terminated record discarded the whole English array. The
+terminator is record framing and is stripped before the screen; interior control
+characters still reject, because those are the footnote/definition prose blobs the
+screen exists to exclude. The same rejection had been pushing that file's
+*geography* through the entire specializer chain down to the loud last-resort net
+(`canivt_geo_unparsed`, English names only); it now reads through the quiet schema
+path with both `geo_name` and `geo_name_fr`. Gates: unit suite FAIL 0 / PASS 1128,
+corpus ledger FAIL 0 / PASS 346, geo snapshot FAIL 0 / PASS 286 (fixture
+regenerated — four rows lose a now-unnecessary `canivt_deleted_slot` /
+`canivt_zero_count` fallback, accs changes hash, and the regen picks up 24 corpus
+tables the fixture predated).
+
 ## Milestones — how the architecture arrived
 
 ### Unified cell decode & metadata
@@ -576,9 +641,9 @@ dropped, labelling the dimension French); and `ivt_f2_dim_dict_en_first()` reads
 remaining declared `04`-gen language vocabularies (`Description`/`Description_FRA`,
 `English`/`French|Français`, bleed-tolerant leading-boundary match inside the tagged
 `22 00` dict block), so the content-score language fallback now fires on **zero** survey
-dims with a declared pair. Remaining gap: the `16 00` block's mid-section (likely
-per-slot flags) is undecoded — it would subsume the `ivt_f2_dim_slot_expand()` margin and
-fix accs Offences' 64-labels-for-40-members alignment.
+dims with a declared pair. The `16 00` block's mid-section, still undecoded here, was
+cracked on 2026-07-25 (above); the accs Offences labels it was expected to fix turned
+out to be a trailing-CR/LF rejection, not a slot misalignment.
 
 ### Uniform, content-free geography parsing
 

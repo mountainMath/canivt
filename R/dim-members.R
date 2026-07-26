@@ -95,6 +95,22 @@ ivt_f2_dim_name_fr_dir <- function(raw, nm, dir, mk = NULL) {
   if (is.null(fr)) NA_character_ else fr
 }
 
+# How many records a dimension's codebook arrays STORE, and which of them are the
+# live members. The member-label / ordinal / prose arrays carry one record per USED
+# slot, and a dimension with a DELETED member has more used slots than members
+# (`ivt_f2_dim_slot_declared()`: CBP's "NAT. INDUSTRIES" stores 949 records for 929
+# members). Reading those arrays at the member count alone truncates them -- and
+# since the deleted slots sit in the MIDDLE, every label past the first deletion
+# shifts. Returns `list(n, keep)`: `n` records to read, and the positions within
+# them that are the live members (NULL when the two coincide, the ordinary case).
+ivt_f2_dim_slot_keep <- function(dim, cnt) {
+  su <- dim$slot_used; sl <- dim$slots
+  if (is.null(su) || is.null(sl) || length(su) <= cnt) return(list(n = cnt, keep = NULL))
+  keep <- match(sl, su)
+  if (anyNA(keep) || length(keep) != cnt) return(list(n = cnt, keep = NULL))
+  list(n = length(su), keep = keep)
+}
+
 # The reader core, addressed by an already-resolved (dimension descriptor, block
 # directory) pair -- so the label adapter (`ivt_f2_dim_dir_label1()`) and the
 # k-addressed entry point above share ONE path. `include_notes = FALSE` skips the
@@ -103,6 +119,8 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   if (is.null(dir)) return(NULL)
   cnt <- as.integer(dim$count)
   if (is.na(cnt) || cnt < 1L) return(NULL)
+  # the arrays are stored per USED slot; `keep` picks the live members back out
+  sk <- ivt_f2_dim_slot_keep(dim, cnt); scnt <- sk$n; keep <- sk$keep
   nm <- dim$name
   named <- !is.null(nm) && !is.na(nm) && nzchar(nm)
   fields <- ivt_f2_dim_field_schema(raw, dir)
@@ -119,6 +137,14 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   # metadata-read time across the corpus and could match another dimension's marker.
   finish <- function(out, label_fr = NULL) {
     if (is.null(out)) return(NULL)
+    # drop the deleted slots' records, then renumber: member ids are 1..count and
+    # ordinals must stay a permutation of 1..count (the `collect_ivt()` invariant),
+    # so the surviving ordinals are re-ranked, preserving their relative order.
+    if (!is.null(keep) && nrow(out) == scnt) {
+      out <- out[keep, , drop = FALSE]
+      out$member_id <- seq_len(cnt)
+      out$ordinal <- as.integer(rank(out$ordinal, ties.method = "first"))
+    }
     name_fr <- if (!is.null(label_fr)) ivt_f2_total_name(label_fr) else NA_character_
     if (named && (is.null(name_fr) || is.na(name_fr)))
       name_fr <- ivt_f2_dim_name_fr_dir(raw, nm, dir, mk)
@@ -139,8 +165,8 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
       return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
                             label_en = tm$labels))
     codes <- ivt_f2_code_array_members(raw, dir)
-    if (!is.null(codes) && length(codes) == cnt)
-      return(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
+    if (!is.null(codes) && length(codes) == scnt)
+      return(tibble::tibble(member_id = seq_len(scnt), ordinal = seq_len(scnt),
                             label_en = codes))
     NULL
   }
@@ -153,8 +179,8 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   # "2006"). Recover it directly rather than declaring the dimension unresolved.
   if (named && mk >= nrow(dir) && mk > 0L) {
     vb <- ivt_f2_dim_value_block_labels(raw, dir, setdiff(seq_len(nrow(dir)), mk))
-    if (length(vb) == cnt)
-      return(finish(tibble::tibble(member_id = seq_len(cnt), ordinal = seq_len(cnt),
+    if (length(vb) == scnt)
+      return(finish(tibble::tibble(member_id = seq_len(scnt), ordinal = seq_len(scnt),
                                    label_en = vb)))
     return(finish(alt_members()))
   }
@@ -167,14 +193,14 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   # genuinely unreadable dimension still returns NULL below.
 
   # --- collect the clean member-value runs (length cnt) ---
-  runs <- ivt_f2_dim_member_runs(raw, dir, cnt, mk)
+  runs <- ivt_f2_dim_member_runs(raw, dir, scnt, mk)
   if (!length(runs)) return(finish(alt_members()))
 
   # --- classify each run by role ---
   ord <- NULL; text_runs <- list()
   for (t in runs) {
     iv <- suppressWarnings(as.integer(t))
-    if (!anyNA(iv) && identical(sort(iv), seq_len(cnt))) {
+    if (!anyNA(iv) && identical(sort(iv), seq_len(scnt))) {
       if (is.null(ord)) ord <- iv                      # the ordinal (Code) run
       next
     }
@@ -201,14 +227,14 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   }
 
   out <- tibble::tibble(
-    member_id = seq_len(cnt),
-    ordinal   = if (is.null(ord)) seq_len(cnt) else ord,
+    member_id = seq_len(scnt),
+    ordinal   = if (is.null(ord)) seq_len(scnt) else ord,
     label_en  = label_en)
   if (!is.null(label_fr)) out$label_fr <- label_fr
   if (!is.null(uid))      out$uid <- uid
   # the sparse, bitmap-gated `_Description`/`_ItemNotes` member-notes column
   if (include_notes) {
-    notes <- ivt_f2_dim_member_notes(raw, dir, cnt)
+    notes <- ivt_f2_dim_member_notes(raw, dir, scnt)
     if (!is.null(notes)) {
       out$notes_en <- notes$en
       if (!all(is.na(notes$fr))) out$notes_fr <- notes$fr
@@ -307,6 +333,22 @@ ivt_f2_dim_prose_texts <- function(raw, dir, cnt) {
   list(en = en, fr = fr)
 }
 
+# The member-array screen: accept a run of member records, or NULL to reject it.
+# Empty and control-character records reject -- that is what keeps the footnote and
+# definition prose blocks (which the Pascal scanner also reads as ~cnt-length runs)
+# out of the member runs. A TRAILING line terminator is the exception: it is record
+# framing, not content. accs writes one English record as
+# "Criminal Code (without traffic)\r\n" while the same dimension's French array is
+# unterminated, and rejecting that ONE record discarded the whole English array, so
+# the labels -- and, through the same screen, that file's geography -- fell through
+# to French. Strip the terminator, then screen; an INTERIOR control character still
+# rejects.
+ivt_f2_member_run_clean <- function(t) {
+  t <- sub("[\r\n]+$", "", t)
+  if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) return(NULL)
+  t
+}
+
 # The clean member-value runs of one dimension (length exactly `cnt`), in storage
 # order, from the rows after its doubled-name marker (or the whole directory when the
 # marker did not resolve). Chunked (>256-member) dimensions reuse the geography/label
@@ -319,12 +361,8 @@ ivt_f2_dim_member_runs <- function(raw, dir, cnt, mk) {
     return(if (is.null(ck)) list() else ck)
   }
   rows <- if (mk > 0L && mk < nrow(dir)) (mk + 1L):nrow(dir) else seq_len(nrow(dir))
-  runs <- ivt_f2_dir_member_arrays(
-    raw, dir, cnt, rows = rows, max_keep = 8L,
-    accept = function(t) {
-      if (any(grepl("[[:cntrl:]]", t)) || !all(nzchar(t))) return(NULL)
-      t
-    })
+  runs <- ivt_f2_dir_member_arrays(raw, dir, cnt, rows = rows, max_keep = 8L,
+                                   accept = ivt_f2_member_run_clean)
   if (length(runs)) return(runs)
   # The older `04 00 20 00` survey tables store a singleton reference dimension's
   # member (ucr2.2_3-2006's "Year" -> "2006") NOT as a `[01 01]` member array but as

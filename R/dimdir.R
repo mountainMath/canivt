@@ -325,7 +325,10 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
   if (is.null(m) || is.null(m[["label_en"]])) return(NULL)
   # the per-member `_Description` prose (the indicator definition on the facet /
   # quantity dimension of the 02-gen survey tables); NULL on dimensions that carry none.
-  desc <- ivt_f2_dim_prose_texts(raw, dir, as.integer(dim$count))
+  sk <- ivt_f2_dim_slot_keep(dim, as.integer(dim$count))
+  desc <- ivt_f2_dim_prose_texts(raw, dir, sk$n)
+  if (!is.null(desc) && !is.null(sk$keep) && length(desc$en) == sk$n)
+    desc <- list(en = desc$en[sk$keep], fr = desc$fr[sk$keep])
   list(en = m[["label_en"]],
        fr = m[["label_fr"]],                         # NULL when the column is absent
        name_fr = attr(m, "name_fr", exact = TRUE),
@@ -560,6 +563,7 @@ ivt_f2_dir_member_count <- function(raw, nm, dir) {
 ivt_f2_dim_count_reconcile <- function(raw, dims) {
   slots <- ivt_f2_dim_slots(raw, m = length(dims))
   if (is.null(slots)) return(dims)
+  dims <- ivt_f2_dim_slot_declared(raw, dims, slots)
   dims <- ivt_f2_dim_slot_expand(raw, dims, slots)
   # A CHUNKED dimension (a >256-member geography / profile / classification) reads
   # WRONG on the generic descriptor path -- the codebook stores it as 256-member
@@ -590,6 +594,10 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
         "codebook; its true member count (%d) was recovered from the chunk-run",
         "geometry."), k, nm, c0, cc), class = "canivt_chunked_count")
       dims[[k]]$count <- as.integer(cc)
+      # a chunk run that reaches PAST the declared slot table means that table was
+      # block-local after all -- drop the slot positions it supplied (no corpus
+      # table takes this branch; it keeps the two witnesses from disagreeing silently)
+      dims[[k]]$slots <- NULL; dims[[k]]$slot_used <- NULL; dims[[k]]$declared <- NULL
     }
   }
   # UNDER-DECLARED counts, caught by the dimension's own DECLARED SLOT ALLOCATION.
@@ -614,7 +622,7 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   # LOUD (canivt_underdeclared_count).
   for (k in seq_along(dims)) {
     c0 <- as.integer(dims[[k]]$count)
-    if (is.na(c0) || c0 < 1L) next
+    if (is.na(c0) || c0 < 1L || isTRUE(dims[[k]]$declared)) next
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) next
     alloc <- ivt_f2_dim_slot_alloc(raw, k, c0, slots)
@@ -629,7 +637,8 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
     dims[[k]]$count <- as.integer(mc$count)
   }
   amb <- which(vapply(dims, function(d)
-    isTRUE(d$double01) || identical(as.integer(d$count), 0L), logical(1)))
+    !isTRUE(d$declared) &&
+      (isTRUE(d$double01) || identical(as.integer(d$count), 0L)), logical(1)))
   if (!length(amb)) return(dims)
   for (k in amb) {
     zero <- identical(as.integer(dims[[k]]$count), 0L)
@@ -658,6 +667,55 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   dims
 }
 
+# DECLARED slot positions, from the dimension's own member-code block
+# (`ivt_f2_dim_slot_table()`: the 22-bit-per-slot mid-section of
+# `[81 02][u16 alloc][16 00]`). This is the file STATING which of its allocated
+# slots hold members and which of those are LIVE -- the third and strongest count
+# witness, and the only one that gives slot POSITIONS:
+#
+#  - a USED-but-not-LIVE slot is a DELETED member. It keeps its codebook entry
+#    (label + code) but addresses no cells, so the member count is the LIVE count
+#    while the codebook arrays still store one record per USED slot. This is what
+#    the `ivt_f2_dim_slot_expand()` margin heuristic below could only approximate:
+#    it widened the count to the physical extent, which kept the page geometry
+#    right but emitted the deleted slot as a phantom member (the accs lineage's
+#    second "Company"). The declared table names the deleted slot exactly
+#    (accs "Sex": slot 4 of 6 -- confirmed empty in the decode), so the geometry
+#    stays extent-6 via `$slots` while the dimension reports its true 5 members.
+#  - USED slots need not start at 1 or be contiguous: LFHR `Table-210`'s
+#    10-member "Education level" occupies slots 10..19 of its 32, and
+#    `table_5_c`'s 215 "Offences" skip slot 98. The presence bitmap addresses
+#    members BY SLOT, so laying those out as `1..n` mis-assigns every member above
+#    the hole. `$slots` is the fix, consumed by `ivt_layout()` exactly as the
+#    time-series slot flags already are.
+#
+# Gated on the code array parsing BYTE-EXACTLY (`codes_ok`) and on the dimension
+# owning exactly ONE such block -- a chunked codebook stores several block-local
+# ones, none of which describes the whole dimension, and those return NULL. Not a
+# fallback and therefore NOT loud: nothing is inferred, the values are read from a
+# declaration in the file. `$slot_used` travels with them so the codebook readers
+# can subset their per-USED-slot arrays back to the live members.
+ivt_f2_dim_slot_declared <- function(raw, dims, slots) {
+  for (k in seq_along(dims)) {
+    dir <- tryCatch(ivt_f2_dim_dir(raw, k, slots), error = function(e) NULL)
+    if (is.null(dir)) next
+    st <- tryCatch(ivt_f2_dim_slot_table(raw, dir), error = function(e) NULL)
+    if (is.null(st) || !isTRUE(st$codes_ok)) next
+    live <- st$live; used <- st$used
+    if (!length(live)) next
+    dense <- identical(live, seq_along(live)) && length(used) == length(live)
+    if (dense && identical(as.integer(dims[[k]]$count), length(live))) next
+    dims[[k]]$count <- length(live)
+    dims[[k]]$double01 <- FALSE
+    dims[[k]]$declared <- TRUE
+    if (!dense) {
+      dims[[k]]$slots <- live
+      if (length(used) > length(live)) dims[[k]]$slot_used <- used
+    }
+  }
+  dims
+}
+
 # DELETED-SLOT expansion: a dimension's physical slot EXTENT can exceed the
 # descriptor's logical member count when a member slot was DELETED but retained
 # its label in the codebook. The adult-criminal-court survey lineage's
@@ -676,10 +734,16 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
 # more than a deleted slot or two, so `<= 2` rejects it) on a genuine multi-member
 # dimension. LOUD (`canivt_deleted_slot`): a count beyond the descriptor's stated
 # one is supplied from the codebook, so strict mode surfaces it.
+#
+# This is now the FALLBACK for dimensions whose declared slot table
+# (`ivt_f2_dim_slot_declared()`, which runs first and states the deleted slots
+# exactly) cannot be read -- a chunked codebook, or a code array that does not
+# parse byte-exactly. Dimensions the declaration already resolved are skipped.
 ivt_f2_dim_slot_expand <- function(raw, dims, slots) {
   for (k in seq_along(dims)) {
     c0 <- as.integer(dims[[k]]$count)
-    if (is.na(c0) || c0 < 3L || isTRUE(dims[[k]]$double01)) next
+    if (is.na(c0) || c0 < 3L || isTRUE(dims[[k]]$double01) ||
+        isTRUE(dims[[k]]$declared)) next
     dir <- ivt_f2_dim_dir(raw, k, slots)
     if (is.null(dir)) next
     ext <- ivt_f2_slot_member_count(raw, dir)
@@ -903,14 +967,20 @@ ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
 ivt_f2_dim_dir_ordinal1 <- function(raw, dim, dir) {
   cnt <- as.integer(dim$count)
   if (is.na(cnt) || cnt < 1L) return(NULL)
+  # the block stores one ordinal per USED slot; deleted slots are dropped and the
+  # survivors re-ranked, so the result stays a permutation of 1..count
+  sk <- ivt_f2_dim_slot_keep(dim, cnt); scnt <- sk$n
   cand <- ivt_f2_dir_member_arrays(
-    raw, dir, cnt, rows = seq_len(nrow(dir)),
+    raw, dir, scnt, rows = seq_len(nrow(dir)),
     accept = function(t) {
       iv <- suppressWarnings(as.integer(t))
-      if (anyNA(iv) || !identical(sort(iv), seq_len(cnt))) return(NULL)
+      if (anyNA(iv) || !identical(sort(iv), seq_len(scnt))) return(NULL)
       iv
     })
-  if (length(cand)) cand[[length(cand)]] else NULL   # the LAST permutation wins
+  if (!length(cand)) return(NULL)
+  iv <- cand[[length(cand)]]                         # the LAST permutation wins
+  if (!is.null(sk$keep)) iv <- as.integer(rank(iv[sk$keep], ties.method = "first"))
+  iv
 }
 
 # Member ordinals for every dimension, read from the header slot table. Returns

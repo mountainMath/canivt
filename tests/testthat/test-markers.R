@@ -94,6 +94,79 @@ test_that("time-series member table (81 02 <alloc> 00 08 00) decodes flags, slot
   expect_null(tmb$labels)
 })
 
+# §E.1a: the `81 02 <alloc> 16 00` mid-section -- 22 bits per slot, byte-pair-
+# swapped, MSB-first, padded up to an even byte count; bit 0 LIVE, bits 1..12 the
+# unary member-code length, bit 18 an extra trailing code byte. The member-code
+# array must be consumed byte-exactly -- that fit is the whole validation.
+test_that("declared slot table decodes the documented 22-bit records", {
+  # 4 slots: 1 live/len 1, 2 live/len 2, 3 DELETED/len 1, 4 unallocated.
+  # bit strings, MSB-first, 22 bits each:
+  #   slot 1  1 10 000000000000000 0 00   -> live, unary "1" (len 1)
+  #   slot 2  1 110 00000000000000 0 00   -> live, unary "11" (len 2)
+  #   slot 3  0 10 000000000000000 0 00   -> deleted, len 1
+  #   slot 4  all zero
+  recs <- c("1100000000000000000000",
+            "1110000000000000000000",
+            "0100000000000000000000",
+            "0000000000000000000000")
+  bits <- as.integer(strsplit(paste(recs, collapse = ""), "")[[1L]])
+  nb <- ceiling(length(bits) / 8); if (nb %% 2L) nb <- nb + 1L
+  bits <- c(bits, rep(0L, nb * 8L - length(bits)))
+  by <- vapply(seq_len(nb), function(i)
+    sum(bits[((i - 1L) * 8L + 1L):(i * 8L)] * 2^(7:0)), 0)
+  ev <- seq.int(1L, nb, 2L); sw <- by; sw[ev] <- by[ev + 1L]; sw[ev + 1L] <- by[ev]
+  # code array: live [len][code], deleted BARE code
+  codes <- c(0x01, 0x41,              # slot 1 live, "A"
+             0x02, 0x42, 0x43,        # slot 2 live, "BC"
+             0x44)                    # slot 3 deleted, bare "D"
+  blk <- as.raw(c(0x81, 0x02, 0x04, 0x00, 0x16, 0x00, sw, codes))
+  dir <- matrix(c(0L, length(blk)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  st <- ivt_f2_dim_slot_table(blk, dir)
+  expect_equal(st$alloc, 4L)
+  expect_equal(st$used, 1:3)
+  expect_equal(st$live, c(1L, 2L))
+  expect_equal(st$deleted, 3L)
+  expect_equal(st$code_len[1:4], c(1L, 2L, 1L, 0L))
+  expect_equal(st$codes[1:3], c("A", "BC", "D"))
+  expect_true(st$codes_ok)               # byte-exact: nothing left over
+  # a code array that does not consume exactly is reported, not silently accepted
+  bad <- as.raw(c(as.integer(blk), 0x00))
+  dirb <- matrix(c(0L, length(bad)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  expect_false(ivt_f2_dim_slot_table(bad, dirb)$codes_ok)
+})
+
+test_that("declared slot tables parse byte-exactly on the bundled sample", {
+  f <- locate_sample_ivt("", "98100044")
+  skip_if(!nzchar(f), "no bundled sample")
+  raw <- readBin(f, "raw", file.size(f))
+  d <- ivt_quietly(ivt_f2_descriptor(raw))
+  slots <- ivt_f2_dim_slots(raw, m = length(d$dims))
+  seen <- 0L
+  for (k in seq_along(d$dims)) {
+    st <- ivt_f2_dim_slot_table(raw, ivt_quietly(ivt_f2_dim_dir(raw, k, slots)))
+    if (is.null(st)) next
+    seen <- seen + 1L
+    expect_true(st$codes_ok)
+    # every dimension of this table is dense: used == live == the member count
+    expect_identical(st$live, st$used)
+    expect_identical(length(st$live), as.integer(d$dims[[k]]$count))
+  }
+  expect_gt(seen, 0L)
+})
+
+test_that("a trailing CR/LF is member-record framing, not a control character", {
+  # accs writes one English label as "Criminal Code (without traffic)\r\n" while its
+  # French array is unterminated. Rejecting the terminated record discarded the whole
+  # English array and the labels came out French, so the screen must strip a TRAILING
+  # terminator -- and must still reject an INTERIOR one (the footnote prose blobs).
+  acc <- ivt_f2_member_run_clean
+  expect_identical(acc(c("Homicide", "Criminal Code (without traffic)\r\n")),
+                   c("Homicide", "Criminal Code (without traffic)"))
+  expect_null(acc(c("Homicide", "two\nlines")))
+  expect_null(acc(c("Homicide", "")))
+  expect_null(acc(c("Homicide", "\r\n")))
+})
+
 test_that("slot-aware cell grid maps member bits through slot positions", {
   # 2 x 3 grid; the inner dimension's members sit at slots {1,2,4} (0-based {0,1,3})
   lay <- ivt_f2_bit_layout(c(2L, 4L))               # extents: inner padded to 4

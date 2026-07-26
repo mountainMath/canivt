@@ -3227,6 +3227,105 @@ ivt_f2_time_members <- function(raw, dir) {
   NULL
 }
 
+# The DECLARED member-slot table of one dimension: the mid-section of its
+# member-code block
+#
+#   [81 02][u16 alloc][16 00] <slot records> <member-code array>
+#
+# The mid-section is a fixed-width **22-bit record per slot**, `alloc` of them,
+# BYTE-PAIR-SWAPPED and read MSB-first like every other bitmap in the container,
+# the run padded up to an EVEN byte count (the swap unit) --
+# `nb = ceil(alloc * 22 / 8)`, rounded up to even. Corpus-wide the 936,317 slot
+# records take only 34 distinct values, and only four bit positions are ever used:
+#
+#   bit 0      LIVE -- the slot holds a real member. A slot that is USED (record
+#              non-zero) but NOT live is a DELETED member: it keeps its codebook
+#              entry (label + code) but carries no cells, and the presence bitmap
+#              addresses members BY SLOT, so the live slots -- not `1..count` --
+#              are the dimension's member positions.
+#   bits 1..12 UNARY code length: the count of consecutive 1s starting at bit 1 is
+#              the byte length of this slot's member code (observed 1..12).
+#   bit 18     one EXTRA byte follows this slot's code in the code array
+#              (empirically the aggregate/"total" members).
+#   bit 19     a further per-slot flag, no byte cost, semantics undetermined
+#              (1028 slots corpus-wide). Bits 13-17, 20 and 21 are never set.
+#
+# An all-zero record is a slot that was never allocated.
+#
+# The code array that follows is walked per USED slot in slot order, and its
+# byte-exact consumption is what VALIDATES the whole reading:
+#   live slot     `[u8 len][code]`, with `len` equal to the declared unary length
+#   deleted slot  the bare `len` code bytes, with NO length prefix
+#   then +1 byte whenever bit 18 is set.
+#
+# 1335 of the corpus's 1347 `16 00` blocks consume their code array exactly, with
+# zero leftover. The 12 that do not are all `alloc = 1024` CHUNKED blocks, whose
+# u16 is a block-local allocation and whose codes live elsewhere; the caller must
+# gate on `codes_ok` so those keep the existing chunked handling.
+#
+# Returns NULL unless the directory carries exactly ONE such block (a chunked
+# dimension carries several and none of them describes the whole dimension), else
+# list(alloc, used, live, deleted, code_len, extra, flag19, codes, codes_ok).
+ivt_f2_dim_slot_table <- function(raw, dir) {
+  if (is.null(dir)) return(NULL)
+  n <- length(raw); hit <- NULL; nhit <- 0L
+  for (r in seq_len(nrow(dir))) {
+    off <- dir[r, "off"]; len <- dir[r, "len"]
+    if (len < 8L || off + 6L > n || off + len > n) next
+    if (as.integer(raw[off + 1L]) != 0x81L || as.integer(raw[off + 2L]) != 0x02L ||
+        as.integer(raw[off + 5L]) != 0x16L || as.integer(raw[off + 6L]) != 0x00L) next
+    nhit <- nhit + 1L
+    if (nhit > 1L) return(NULL)
+    hit <- unname(c(off, len))
+  }
+  if (is.null(hit)) return(NULL)
+  off <- hit[[1L]]; len <- hit[[2L]]
+  alloc <- rd_u16(raw, off + 2L)
+  if (is.na(alloc) || alloc < 1L || bitwAnd(alloc, alloc - 1L) != 0L) return(NULL)
+  nb <- as.integer(ceiling(alloc * 22 / 8))
+  if (nb %% 2L == 1L) nb <- nb + 1L
+  if (6L + nb >= len) return(NULL)
+
+  b <- as.integer(raw[(off + 7L):(off + 6L + nb)])
+  ev <- seq.int(1L, nb, 2L)
+  sw <- b; sw[ev] <- b[ev + 1L]; sw[ev + 1L] <- b[ev]
+  bits <- as.integer(intToBits(sw)[rep((seq_along(sw) - 1L) * 32L, each = 8L) +
+                                     rep(8:1, length(sw))])
+  bm <- matrix(bits[seq_len(alloc * 22L)], nrow = 22L)
+
+  live <- bm[1L, ] == 1L
+  used <- colSums(bm) > 0L
+  extra <- bm[19L, ] == 1L
+  cp <- bm[2:13, , drop = FALSE]
+  for (i in 2:12) cp[i, ] <- cp[i, ] * cp[i - 1L, ]
+  code_len <- as.integer(colSums(cp))
+
+  # the member-code array: walking it is the validation
+  tl <- as.integer(raw[(off + 7L + nb):(off + len)])
+  codes <- rep(NA_character_, alloc)
+  p <- 1L; ok <- TRUE
+  for (s in which(used)) {
+    L <- code_len[s]
+    if (L < 1L) { ok <- FALSE; break }
+    if (live[s]) {
+      if (p > length(tl) || tl[p] != L) { ok <- FALSE; break }
+      p <- p + 1L
+    }
+    if (p + L - 1L > length(tl)) { ok <- FALSE; break }
+    codes[s] <- raw_to_latin1(as.raw(tl[p:(p + L - 1L)]))
+    p <- p + L
+    if (extra[s]) {
+      if (p > length(tl)) { ok <- FALSE; break }
+      p <- p + 1L
+    }
+  }
+  if (ok && p - 1L != length(tl)) ok <- FALSE
+
+  list(alloc = as.integer(alloc), used = which(used), live = which(live),
+       deleted = which(used & !live), code_len = code_len, extra = which(extra),
+       flag19 = which(bm[20L, ] == 1L), codes = codes, codes_ok = ok)
+}
+
 # The DECLARED member-slot allocation of one dimension: the u16 that opens its
 # member-code block `[81 02][u16 alloc][16 00]` or its time-series member table
 # `[81 02][u16 alloc][08 00]` (`ivt_f2_time_members()`). Every dimension of

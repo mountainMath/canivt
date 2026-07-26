@@ -99,14 +99,6 @@ exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
 
 ## [ ] Open gaps
 
-- [ ] **The `16 00` member-code block's mid-section** (between the u16 slot
-  allocation and the tail Pascal codes) is undecoded and very likely carries
-  **per-slot flags** — the analogue of the time table's flag bytes. Decoding it
-  would give a fully declared slot table for every dimension, subsuming the
-  `ivt_f2_dim_slot_expand()` deleted-slot margin heuristic (accs Sex: 6 slots /
-  5 members) and fixing the accs **Offences** label alignment (64 stored label
-  records for 40 members — 24 deleted slots at unknown positions, so its labels
-  come from a count-anchored scan and may be misaligned; the EN/FR pair likewise).
 - [ ] **EO2654_2011_Van geography column identity** stays a content heuristic: its
   field dictionary declares 5 columns but only 4 are stored, so the run → column
   map is not 1-to-1. Resolving which field is unstored would make it
@@ -303,7 +295,7 @@ declared `UID/IDU` uids (the heuristic had mis-picked the `Geo Code` column);
 validated by `ivt_f2_check_geo_count()`) — still heuristic, see Open gaps.
 
 The whole read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` —
-light for every corpus table, full for 23; opt-in `test-geo-snapshot.R`), and
+light for all 118 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
 geography identity feeds only the slug/metadata, never the positional cell decode.
 
 ## [x] Lineage coverage
@@ -368,9 +360,55 @@ Hours alloc 32 × Timeseries alloc 32 = a 1024-bit inner block →
 **Historical note**: the accs table showed the same doubled-directory *symptom*
 from a different cause — an interior DELETED member slot in Sex, solved via
 `ivt_f2_dim_slot_expand()` (`canivt_deleted_slot`). Both are now principled:
-deleted slots widen the *extent*, the allocation widens the *padding*. The
-still-open `16 00` mid-section (per-slot flags) would subsume the deleted-slot
-heuristic — see Open gaps.
+deleted slots widen the *extent*, the allocation widens the *padding*.
+
+## [x] The `16 00` mid-section — DECODED (2026-07-25)
+
+The block's mid-section is **22 bits per allocated slot** (byte-pair-swapped,
+MSB-first, padded up to an even byte count): bit 0 LIVE, bits 1..12 the unary
+member-code length, bit 18 an extra trailing code byte, bit 19 an undetermined
+flag; all-zero = never allocated. Full field table and validation in
+[`markers.md`](markers.md) §E.1a. Validated by walking the member-code array to a
+**byte-exact** fit — 459/459 of the dimensions that own exactly one such block.
+
+The file therefore DECLARES its member count, its deleted slots and its slot
+positions (`ivt_f2_dim_slot_table()` → `ivt_f2_dim_slot_declared()`, quiet: it is
+a declaration, not a heuristic). What it closed:
+
+- `ivt_f2_dim_slot_expand()` is demoted to the fallback for dimensions with no
+  readable declared table (chunked codebooks, code arrays that do not parse
+  byte-exactly). The margin heuristic widened the count to the physical extent,
+  which kept the geometry right but emitted the deleted slot as a phantom member;
+  accs "Sex" is now 5 members with slot 4 declared deleted.
+- **CBP2008DA / CBP2010DA were losing 20 industries each.** "NAT. INDUSTRIES" is
+  929 members over 949 used slots (20 deleted, scattered from 458 to 836); the
+  count-only read cropped at 929 and dropped the live members at slots 930..949.
+  Validated: the industry Total now equals the sum of the 928 six-digit NAICS
+  leaves in **all 312,417** geography × emp-size groups. Ledger cell counts
+  updated (3,957,641 → 4,059,594 and 3,970,492 → 4,075,156).
+- Slot POSITIONS need not start at 1: LFHR `Table-210`'s 10-member "Education
+  level" sits at slots **10..19** of 32, and `table_5_c`'s 215 "Offences" skip
+  slot **98**.
+- SP3_RHUXA9_801's garbage descriptor counts (3338/3386/3378/3338) read as
+  1/5/2/7 — still UNSUPPORTED (the layout needs more than the counts), but the
+  misread is now named.
+
+Chasing the accs "Offences" labels through the declared table also turned up an
+unrelated, older bug and disproved a standing suspicion:
+
+- Those labels came out in **French on the English path**, and the cause was not
+  slot alignment (the declared table shows 40 used == 40 live slots, contiguous
+  from 1 — the count-anchored read was always correct). A member label may carry a
+  **trailing CR/LF**: one record of the English array reads
+  `"Criminal Code (without traffic)\r\n"`, and the member-run screen rejected any
+  array containing a control character, so a single terminated record discarded
+  the whole English array and the labels fell through to the French one. The
+  terminator is record framing and is now stripped before the screen; interior
+  control characters still reject, since those are the footnote/definition prose
+  blobs the screen exists to exclude. The same rejection had been pushing that
+  file's GEOGRAPHY through the whole specializer chain down to the loud
+  last-resort net (`canivt_geo_unparsed`, English names only); it now reads
+  through the quiet schema path with both `geo_name` and `geo_name_fr`.
 
 ## Summary
 
