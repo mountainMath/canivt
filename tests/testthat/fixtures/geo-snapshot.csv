@@ -117,3 +117,7 @@
 "SP3_RHUXA9_703",13,"562d6de6076640a0f987f6d710a302d8","canivt_geo_datadim",NA,NA
 "SP3_RHUXA9_103",30,"0b065bec0662884fe5c9355cddee5f38","canivt_geo_datadim",NA,NA
 "SP3_RHUXA9_801",1,"a0c31675c4f79751e2e92310d5553781","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
+"SP_BXW0XU_optab12",11,"5ad1621b27bac3140d1d0f87dc13b4ff","canivt_descriptor_from_slots|canivt_geo_datadim",NA,NA
+"SP_U649IE_optab13",11,"51e4381b4149c634a8699be0dfe81bd7","canivt_descriptor_from_slots|canivt_geo_datadim",NA,NA
+"SP_IE56KT_CDCSDNAIC3dec2006",5914,"6493f51eab180793cb0b739c8eb1de9b","canivt_descriptor_lenient|canivt_geo_unparsed",NA,NA
+"SP3_NAZQV2_Table-210",11,"74cda1e44ea4a135e9b1ca6d2a7b6cf9","canivt_descriptor_from_slots|canivt_fallback|canivt_geo_datadim",NA,NA

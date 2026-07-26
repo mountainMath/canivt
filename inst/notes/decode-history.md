@@ -406,6 +406,35 @@ mis-detection).
 the sums unchanged — so the industry axis labels are surfaced PROVISIONAL via the loud
 `canivt_suba` / `canivt_suba_labels` fallbacks.
 
+### Historical Census of Agriculture — `optab12` / `optab13` (2026-07-25)
+
+Two small `04`-gen tables that had been sitting in the local corpus with **no
+ledger row**, so nothing regression-tested them. They need no code change: both
+decode through `ivt_f2_descriptor_from_slots()` (no descriptor block) with
+`canivt_geo_datadim` geography, `strict_clean = FALSE` on those two known
+fallbacks. `optab12` is Geography 11 × Variables 13 × Census year 2 (farm-operator
+injuries, 1996/2001, **261** cells); `optab13` is Geography 11 × Variables 62 ×
+Years 14 (the long agriculture series 1921–2001, **8,638** cells).
+
+Validated internally against Canada == Σ the 10 provinces (the geography is Canada
+plus provinces, no territories):
+
+- `optab12` — the two count variables match to StatCan's published rounding-to-5
+  (385,605 vs 385,610; 15,465 vs 15,455). The percentage variables are correctly
+  **non**-additive, and the structure confirms itself exactly: the "Total"
+  percentage row is 100.0 for Canada and 1000.0 across the provinces — ten
+  geographies each summing to 100 %.
+- `optab13` — split by variable kind: counts/acres 451/465 groups exact, worst
+  relative error 1.8e-4 (6,313 of 35.2M acres of wheat — provincial rounding);
+  hectares 66/140 exact, same 1.8e-4 bound plus conversion rounding; averages
+  0/215, as ratios must be.
+
+Two other unledgered corpus files were promoted to `supported = FALSE` guards in
+the same pass — `SP3_NAZQV2_Table-210` and `SP_IE56KT_CDCSDNAIC3dec2006`, both
+already diagnosed in [`unsupported-formats.md`](unsupported-formats.md). Every
+file under `CANIVT_IVT_CACHE` now carries a ledger row, so the gate cannot start
+emitting values for one of them unnoticed.
+
 ### Chunked-count generalisation (the metadata-harvest sweeps)
 
 - **2026-07-23**: `ivt_f2_slot_chunked_count()` (written for the `02`-gen above) was

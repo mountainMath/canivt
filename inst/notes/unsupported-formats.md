@@ -50,6 +50,15 @@ These three do not reconcile, so the gate refuses them:
 | `SP3_PAWNKX_PROVSIC4-2` | SIC-4, 1254 classes — does not reconcile |
 | `SP_VB0LLW_PROVSIC4dec1997` | `idx0` mis-detection — the page-directory anchor does not resolve, so there is no layout to reconcile against |
 
+Two further guards, unrelated to sub-A, whose diagnosis is in the deferred section
+below — they are in the local corpus, so they carry a ledger row (2026-07-25)
+rather than sitting only in prose:
+
+| key | why |
+|---|---|
+| `SP3_NAZQV2_Table-210` | stale `@558` anchor **and** irregular directory packing that does not fit the power-of-two stride model — `ivt_page_preflight()` rejects |
+| `SP_IE56KT_CDCSDNAIC3dec2006` | `SUB-SECTORS` misread as 26 628 (type `0x0b`) plus a sparse fragmented directory — pre-flight rejects |
+
 Onboarded siblings, for contrast: `PROVINDjune1997` (dense DIVISIONS, 2,031
 cells), `PROVSIC3june1997` (chunked, total-far, 22,581), `PROVSIC3-1` (chunked,
 total-first, 29,463). Their industry **labels are provisional** — reconciliation
@@ -61,11 +70,14 @@ Dataverse-API-checked 2026-07-24).
 ## Known but not in the corpus (deferred, no ledger row)
 
 Sampled by the range-harvest sweeps, diagnosed, left for a future pass. Grouped by
-the format issue, not the file:
+the format issue, not the file. Entries here have **no ledger row** because the
+file is not in the local corpus; the two that are (`Table-210`,
+`CDCSDNAIC3dec2006`) were promoted to ledgered guards above on 2026-07-25 and keep
+their diagnosis here.
 
 **Directory relocation / anchor failure**
 
-- `103`, `Table-080` — the `@558` anchor does not resolve; `ivt_idx0()` falls to
+- `Table-080` — the `@558` anchor does not resolve; `ivt_idx0()` falls to
   the historical constant and no directory entries validate.
 - `SP3_NAZQV2_Table-210` (LFHR: Geography 11 × Sex 3 × Age 9 × Characteristics 10
   × Education 10 × Timeseries 240 monthly, 1990-01…2009-12) — `@558 = 34997` is
@@ -75,9 +87,11 @@ the format issue, not the file:
   alternates 8/12 valid entries per 32-entry block; two page sizes) and does not
   fit the power-of-two stride model: Characteristics decodes only 4 of 10 members
   (missing Unemployment and the rates) and the in-page Education dimension is off
-  by one (member 1 phantom-absent). This is the Table-023/Table-024 geometry, and
-  the undecoded `16 00` mid-section (per-slot flags) likely bites. Left rejected
-  rather than routed through the scan, which would **silently mis-decode**.
+  by one (member 1 phantom-absent). This is the Table-023/Table-024 geometry. The
+  `16 00` mid-section, once suspected of biting here, is now decoded (2026-07-25)
+  and does name the slot positions -- Education level occupies slots 10..19 of 32 --
+  but the irregular packing survives it, so the file stays rejected rather than
+  routed through the scan, which would **silently mis-decode**.
 
 **Sparse-directory modelling (Business-Register provincial SIC/NAIC)**
 
@@ -95,8 +109,10 @@ the format issue, not the file:
 
 **Layout extent / overshoot**
 
-- `02560006`, `701`, `Table_6_c-2009` — small tables whose directory overshoots
-  the modelled cartesian; the extent guard rejects them.
+- `02560006`, `Table_6_c-2009` — small tables whose directory overshoots
+  the modelled cartesian; the extent guard rejects them. (`701`, listed here
+  before, was onboarded 2026-07-25 as `SP3_RHUXA9_701` by the under-declared-count
+  work, as was the `103` formerly listed under anchor failure.)
 
 **Corrupted source**
 

@@ -38,6 +38,18 @@ corpus_file <- function(key) {
 ledger <- utils::read.csv(testthat::test_path("fixtures", "corpus-ledger.csv"),
                           stringsAsFactors = FALSE)
 
+# The ledger is only a net if it COVERS the corpus. Four tables (optab12, optab13,
+# Table-210, CDCSDNAIC3dec2006) once sat in the cache with no row, so nothing
+# regression-tested them and two that decoded correctly went unnoticed for weeks.
+# A new folder must therefore be ledgered -- with a cell count if it decodes, or
+# `supported = FALSE` if it is a deliberate gate guard.
+test_that("every corpus folder has a ledger row", {
+  skip_if(!corpus_on, "corpus tests are opt-in: set CANIVT_CORPUS_TESTS=1 (and CANIVT_IVT_CACHE)")
+  dirs <- list.dirs(corpus_dir, recursive = FALSE, full.names = FALSE)
+  dirs <- dirs[vapply(dirs, function(k) !is.na(corpus_file(k)), logical(1))]
+  expect_identical(sort(setdiff(dirs, ledger$key)), character(0))
+})
+
 for (i in seq_len(nrow(ledger))) {
   row <- ledger[i, ]
   test_that(paste0("corpus: ", row$key), {

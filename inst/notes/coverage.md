@@ -295,7 +295,7 @@ declared `UID/IDU` uids (the heuristic had mis-picked the `Geo Code` column);
 validated by `ivt_f2_check_geo_count()`) — still heuristic, see Open gaps.
 
 The whole read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` —
-light for all 118 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
+light for all 122 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
 geography identity feeds only the slug/metadata, never the positional cell decode.
 
 ## [x] Lineage coverage
@@ -326,6 +326,7 @@ each lineage (narrative + validation records in
 | 2016 Census of Agriculture (00040200, 00040207) | the `[type][count] 01 02 <doubled name>` facet framing (gated on facet count `< 0x20`); inline `[code]` geography |
 | type-00 sub-A provincial Business Patterns (PROVINDjune1997, PROVSIC3june1997, PROVSIC3-1) | `R/suba.R` — stride MEASURED from the directory, count from codebook chunks, **commits only if the decode reconciles**; labels provisional |
 | 2021 postal/electoral (98100019 FSA, 98100010 FED, 98100013 ADA) | no code change for cells; full attribute read needed `ivt_f2_dir_is_text_block()` (per-member footnote text blocks in the directory tail) |
+| historical Census of Agriculture (optab12, optab13) | no code change — ordinary `04`-gen containers, descriptor synthesised from the `@824` slot table |
 | SLID-era income (SP3_RHUXA9 103/404/405/501/701/703) | under-declared count reconcile — the declared slot allocation is the second count witness (`> 4·nextpow2(count)` ⇒ take the codebook member array's length, `canivt_underdeclared_count`); page-head codes widened to `b3 ∈ {08..0e}` |
 
 ## [x] The `04`-gen "doubled-window" survey directory — RESOLVED (2026-07-23)
