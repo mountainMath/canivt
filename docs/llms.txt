@@ -136,6 +136,34 @@ byte-marker catalog ship with the package as
 [`CLAUDE.md`](https://mountainmath.github.io/canivt/CLAUDE.md) for the
 code map and dev workflow.
 
+## Related packages
+
+There are several packages that perform related tasks accessing StatCan
+data.
+
+The [cansim package](https://mountainmath.github.io/cansim/) is designed
+to retrieve and work with public Statistics Canada data tables via the
+New Dissemination Model (NDM) API interface. This is the preferred
+method to access these tables, but only tables from the 2021 census and
+newer are available via this interface. The **cansim** package is
+available on CRAN and on
+[Github](https://github.com/mountainMath/cansim).
+
+The [cancensus package](https://mountainmath.github.io/cancensus/) ties
+into the [CensusMapper](https://censusmapper.ca) data API to retrieve
+Statistics Canada census profile data. It provides more pinpointed data
+access than pulling entire tables, and it provides access to the
+Statistics Canada API for census data that serves newer vintage census
+data, albeit with several downsides. The **cancensus** package is
+available on CRAN and on
+[Github](https://github.com/mountainMath/cancensus).
+
+The [statcanXtabs](https://mountainmath.github.io/statcanXtabs/) package
+is a fairly rough package that provides an interface to intermediate
+year StatCan census data tables that are available in CSV or SDXML
+format. The package is functional but data processing is somewhat
+limited.
+
 ## License
 
 MIT

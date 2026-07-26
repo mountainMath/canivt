@@ -28,7 +28,7 @@
 
     <a class="navbar-brand me-2" href="index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -151,6 +151,14 @@
 <h2 id="how-it-works">How it works<a class="anchor" aria-label="anchor" href="#how-it-works"></a>
 </h2>
 <p>The <a href="https://mountainmath.github.io/canivt/articles/ivt-format.html">file format article</a> walks through the reverse-engineered format and how the package maps onto it; <code><a href="articles/ivt-format.html">vignette("ivt-format", package = "canivt")</a></code> is the same text offline. The authoritative byte-level spec and the byte-marker catalog ship with the package as <code>system.file("notes/ivt-format.md", package = "canivt")</code> and <code>system.file("notes/markers.md", package = "canivt")</code>. See <a href="CLAUDE.html"><code>CLAUDE.md</code></a> for the code map and dev workflow.</p>
+</div>
+<div class="section level2">
+<h2 id="related-packages">Related packages<a class="anchor" aria-label="anchor" href="#related-packages"></a>
+</h2>
+<p>There are several packages that perform related tasks accessing StatCan data.</p>
+<p>The <a href="https://mountainmath.github.io/cansim/" class="external-link">cansim package</a> is designed to retrieve and work with public Statistics Canada data tables via the New Dissemination Model (NDM) API interface. This is the preferred method to access these tables, but only tables from the 2021 census and newer are available via this interface. The <strong>cansim</strong> package is available on CRAN and on <a href="https://github.com/mountainMath/cansim" class="external-link">Github</a>.</p>
+<p>The <a href="https://mountainmath.github.io/cancensus/" class="external-link">cancensus package</a> ties into the <a href="https://censusmapper.ca" class="external-link">CensusMapper</a> data API to retrieve Statistics Canada census profile data. It provides more pinpointed data access than pulling entire tables, and it provides access to the Statistics Canada API for census data that serves newer vintage census data, albeit with several downsides. The <strong>cancensus</strong> package is available on CRAN and on <a href="https://github.com/mountainMath/cancensus" class="external-link">Github</a>.</p>
+<p>The <a href="https://mountainmath.github.io/statcanXtabs/" class="external-link">statcanXtabs</a> package is a fairly rough package that provides an interface to intermediate year StatCan census data tables that are available in CSV or SDXML format. The package is functional but data processing is somewhat limited.</p>
 </div>
 <div class="section level2">
 <h2 id="license">License<a class="anchor" aria-label="anchor" href="#license"></a>

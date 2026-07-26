@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,6 +38,17 @@
       <small>Source: <a href="https://github.com/mountainMath/canivt/blob/HEAD/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.4.3" id="canivt-043">canivt 0.4.3<a class="anchor" aria-label="anchor" href="#canivt-043"></a></h2>
+<ul><li>
+<strong>Breaking:</strong> <code><a href="../reference/collect_ivt.html">collect_ivt()</a></code> no longer takes a <code>geography</code> argument, and <code><a href="../reference/ivt_members.html">ivt_members()</a></code> no longer emits geography rows. Geography is an identity axis rather than a category — <code>geo_uid</code> is the language-neutral key you join on, the member list runs to tens of thousands of entries on the large tables, and its ordinal is a hierarchy traversal rather than the analytic order that makes a data dimension worth levelling. The geography columns stay <code>character</code>. The geography rows were 99.7% of the <code>_members.parquet</code> sidecar (1.832 MB → 6 KB on the 1991 profile <code>1003011</code>). A sidecar written by an earlier version is still accepted; its geography rows are ignored rather than levelled.</li>
+<li>
+<code>metadata$geographies</code> gains <code>geo_depth</code> / <code>geo_parent_id</code>: the hierarchy implied by the display label’s indentation, as a depth and the <code>member_id</code> of each member’s nearest shallower ancestor. This is the one piece of per-member context the geography member rows uniquely held, now carried one row per geography rather than once per geography column. Both columns are omitted when the geography axis is flat, like any other column a vintage does not store.</li>
+<li>
+<code>ivt_label_depth()</code> / <code>ivt_label_parent()</code> gained a <code>unit</code> argument, and <code>ivt_label_indent_unit()</code> reads the spaces-per-level off the label set itself (the gcd of the observed indents) rather than assuming two. The census-of-agriculture geography axis (<code>00040200</code>, <code>00040207</code>, <code>00040231</code>) indents one space per level over Canada / province / CAR / CD / CCS, which a fixed unit of 2 collapsed into three levels, making each census division a sibling of the agricultural region containing it. Geography now infers the unit; data dimensions keep the validated default of 2.</li>
+<li>
+<code><a href="../reference/collect_ivt.html">collect_ivt()</a></code> honours <code>dim_names = "label"</code> on the Arrow / Parquet forms too (previously silently ignored there), and the result carries the member table it used and the source Parquet path as <code>members</code> / <code>path</code> attributes, so <code><a href="../reference/label_ivt_columns.html">label_ivt_columns()</a></code> composes with <code><a href="../reference/collect_ivt.html">collect_ivt()</a></code> in <strong>either order</strong>.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.4.0" id="canivt-040">canivt 0.4.0<a class="anchor" aria-label="anchor" href="#canivt-040"></a></h2>
 <ul><li>The page/presence nesting geometry is now driven by each dimension’s <strong>declared member-slot allocation</strong> (the u16 opening its codebook member-code block <code>81 02 &lt;alloc-u16&gt; 16 00</code> or time-series table <code>... 08 00</code>) instead of re-deriving <code>nextpow2(count)</code>. The two coincide on almost every table, but the declared value is authoritative: LFHR <code>Table-023</code>’s Hours dimension allocates 32 slots for 10 members, which <em>is</em> the formerly-mysterious “doubled-window” directory. The structural page-size probe (<code>ivt_survey_double()</code>) and its <code>canivt_survey_directory</code> fallback are retired; the table decodes byte-identically with no fallback, and the deferred <code>Table-024</code> record-packing puzzle is predicted by the same rule.</li>

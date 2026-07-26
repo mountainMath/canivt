@@ -1,9 +1,9 @@
 # Member levels of an IVT table
 
-Returns one row per (column, member) for every labelled column that
+Returns one row per (column, member) for every labelled **data**
+dimension
 [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md)
-emits: each data dimension (with its stored member-ordinal order) and
-the geography columns. This is the level table
+emits, in its stored member-ordinal order. This is the level table
 [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
 uses to convert dimension columns into factors whose levels cover
 **all** members – including members filtered out of the data – and it is
@@ -56,8 +56,8 @@ ivt_members(
 ## Value
 
 A tibble with columns `column` (the tidy column name), `dimension` (the
-full English dimension name; `"Geography"` for the geography columns),
-`dimension_fr` (the French dimension name, `NA` when none – used by
+full English dimension name), `dimension_fr` (the French dimension name,
+`NA` when none – used by
 [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md)),
 `member_id` (1-based StatCan member id), `ordinal` (the codebook
 member-ordinal; equals `member_id` when the file stores no ordinal
@@ -73,6 +73,16 @@ fertility rate's "... the number of children born per 1,000 women ...",
 which states the value's units; `NA` for the many dimensions/tables that
 carry none).
 
+## Details
+
+The geography columns are **not** levelled. Geography is an identity
+axis rather than a category: `geo_uid` is the language-neutral key you
+join on, the member list runs to tens of thousands of entries on the
+large tables, and its ordinal is a hierarchy traversal rather than an
+analytic order. Per-member geography context – names, identifiers,
+quality flags, and the label hierarchy as `geo_depth`/`geo_parent_id` –
+lives in `metadata$geographies` instead.
+
 ## See also
 
 [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
@@ -83,19 +93,26 @@ carry none).
 path <- system.file("extdata", "98100044.ivt", package = "canivt")
 ivt <- read_ivt(path)
 ivt_members(ivt)
-#> # A tibble: 74 × 12
-#>    column dimension    dimension_fr member_id ordinal label level level_fr depth
-#>    <chr>  <chr>        <chr>            <int>   <int> <chr> <chr> <chr>    <int>
-#>  1 type   Type of col… Type de log…         1       1 "Tot… Tota… Total -…     0
-#>  2 type   Type of col… Type de log…         2       2 "  H… Heal… Établis…     1
-#>  3 type   Type of col… Type de log…         3       3 "   … Hosp… Hôpitaux     2
-#>  4 type   Type of col… Type de log…         4       4 "   … Nurs… Établis…     2
-#>  5 type   Type of col… Type de log…         5       5 "   … Resi… Résiden…     2
-#>  6 type   Type of col… Type de log…         6       6 "   … Faci… Établis…     2
-#>  7 type   Type of col… Type de log…         7       7 "   … Resi… Établis…     2
-#>  8 type   Type of col… Type de log…         8       8 "  C… Corr… Établis…     1
-#>  9 type   Type of col… Type de log…         9       9 "  S… Shel… Refuges      1
-#> 10 type   Type of col… Type de log…        10      10 "  S… Serv… Logemen…     1
-#> # ℹ 64 more rows
+#> # A tibble: 18 × 12
+#>    column    dimension dimension_fr member_id ordinal label level level_fr depth
+#>    <chr>     <chr>     <chr>            <int>   <int> <chr> <chr> <chr>    <int>
+#>  1 type      Type of … Type de log…         1       1 "Tot… Tota… Total -…     0
+#>  2 type      Type of … Type de log…         2       2 "  H… Heal… Établis…     1
+#>  3 type      Type of … Type de log…         3       3 "   … Hosp… Hôpitaux     2
+#>  4 type      Type of … Type de log…         4       4 "   … Nurs… Établis…     2
+#>  5 type      Type of … Type de log…         5       5 "   … Resi… Résiden…     2
+#>  6 type      Type of … Type de log…         6       6 "   … Faci… Établis…     2
+#>  7 type      Type of … Type de log…         7       7 "   … Resi… Établis…     2
+#>  8 type      Type of … Type de log…         8       8 "  C… Corr… Établis…     1
+#>  9 type      Type of … Type de log…         9       9 "  S… Shel… Refuges      1
+#> 10 type      Type of … Type de log…        10      10 "  S… Serv… Logemen…     1
+#> 11 type      Type of … Type de log…        11      11 "   … Lodg… Maisons…     2
+#> 12 type      Type of … Type de log…        12      12 "   … Hote… Hôtels,…     2
+#> 13 type      Type of … Type de log…        13      13 "   … Othe… Autres …     2
+#> 14 type      Type of … Type de log…        14      14 "  R… Reli… Établis…     1
+#> 15 type      Type of … Type de log…        15      15 "  H… Hutt… Colonie…     1
+#> 16 type      Type of … Type de log…        16      16 "  O… Othe… Autres …     1
+#> 17 collecti… Collecti… Logements c…         1       1 "Col… Coll… Logemen…     0
+#> 18 collecti… Collecti… Logements c…         2       2 "Pop… Popu… Populat…     0
 #> # ℹ 3 more variables: parent_id <int>, description <chr>, description_fr <chr>
 ```

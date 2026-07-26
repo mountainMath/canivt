@@ -11,7 +11,7 @@ identifiers, footnotes). No companion CSV or metadata download is required."><me
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -83,7 +83,10 @@ vintage stores them: the bilingual display label (<code>geo_label</code>,
 <code>geo_label_fr</code>) and name (<code>geo_name</code>, <code>geo_name_fr</code> – on pre-DGUID tables
 the EN/FR halves of the stored bilingual label), <code>geo_uid</code> (DGUID, or the
 bare GEOUID on pre-DGUID tables), the aggregation level (<code>geo_level</code>), the
-geography type / municipal status (<code>geo_type</code>, <code>geo_type_abbr</code>), province
+label hierarchy (<code>geo_depth</code>, <code>geo_parent_id</code> – the indentation the display
+label carries, turned into a depth and the <code>member_id</code> of each member's
+nearest shallower ancestor; both absent when the geography axis is flat),
+the geography type / municipal status (<code>geo_type</code>, <code>geo_type_abbr</code>), province
 abbreviation and codes (<code>prov_abbr</code>, <code>alt_geo_code</code>, <code>pr_code</code>), the
 data-quality flag (<code>dqf_code</code>, with <code>dqf_note</code> and the table-level
 <code>dqf_legend</code>), and the total non-response rate (<code>tnr_short_form</code>).</p>

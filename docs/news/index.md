@@ -1,5 +1,46 @@
 # Changelog
 
+## canivt 0.4.3
+
+- **Breaking:**
+  [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
+  no longer takes a `geography` argument, and
+  [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)
+  no longer emits geography rows. Geography is an identity axis rather
+  than a category — `geo_uid` is the language-neutral key you join on,
+  the member list runs to tens of thousands of entries on the large
+  tables, and its ordinal is a hierarchy traversal rather than the
+  analytic order that makes a data dimension worth levelling. The
+  geography columns stay `character`. The geography rows were 99.7% of
+  the `_members.parquet` sidecar (1.832 MB → 6 KB on the 1991 profile
+  `1003011`). A sidecar written by an earlier version is still accepted;
+  its geography rows are ignored rather than levelled.
+- `metadata$geographies` gains `geo_depth` / `geo_parent_id`: the
+  hierarchy implied by the display label’s indentation, as a depth and
+  the `member_id` of each member’s nearest shallower ancestor. This is
+  the one piece of per-member context the geography member rows uniquely
+  held, now carried one row per geography rather than once per geography
+  column. Both columns are omitted when the geography axis is flat, like
+  any other column a vintage does not store.
+- `ivt_label_depth()` / `ivt_label_parent()` gained a `unit` argument,
+  and `ivt_label_indent_unit()` reads the spaces-per-level off the label
+  set itself (the gcd of the observed indents) rather than assuming two.
+  The census-of-agriculture geography axis (`00040200`, `00040207`,
+  `00040231`) indents one space per level over Canada / province / CAR /
+  CD / CCS, which a fixed unit of 2 collapsed into three levels, making
+  each census division a sibling of the agricultural region containing
+  it. Geography now infers the unit; data dimensions keep the validated
+  default of 2.
+- [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
+  honours `dim_names = "label"` on the Arrow / Parquet forms too
+  (previously silently ignored there), and the result carries the member
+  table it used and the source Parquet path as `members` / `path`
+  attributes, so
+  [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md)
+  composes with
+  [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
+  in **either order**.
+
 ## canivt 0.4.0
 
 - The page/presence nesting geometry is now driven by each dimension’s

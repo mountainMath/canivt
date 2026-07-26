@@ -15,7 +15,7 @@ order rather than alphabetically."><meta property="og:image" content="https://mo
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -60,7 +60,6 @@ order rather than alphabetically.</p>
     <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">collect_ivt</span><span class="op">(</span></span>
 <span>  <span class="va">x</span>,</span>
 <span>  members <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  geography <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  dim_names <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"slug"</span>, <span class="st">"label"</span><span class="op">)</span>,</span>
 <span>  language <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  <span class="va">...</span></span>
@@ -80,13 +79,6 @@ order rather than alphabetically.</p>
 <dd><p>A level table from <code><a href="ivt_members.html">ivt_members()</a></code>; when <code>NULL</code> it is located
 from <code>x</code> (an attached <code>members</code> attribute, or the Parquet's
 <code>_members.parquet</code> sidecar).</p></dd>
-
-
-<dt id="arg-geography">geography<a class="anchor" aria-label="anchor" href="#arg-geography"></a></dt>
-<dd><p>Also convert the geography columns (<code>geo_label</code>,
-<code>geo_name</code>, <code>geo_uid</code>, <code>geo_level</code>) to factors. Default <code>FALSE</code>: large
-tables carry tens of thousands of geographies, which makes for unwieldy
-factor levels.</p></dd>
 
 
 <dt id="arg-dim-names">dim_names<a class="anchor" aria-label="anchor" href="#arg-dim-names"></a></dt>
@@ -120,7 +112,11 @@ as <code>path</code>) so <code><a href="label_ivt_columns.html">label_ivt_column
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p><code>x</code> can be an <code>ivt</code> object from <code><a href="read_ivt.html">read_ivt()</a></code>, the Arrow dataset returned by
+    <p>The geography columns are left as character: they are identifiers to join on,
+not categories (see <code><a href="ivt_members.html">ivt_members()</a></code>). A member table written by an older
+version that still carries geography rows is accepted, and its geography rows
+ignored.</p>
+<p><code>x</code> can be an <code>ivt</code> object from <code><a href="read_ivt.html">read_ivt()</a></code>, the Arrow dataset returned by
 <code><a href="get_statcan_ivt.html">get_statcan_ivt()</a></code> (optionally after <code>dplyr</code> verbs such as <code><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter()</a></code>), or
 a path to a Parquet written by <code><a href="ivt_write_parquet.html">ivt_write_parquet()</a></code>. For the Arrow /
 Parquet forms the member levels come from the <code>&lt;name&gt;_members.parquet</code>

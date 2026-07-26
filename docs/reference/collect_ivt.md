@@ -14,7 +14,6 @@ than alphabetically.
 collect_ivt(
   x,
   members = NULL,
-  geography = FALSE,
   dim_names = c("slug", "label"),
   language = NULL,
   ...
@@ -34,13 +33,6 @@ collect_ivt(
   [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md);
   when `NULL` it is located from `x` (an attached `members` attribute,
   or the Parquet's `_members.parquet` sidecar).
-
-- geography:
-
-  Also convert the geography columns (`geo_label`, `geo_name`,
-  `geo_uid`, `geo_level`) to factors. Default `FALSE`: large tables
-  carry tens of thousands of geographies, which makes for unwieldy
-  factor levels.
 
 - dim_names:
 
@@ -81,6 +73,12 @@ member table it used as a `members` attribute (and the source Parquet as
 can still be applied afterwards.
 
 ## Details
+
+The geography columns are left as character: they are identifiers to
+join on, not categories (see
+[`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)).
+A member table written by an older version that still carries geography
+rows is accepted, and its geography rows ignored.
 
 `x` can be an `ivt` object from
 [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md),
