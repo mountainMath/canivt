@@ -53,6 +53,12 @@ meta$dimensions
 #> [[1]]$ordinal
 #> NULL
 #> 
+#> [[1]]$description
+#> NULL
+#> 
+#> [[1]]$description_fr
+#> NULL
+#> 
 #> 
 #> [[2]]
 #> [[2]]$name
@@ -109,13 +115,19 @@ meta$dimensions
 #> [[2]]$ordinal
 #>  [1]  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16
 #> 
+#> [[2]]$description
+#> NULL
+#> 
+#> [[2]]$description_fr
+#> NULL
+#> 
 #> 
 #> [[3]]
 #> [[3]]$name
 #> [1] "Collective dwellings occupied by usual residents and population in collective dwellings"
 #> 
 #> [[3]]$name_fr
-#> [1] NA
+#> [1] "Logements colle"
 #> 
 #> [[3]]$count
 #> [1] 2
@@ -136,6 +148,12 @@ meta$dimensions
 #> 
 #> [[3]]$ordinal
 #> [1] 1 2
+#> 
+#> [[3]]$description
+#> NULL
+#> 
+#> [[3]]$description_fr
+#> NULL
 #> 
 #> 
 ```

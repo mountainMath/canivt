@@ -83,7 +83,7 @@ carry none).
 path <- system.file("extdata", "98100044.ivt", package = "canivt")
 ivt <- read_ivt(path)
 ivt_members(ivt)
-#> # A tibble: 74 × 10
+#> # A tibble: 74 × 12
 #>    column dimension    dimension_fr member_id ordinal label level level_fr depth
 #>    <chr>  <chr>        <chr>            <int>   <int> <chr> <chr> <chr>    <int>
 #>  1 type   Type of col… Type de log…         1       1 "Tot… Tota… Total -…     0
@@ -97,5 +97,5 @@ ivt_members(ivt)
 #>  9 type   Type of col… Type de log…         9       9 "  S… Shel… Refuges      1
 #> 10 type   Type of col… Type de log…        10      10 "  S… Serv… Logemen…     1
 #> # ℹ 64 more rows
-#> # ℹ 1 more variable: parent_id <int>
+#> # ℹ 3 more variables: parent_id <int>, description <chr>, description_fr <chr>
 ```

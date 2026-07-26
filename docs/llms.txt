@@ -61,9 +61,15 @@ tab
 #> ── IVT table 98100241 ──
 #> Housing indicators by tenure ... period of construction: Canada, provinces ...
 #> 7489464 cells | 166 geographies | 7 dimensions | 20 footnotes
+#> geography labelled by name + uid
 
 # Tidy, labelled long table (one value per row)
 ivt_tidy(tab)
+ivt_tidy(tab, language = "fr")                # French labels where the file has them
+
+# Dimension members as factors carrying the FULL member list as levels,
+# so members filtered out of the data still show up in tables/plots
+collect_ivt(tab)
 
 # Write outputs
 ivt_write_parquet(tab, "98100241.parquet")   # ~17 MB
@@ -118,9 +124,15 @@ offending IVT and a brief description of the failure.
 
 ## How it works
 
-See
-[`inst/notes/ivt-format.md`](https://mountainmath.github.io/canivt/inst/notes/ivt-format.md)
-for the reverse-engineered file format, and
+The [file format
+article](https://mountainmath.github.io/canivt/articles/ivt-format.html)
+walks through the reverse-engineered format and how the package maps
+onto it;
+[`vignette("ivt-format", package = "canivt")`](https://mountainmath.github.io/canivt/articles/ivt-format.md)
+is the same text offline. The authoritative byte-level spec and the
+byte-marker catalog ship with the package as
+`system.file("notes/ivt-format.md", package = "canivt")` and
+`system.file("notes/markers.md", package = "canivt")`. See
 [`CLAUDE.md`](https://mountainmath.github.io/canivt/CLAUDE.md) for the
 code map and dev workflow.
 

@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -124,8 +124,11 @@ inline codebook. They decode through the same path.</p>
 <code>ivt_family()</code> (which just reports whether geography
 straddles), but the cell decode and metadata read are <strong>shared for
 every file</strong> — <code>family</code> only tags provenance. Every
-<code>.ivt</code> in the corpus decodes; there are no unsupported
-files.</p>
+<code>.ivt</code> in the test corpus decodes, and no file in it is
+currently refused. That is not a promise about files the corpus has
+never seen: detection is structural, and <code><a href="../reference/read_ivt.html">read_ivt()</a></code> still
+refuses anything whose page geometry it cannot verify rather than emit
+misindexed cells.</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/mountainMath/canivt" class="external-link">canivt</a></span><span class="op">)</span></span>
 <span><span class="va">tab</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="../reference/ivt_download.html">ivt_download</a></span><span class="op">(</span><span class="st">"98100023"</span><span class="op">)</span><span class="op">)</span></span>
@@ -301,6 +304,30 @@ which is what the historical “family” label really named.</p>
 <span><span class="co">#&gt; 1                                         Geography   63404</span></span>
 <span><span class="co">#&gt; 2 Age (in single years), average age and median age     128</span></span>
 <span><span class="co">#&gt; 3                                            Gender       3</span></span></code></pre></div>
+<div class="section level3">
+<h3 id="three-witnesses-to-the-member-count">Three witnesses to the member count<a class="anchor" aria-label="anchor" href="#three-witnesses-to-the-member-count"></a>
+</h3>
+<p>Getting a dimension’s member count wrong misindexes every cell
+downstream, and the descriptor’s count field alone is not always
+trustworthy — its record framing is ambiguous in places, and a count can
+be read at the wrong width. The file states the same number three times,
+in three independent places, so the count is <strong>reconciled</strong>
+rather than taken on faith:</p>
+<ol style="list-style-type: decimal">
+<li>the <strong>descriptor</strong> record’s count field;</li>
+<li>the <strong>codebook</strong> — the declared slot allocation and the
+length of the member arrays themselves. Member labels are written in
+blocks capped at 256, so a dimension with more members spans several
+blocks, and the run of block lengths witnesses the true total;</li>
+<li>the <strong>page directory</strong> — how far the outermost paged
+dimension’s entries actually extend, counting only entries that both
+decode and carry cells.</li>
+</ol>
+<p>Reconciliation only ever <em>raises</em> a count, never lowers one,
+and every correction is a loud, classed warning. When the count is right
+the container agrees exactly: the directory’s outer entry cartesian
+equals the page count.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="case-a-geography-straddles-a-single-page-directory-98-10-0023">Case A — geography straddles: a single page directory
@@ -331,10 +358,12 @@ Total/Men/Women at bits 3/2/1 (the all-present marker is
 non-zero cells are stored — the StatCan CSV publishes the zeros, so a
 missing cell means 0.</li>
 </ul>
-<p><code>ivt_f2_geo_attributes()</code> decodes the full per-geography
-codebook: name, DGUID, geographic level and type (+ abbreviation), two
-geocodes, the data-quality flag and note, and the non-response rate —
-all exact for 63,404 geographies.</p>
+<p>The full per-geography codebook — name, DGUID, geographic level and
+type (+ abbreviation), two geocodes, the data-quality flag and note, and
+the non-response rate — decodes exactly for all 63,404 geographies; it
+is attached by <code>read_ivt(geo_attributes = TRUE)</code> (internally
+<code>ivt_f2_geo_attributes()</code>), while the default metadata path
+already carries the names and DGUIDs.</p>
 </div>
 <div class="section level2">
 <h2 id="case-b-a-data-dimension-straddles-per-geography-directories-98-10-0241">Case B — a data dimension straddles: per-geography directories
@@ -388,6 +417,19 @@ faithfully spans the larger cartesian (the padding slots hold minimal,
 empty pages). Reading the declared allocation instead of re-deriving
 <code>nextpow2</code> is what lets one layout rule cover that lineage
 too.</p>
+<p>That block declares more than the capacity. Its mid-section is a
+table of <strong>22 bits per allocated slot</strong> (pair-swapped,
+MSB-first): a <em>live</em> bit, the member code’s length in unary, and
+a flag for an extra trailing code byte. So the file states <strong>which
+slots hold members and which were deleted</strong> — the bitmap
+addresses members by <em>slot</em>, and slots can have holes. The
+declaration is trusted only when walking the code lengths it predicts
+consumes the following member-code array byte-exactly; where it does,
+the count and slot positions are read rather than guessed. The same slot
+map also addresses the <strong>codebook</strong> arrays, which may be
+written one record per allocated slot and left empty at the rest — an
+interior hole otherwise defeats a trailing-NA trim and silently shifts
+every label past it.</p>
 </div>
 <div class="section level2">
 <h2 id="the-codebook-labels-geographic-ids-footnotes">The codebook: labels, geographic ids, footnotes<a class="anchor" aria-label="anchor" href="#the-codebook-labels-geographic-ids-footnotes"></a>
@@ -516,7 +558,9 @@ tag, not part of a fixed constant, and
 <code>ivt_family()</code>/<code><a href="../reference/read_ivt.html">read_ivt()</a></code> handle both
 transparently. This generation covers older survey product lines rather
 than census geography tables: Health Statistics at a Glance (1999), the
-1996 Census of Agriculture, and the 1996 Small Area Business survey.</p>
+1996 Census of Agriculture, the 1996 Small Area Business survey, and the
+provincial Canadian Business Patterns releases of 1997–2002 (see
+“Undeclared geometry” below).</p>
 <p>Two things are structurally different, both confined to the
 descriptor and codebook:</p>
 <ul>
@@ -532,11 +576,11 @@ dimension: <code>metadata$geographies</code> is empty and
 dimension can be stored with no code or label array at all — only a
 per-member <strong>date table</strong> (one-byte populated-slot flags +
 a 3-byte date, days since <code>0000-03-01</code>). Member labels
-(typically a year) are <em>generated</em> from those dates. Because the
-presence bitmap addresses members by their <strong>slot</strong> rather
-than a dense <code>1..count</code> range, and deleted members leave
-holes in the slot numbering, the decoder’s layout is slot-aware
-here.</li>
+(typically a year) are <em>generated</em> from those dates. The slot
+addressing is the same one described above — this table
+(<code>... 08 00</code>) is simply where a dimension declares it when it
+carries no <code>16 00</code> member-code block. A dimension carries one
+or the other, never both.</li>
 </ul>
 <div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Health Statistics at a Glance 1999 is Borealis-hosted (see vignette("borealis")</span></span>
@@ -554,6 +598,50 @@ can be mapped unambiguously.</p>
 <p>See <code>inst/notes/ivt-format.md</code> (“The older
 <code>02 00 20 00</code> survey-generation container”) and
 <code>inst/notes/markers.md</code> §E.1 for the exact byte framings.</p>
+<div class="section level3">
+<h3 id="undeclared-geometry-the-provincial-business-patterns-cluster">Undeclared geometry: the provincial Business Patterns cluster<a class="anchor" aria-label="anchor" href="#undeclared-geometry-the-provincial-business-patterns-cluster"></a>
+</h3>
+<p>One corner of this generation declares <em>less</em> than everything
+above assumes. The provincial Canadian Business Patterns releases
+(<code>PROVSIC*</code>, <code>PRVNAIC*</code>, <code>CACMA*</code>,
+1997–2002; province/CMA × industry × employment-size class) carry
+<strong>no <code>16 00</code> slot table for any dimension</strong>, so
+the outer directory stride — the number of entry slots each geography
+occupies — is stated nowhere in the file and has to be <em>measured</em>
+from the page directory itself. It is measured as a
+<strong>tiling</strong>, not a progression: every geography occupies
+<code>S</code> consecutive entry slots and writes the same window
+residues inside them, and the smallest <code>S</code> that tiles the
+whole directory wins. That matters because a run need not start at
+window 0 — one file lays its 11 industry windows at slots 3..13 of a
+16-slot group. A written page whose presence record is entirely zero is
+treated as an <strong>absence</strong>: it carries no cells, so it
+witnesses nothing about where members sit.</p>
+<p>Because the geometry is inferred rather than declared, it is
+<strong>adopted only if the decoded values reconcile exactly</strong> on
+the file’s own arithmetic — the industry <code>Total</code> member
+equalling the sum of the detail members for every (geography, size
+class), or <code>Canada</code> equalling the sum of the provinces. A
+file whose geometry cannot be measured, or whose decode does not
+reconcile, is left <strong>unsupported</strong> rather than emitting
+unvalidated numbers.</p>
+<p>Two caveats travel with these tables, both raised as loud, classed
+warnings:</p>
+<ul>
+<li>the industry <strong>labels are provisional</strong>
+(<code>canivt_suba_labels</code>) — reconciliation validates the
+<em>sums</em>, not the code → member assignment, and a uniform relabel
+would leave every sum unchanged. There is no published ground truth to
+settle it against;</li>
+<li>the recovered geometry itself is flagged (<code>canivt_suba</code>),
+so a caller can spot these tables programmatically or promote the
+warnings to errors with <code>options(canivt.strict = TRUE)</code>.</li>
+</ul>
+<p>Values and dimension structure are otherwise ordinary. See
+<code>R/suba.R</code> and the sub-A sections of
+<code>inst/notes/unsupported-formats.md</code> and
+<code>inst/notes/coverage.md</code>.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="how-canivt-maps-to-the-format">How <code>canivt</code> maps to the format<a class="anchor" aria-label="anchor" href="#how-canivt-maps-to-the-format"></a>
@@ -573,7 +661,8 @@ can be mapped unambiguously.</p>
 <tr class="odd">
 <td>Header identity, dimension descriptor, layout</td>
 <td>
-<code><a href="../reference/ivt_metadata.html">ivt_metadata()</a></code>, <code>ivt_f2_header_layout()</code>,
+<code><a href="../reference/ivt_metadata.html">ivt_metadata()</a></code>; (internal)
+<code>ivt_f2_header_layout()</code>,
 <code>ivt_f2_descriptor()</code>
 </td>
 <td>
@@ -601,6 +690,7 @@ can be mapped unambiguously.</p>
 footnotes</td>
 <td>
 <code><a href="../reference/ivt_metadata.html">ivt_metadata()</a></code>,
+<code>read_ivt(geo_attributes = TRUE)</code>; (internal)
 <code>ivt_f2_geo_attributes()</code>
 </td>
 <td>

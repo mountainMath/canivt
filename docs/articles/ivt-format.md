@@ -47,7 +47,12 @@ codebook. They decode through the same path.
 auto-detects the case via `ivt_family()` (which just reports whether
 geography straddles), but the cell decode and metadata read are **shared
 for every file** — `family` only tags provenance. Every `.ivt` in the
-corpus decodes; there are no unsupported files.
+test corpus decodes, and no file in it is currently refused. That is not
+a promise about files the corpus has never seen: detection is
+structural, and
+[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+still refuses anything whose page geometry it cannot verify rather than
+emit misindexed cells.
 
 ``` r
 
@@ -205,6 +210,29 @@ data.frame(dimension = meta$dimension_names,
 #> 3                                            Gender       3
 ```
 
+### Three witnesses to the member count
+
+Getting a dimension’s member count wrong misindexes every cell
+downstream, and the descriptor’s count field alone is not always
+trustworthy — its record framing is ambiguous in places, and a count can
+be read at the wrong width. The file states the same number three times,
+in three independent places, so the count is **reconciled** rather than
+taken on faith:
+
+1.  the **descriptor** record’s count field;
+2.  the **codebook** — the declared slot allocation and the length of
+    the member arrays themselves. Member labels are written in blocks
+    capped at 256, so a dimension with more members spans several
+    blocks, and the run of block lengths witnesses the true total;
+3.  the **page directory** — how far the outermost paged dimension’s
+    entries actually extend, counting only entries that both decode and
+    carry cells.
+
+Reconciliation only ever *raises* a count, never lowers one, and every
+correction is a loud, classed warning. When the count is right the
+container agrees exactly: the directory’s outer entry cartesian equals
+the page count.
+
 ## Case A — geography straddles: a single page directory (98-10-0023)
 
 When the data dimensions fit in one 2048-bit presence record, geography
@@ -228,10 +256,12 @@ each directory record is a page that packs **4 geographies**:
   cells, member-major / gender-inner. Only non-zero cells are stored —
   the StatCan CSV publishes the zeros, so a missing cell means 0.
 
-`ivt_f2_geo_attributes()` decodes the full per-geography codebook: name,
-DGUID, geographic level and type (+ abbreviation), two geocodes, the
-data-quality flag and note, and the non-response rate — all exact for
-63,404 geographies.
+The full per-geography codebook — name, DGUID, geographic level and type
+(+ abbreviation), two geocodes, the data-quality flag and note, and the
+non-response rate — decodes exactly for all 63,404 geographies; it is
+attached by `read_ivt(geo_attributes = TRUE)` (internally
+`ivt_f2_geo_attributes()`), while the default metadata path already
+carries the names and DGUIDs.
 
 ## Case B — a data dimension straddles: per-geography directories (98-10-0241)
 
@@ -285,6 +315,19 @@ directory faithfully spans the larger cartesian (the padding slots hold
 minimal, empty pages). Reading the declared allocation instead of
 re-deriving `nextpow2` is what lets one layout rule cover that lineage
 too.
+
+That block declares more than the capacity. Its mid-section is a table
+of **22 bits per allocated slot** (pair-swapped, MSB-first): a *live*
+bit, the member code’s length in unary, and a flag for an extra trailing
+code byte. So the file states **which slots hold members and which were
+deleted** — the bitmap addresses members by *slot*, and slots can have
+holes. The declaration is trusted only when walking the code lengths it
+predicts consumes the following member-code array byte-exactly; where it
+does, the count and slot positions are read rather than guessed. The
+same slot map also addresses the **codebook** arrays, which may be
+written one record per allocated slot and left empty at the rest — an
+interior hole otherwise defeats a trailing-NA trim and silently shifts
+every label past it.
 
 ## The codebook: labels, geographic ids, footnotes
 
@@ -414,8 +457,9 @@ fixed constant, and
 `ivt_family()`/[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
 handle both transparently. This generation covers older survey product
 lines rather than census geography tables: Health Statistics at a Glance
-(1999), the 1996 Census of Agriculture, and the 1996 Small Area Business
-survey.
+(1999), the 1996 Census of Agriculture, the 1996 Small Area Business
+survey, and the provincial Canadian Business Patterns releases of
+1997–2002 (see “Undeclared geometry” below).
 
 Two things are structurally different, both confined to the descriptor
 and codebook:
@@ -430,10 +474,10 @@ and codebook:
   stored with no code or label array at all — only a per-member **date
   table** (one-byte populated-slot flags + a 3-byte date, days since
   `0000-03-01`). Member labels (typically a year) are *generated* from
-  those dates. Because the presence bitmap addresses members by their
-  **slot** rather than a dense `1..count` range, and deleted members
-  leave holes in the slot numbering, the decoder’s layout is slot-aware
-  here.
+  those dates. The slot addressing is the same one described above —
+  this table (`... 08 00`) is simply where a dimension declares it when
+  it carries no `16 00` member-code block. A dimension carries one or
+  the other, never both.
 
 ``` r
 
@@ -456,14 +500,54 @@ See `inst/notes/ivt-format.md` (“The older `02 00 20 00`
 survey-generation container”) and `inst/notes/markers.md` §E.1 for the
 exact byte framings.
 
+### Undeclared geometry: the provincial Business Patterns cluster
+
+One corner of this generation declares *less* than everything above
+assumes. The provincial Canadian Business Patterns releases (`PROVSIC*`,
+`PRVNAIC*`, `CACMA*`, 1997–2002; province/CMA × industry ×
+employment-size class) carry **no `16 00` slot table for any
+dimension**, so the outer directory stride — the number of entry slots
+each geography occupies — is stated nowhere in the file and has to be
+*measured* from the page directory itself. It is measured as a
+**tiling**, not a progression: every geography occupies `S` consecutive
+entry slots and writes the same window residues inside them, and the
+smallest `S` that tiles the whole directory wins. That matters because a
+run need not start at window 0 — one file lays its 11 industry windows
+at slots 3..13 of a 16-slot group. A written page whose presence record
+is entirely zero is treated as an **absence**: it carries no cells, so
+it witnesses nothing about where members sit.
+
+Because the geometry is inferred rather than declared, it is **adopted
+only if the decoded values reconcile exactly** on the file’s own
+arithmetic — the industry `Total` member equalling the sum of the detail
+members for every (geography, size class), or `Canada` equalling the sum
+of the provinces. A file whose geometry cannot be measured, or whose
+decode does not reconcile, is left **unsupported** rather than emitting
+unvalidated numbers.
+
+Two caveats travel with these tables, both raised as loud, classed
+warnings:
+
+- the industry **labels are provisional** (`canivt_suba_labels`) —
+  reconciliation validates the *sums*, not the code → member assignment,
+  and a uniform relabel would leave every sum unchanged. There is no
+  published ground truth to settle it against;
+- the recovered geometry itself is flagged (`canivt_suba`), so a caller
+  can spot these tables programmatically or promote the warnings to
+  errors with `options(canivt.strict = TRUE)`.
+
+Values and dimension structure are otherwise ordinary. See `R/suba.R`
+and the sub-A sections of `inst/notes/unsupported-formats.md` and
+`inst/notes/coverage.md`.
+
 ## How `canivt` maps to the format
 
 | Region | Function(s) | Source file(s) |
 |----|----|----|
-| Header identity, dimension descriptor, layout | [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md), `ivt_f2_header_layout()`, `ivt_f2_descriptor()` | `R/codebook-f2.R`, `R/dimdir.R` |
+| Header identity, dimension descriptor, layout | [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md); (internal) `ivt_f2_header_layout()`, `ivt_f2_descriptor()` | `R/codebook-f2.R`, `R/dimdir.R` |
 | Page directory / geography index | (internal) `ivt_layout()` | `R/decode.R`, `R/container*.R` |
 | Presence bitmap + value codec (both straddle cases) | (internal) `ivt_decode()` | `R/decode.R`, `R/decode-f2.R` |
-| Codebook labels, DGUIDs/GEOUIDs, geography attributes, footnotes | [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md), `ivt_f2_geo_attributes()` | `R/codebook-f2.R`, `R/dimdir.R`, `R/read-f2.R` |
+| Codebook labels, DGUIDs/GEOUIDs, geography attributes, footnotes | [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md), `read_ivt(geo_attributes = TRUE)`; (internal) `ivt_f2_geo_attributes()` | `R/codebook-f2.R`, `R/dimdir.R`, `R/read-f2.R` |
 | Tidy / write outputs | [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md), `ivt_write_*()` | `R/read.R`, `R/write.R` |
 
 ## Validation

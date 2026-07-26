@@ -28,7 +28,7 @@
 
     <a class="navbar-brand me-2" href="index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -107,9 +107,15 @@
 <span><span class="co">#&gt; ── IVT table 98100241 ──</span></span>
 <span><span class="co">#&gt; Housing indicators by tenure ... period of construction: Canada, provinces ...</span></span>
 <span><span class="co">#&gt; 7489464 cells | 166 geographies | 7 dimensions | 20 footnotes</span></span>
+<span><span class="co">#&gt; geography labelled by name + uid</span></span>
 <span></span>
 <span><span class="co"># Tidy, labelled long table (one value per row)</span></span>
 <span><span class="fu"><a href="reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">tab</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">tab</span>, language <span class="op">=</span> <span class="st">"fr"</span><span class="op">)</span>                <span class="co"># French labels where the file has them</span></span>
+<span></span>
+<span><span class="co"># Dimension members as factors carrying the FULL member list as levels,</span></span>
+<span><span class="co"># so members filtered out of the data still show up in tables/plots</span></span>
+<span><span class="fu"><a href="reference/collect_ivt.html">collect_ivt</a></span><span class="op">(</span><span class="va">tab</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Write outputs</span></span>
 <span><span class="fu"><a href="reference/ivt_write_parquet.html">ivt_write_parquet</a></span><span class="op">(</span><span class="va">tab</span>, <span class="st">"98100241.parquet"</span><span class="op">)</span>   <span class="co"># ~17 MB</span></span>
@@ -144,7 +150,7 @@
 <div class="section level2">
 <h2 id="how-it-works">How it works<a class="anchor" aria-label="anchor" href="#how-it-works"></a>
 </h2>
-<p>See <a href="inst/notes/ivt-format.html"><code>inst/notes/ivt-format.md</code></a> for the reverse-engineered file format, and <a href="CLAUDE.html"><code>CLAUDE.md</code></a> for the code map and dev workflow.</p>
+<p>The <a href="https://mountainmath.github.io/canivt/articles/ivt-format.html">file format article</a> walks through the reverse-engineered format and how the package maps onto it; <code><a href="articles/ivt-format.html">vignette("ivt-format", package = "canivt")</a></code> is the same text offline. The authoritative byte-level spec and the byte-marker catalog ship with the package as <code>system.file("notes/ivt-format.md", package = "canivt")</code> and <code>system.file("notes/markers.md", package = "canivt")</code>. See <a href="CLAUDE.html"><code>CLAUDE.md</code></a> for the code map and dev workflow.</p>
 </div>
 <div class="section level2">
 <h2 id="license">License<a class="anchor" aria-label="anchor" href="#license"></a>

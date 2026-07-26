@@ -44,19 +44,19 @@ no product).
 ``` r
 # Lists whatever is in the configured cache directories (empty when unset):
 list_ivt_cache()
-#> # A tibble: 107 × 10
+#> # A tibble: 142 × 10
 #>    kind    key             language catalogue     title census_year topic  bytes
 #>    <chr>   <chr>           <chr>    <chr>         <chr>       <int> <chr>  <dbl>
-#>  1 ivt     0               NA       NA            NA             NA NA    1.36e8
-#>  2 ivt     1003011         NA       1003011       E910…        1991 Age,… 2.67e7
-#>  3 parquet 1003011         en       1003011       E910…        1991 Age,… 1.31e7
-#>  4 parquet 1003011         NA       1003011       E910…        1991 Age,… 1.27e7
+#>  1 ivt     1003011         NA       1003011       E910…        1991 Age,… 2.67e7
+#>  2 parquet 1003011         en       1003011       E910…        1991 Age,… 1.31e7
+#>  3 parquet 1003011         NA       1003011       E910…        1991 Age,… 1.27e7
+#>  4 ivt     1006454         NA       1006454       N910…        1991 Labo… 8.36e7
 #>  5 ivt     94F0009XDB96078 NA       94F0009XDB96… Cens…        1996 Sour… 1.17e5
 #>  6 ivt     95F0170X        NA       95F0170X      Prof…        1991 Prof… 9.26e6
 #>  7 ivt     95F0200XDB96003 NA       95F0200XDB96… Occu…        1996 Occu… 2.40e7
 #>  8 ivt     95F0223XDB96001 NA       95F0223XDB96… Tota…        1996 Immi… 3.26e6
 #>  9 ivt     95F0250XDB96001 NA       95F0250XDB96… Priv…        1996 Sour… 7.82e5
-#> 10 ivt     95f0491xcb01004 NA       SP3/NIQKF5/9… Cens…          NA NA    1.37e5
-#> # ℹ 97 more rows
+#> 10 ivt     95f0437xcb01001 NA       SP3/P0GGAN/9… Cens…          NA NA    7.10e6
+#> # ℹ 132 more rows
 #> # ℹ 2 more variables: modified <dttm>, path <chr>
 ```
