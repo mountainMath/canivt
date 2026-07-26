@@ -391,8 +391,8 @@ a declaration, not a heuristic). What it closed:
   level" sits at slots **10..19** of 32, and `table_5_c`'s 215 "Offences" skip
   slot **98**.
 - SP3_RHUXA9_801's garbage descriptor counts (3338/3386/3378/3338) read as
-  1/5/2/7 — still UNSUPPORTED (the layout needs more than the counts), but the
-  misread is now named.
+  1/5/2/7, which isolated its remaining problem to the one dimension owning no
+  `16 00` block and **onboarded** it the same day (below).
 
 Chasing the accs "Offences" labels through the declared table also turned up an
 unrelated, older bug and disproved a standing suspicion:
@@ -410,6 +410,31 @@ unrelated, older bug and disproved a standing suspicion:
   file's GEOGRAPHY through the whole specializer chain down to the loud
   last-resort net (`canivt_geo_unparsed`, English names only); it now reads
   through the quiet schema path with both `geo_name` and `geo_name_fr`.
+
+## [x] The `08 00` time table declares its count too (2026-07-25)
+
+The `16 00` mid-section's counterpart. A reference-period dimension carries a
+`[81 02][u16 alloc][08 00]` time-series member table *instead of* a `16 00`
+member-code block — never both — and it declares the same two things: how many
+members, and at which slots. `ivt_f2_time_members()` has read it since the
+`02`-generation onboarding; `ivt_f2_dim_time_declared()` now presents it to
+`ivt_f2_dim_slot_declared()` whenever the `16 00` table is absent or does not
+validate. The gate is the **dates**: accepted only when every populated slot
+resolves to a plausible date, which a run of bytes that merely looks like a flag
+array cannot do. A declaration, so quiet.
+
+This onboards **`SP3_RHUXA9_801`** (SLID low-income cut-offs, 1980–2002), the last
+UNSUPPORTED file of the SLID-era income collection: its four data dimensions
+declare 1/5/2/7 in `16 00` blocks, but "Date" reads **3386** in the descriptor
+against **23** declared annual members — a 237,020-cell cartesian in a 16.7 KB
+file, which is why the pre-flight rejected it. 1 × 5 × 2 × 7 × 23 = **1,610**
+dense cells, ledgered `TRUE,FALSE,1610`. Validated on four internal invariants of
+the value surface (LICO monotone in family size 230/230 groups, in year 70/70
+series, in community size 322/322 groups; after-tax < before-tax 805/805 cells)
+plus the published 1992-base cut-offs; detail in
+[`decode-history.md`](decode-history.md). The community-size check is the sharpest
+— those labels sort alphabetically into a different order than their ordinals, so
+it confirms the ordinals drive the nesting.
 
 ## Summary
 

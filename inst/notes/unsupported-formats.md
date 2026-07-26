@@ -27,7 +27,8 @@ carries a **u16** count: 825, not 57), 97F0020XCB2001070 (type `0x09` likewise:
 282, not 1 — which also fixed a silent mis-decode of 98-10-0174), 97-563-XCB2006072
 (the `b3` head-block rule), the 1991 profiles (the dense `0x0_` page variant),
 `ord-08035`, the `cro`/`CRO` custom extracts, 97F0015X, 97-570-X1981002,
-98-400-X2016019. **Check the descriptor first.**
+98-400-X2016019, `SP3_RHUXA9_801` (the "Date" count read 3386 against the 23
+members its `08 00` time table declares). **Check the descriptor first.**
 
 The rule when a file cannot be onboarded honestly: **ledger it
 `supported = FALSE`** in `tests/testthat/fixtures/corpus-ledger.csv` rather than

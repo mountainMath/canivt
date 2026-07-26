@@ -700,7 +700,10 @@ ivt_f2_dim_slot_declared <- function(raw, dims, slots) {
     dir <- tryCatch(ivt_f2_dim_dir(raw, k, slots), error = function(e) NULL)
     if (is.null(dir)) next
     st <- tryCatch(ivt_f2_dim_slot_table(raw, dir), error = function(e) NULL)
-    if (is.null(st) || !isTRUE(st$codes_ok)) next
+    if (is.null(st) || !isTRUE(st$codes_ok)) {
+      st <- ivt_f2_dim_time_declared(raw, dir)
+      if (is.null(st)) next
+    }
     live <- st$live; used <- st$used
     if (!length(live)) next
     dense <- identical(live, seq_along(live)) && length(used) == length(live)
@@ -714,6 +717,32 @@ ivt_f2_dim_slot_declared <- function(raw, dims, slots) {
     }
   }
   dims
+}
+
+# The same declaration for a dimension whose members are declared in the
+# TIME-SERIES member table `[81 02][u16 alloc][08 00]` instead of the `16 00`
+# member-code block. A reference-period dimension carries one or the other, never
+# both: the time table stores `alloc` pair-swapped slot flags plus one u24 date
+# per populated slot, so it names the same two things the `16 00` mid-section
+# does -- how many members there are, and at which SLOTS they sit.
+#
+# It is a declaration, not an inference, and the dates are what validate it: a
+# block is only accepted when every populated slot resolves to a plausible date
+# and `ivt_f2_time_members()` therefore returns generated labels. A run of bytes
+# that merely looks like a flag array cannot pass that.
+#
+# Why it is needed: the descriptor's count for such a dimension can be pure
+# garbage. `SP3_RHUXA9_801` (SLID low-income, 1980-2002) declares its four data
+# dimensions honestly in `16 00` blocks (1/5/2/7) but reads "Date" as **3386** --
+# a 237,020-cell cartesian in a 16.7 KB file. Its time table declares 23 annual
+# members, which is the count the pages actually fit. There are no deleted slots
+# here (used == live), so this returns the same shape the `16 00` reader does,
+# with `deleted` empty.
+ivt_f2_dim_time_declared <- function(raw, dir) {
+  tm <- tryCatch(ivt_f2_time_members(raw, dir), error = function(e) NULL)
+  if (is.null(tm) || is.null(tm$labels) || anyNA(tm$labels)) return(NULL)
+  if (length(tm$slots) != tm$count) return(NULL)
+  list(used = tm$slots, live = tm$slots, deleted = integer(0))
 }
 
 # DELETED-SLOT expansion: a dimension's physical slot EXTENT can exceed the

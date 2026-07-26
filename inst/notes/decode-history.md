@@ -516,9 +516,56 @@ this lineage):
 | `703` | 43,224 | Σ 5 quintiles == Total of quintiles | 3,597/3,597 |
 | `103` | 9,326 | Both sexes == M + F; All earners == Σ 3 work-activity; Canada == selected CMAs + other areas | 3,096/3,096; 959/959; 312/312 (all max \|d\| = 1, values in thousands) |
 
-`801` in the same collection stays honestly **UNSUPPORTED** — it is rejected
-cleanly by the new integer-overflow guard in `ivt_layout()` rather than throwing,
-and is ledgered `supported = FALSE` as a gate guard.
+`801` in the same collection was rejected cleanly by the new integer-overflow
+guard in `ivt_layout()` rather than throwing, and ledgered `supported = FALSE`
+until the `08 00` time table was wired into the count reconcile (below).
+
+### `SP3_RHUXA9_801` — the time table is the count declaration (2026-07-25)
+
+The last UNSUPPORTED file of the SLID-era income collection. Its descriptor reads
+`Geography 1 × Rural and urban 5 × Low income cut- 2 × Family size 7 × Date 3386`
+— a 237,020-cell cartesian in a **16.7 KB** file, so the pre-flight rejected it.
+The `16 00` work of the same day showed the first four counts are *declared*
+(1/5/2/7, all `codes_ok`), which isolated the problem to "Date": alone among the
+five it carries **no `16 00` block at all**. It carries an `08 00` time-series
+member table instead, and that table has been read correctly by
+`ivt_f2_time_members()` since the `02`-generation onboarding — 23 populated
+slots, dates 1980-01-01 … 2002-01-01, an annual series. The count reconcile
+simply never asked it.
+
+The fix is the same shape as the `16 00` one, not a new mechanism:
+`ivt_f2_dim_time_declared()` presents the time table's slots in the shape
+`ivt_f2_dim_slot_declared()` already consumes, and that function tries it whenever
+the `16 00` table is absent or does not validate. Both blocks declare exactly the
+same two things — how many members, and at which slots — and a dimension carries
+one or the other, never both. The gate is the **dates**: the block is accepted only
+if every populated slot resolves to a plausible date and labels are generated, which
+a run of bytes that merely looks like a flag array cannot do. Nothing is inferred,
+so it stays quiet, exactly as the `16 00` declaration does.
+
+1 × 5 × 2 × 7 × 23 = **1,610 cells**, and the store is completely dense — the table
+is a small published matrix of low-income cut-offs, not a sparse count table.
+Validation, four internal invariants over the decoded values plus one external
+check, all of which a mis-nested layout would break:
+
+| check | result |
+|---|---|
+| LICO strictly increases with family size, within every (area, base, year) | 230/230 groups |
+| after-tax LICO < before-tax LICO, same area × size × year | 805/805 cells |
+| LICO strictly increases with year (the series is CPI-indexed), within every cell | 70/70 series |
+| LICO strictly increases with community size, within every (base, size, year) | 322/322 groups |
+
+The community-size ordering is the sharpest of the four: the member labels sort
+alphabetically into a *different* order than their codebook ordinals (…100,000 to
+499,999 before …30,000 to 99,999), so the monotone result confirms the ordinals
+drive the nesting, not the labels. Externally, the 1992 column reproduces StatCan's
+published 1992-base before-tax cut-offs exactly — 1 person: 11,186 / 12,829 /
+13,787 / 13,883 / 16,186 rural → 500,000+; 4 persons: 21,050 / 24,142 / 25,945 /
+26,126 / 30,460.
+
+Ledgered `TRUE,FALSE,1610` — `strict_clean = FALSE` because the descriptor still
+resolves through the accept-all structural walk (`canivt_descriptor_lenient`),
+which is a pre-existing loud fallback of this lineage, not new.
 
 ### The detection gate must always return a verdict (2026-07-25)
 
@@ -606,9 +653,9 @@ Museums). Ledger cell counts 3 957 641 → **4 059 594** and 3 970 492 →
 than by a leading run.
 
 Two side findings. SP3_RHUXA9_801's garbage descriptor counts (3338/3386/3378/3338)
-read as 1/5/2/7 from the declared tables; the file stays UNSUPPORTED because its
-layout needs more than the counts, but the misread is now named rather than
-mysterious. And the accs "Offences" labels, long suspected of a slot misalignment,
+read as 1/5/2/7 from the declared tables, which isolated its remaining problem to
+the one dimension carrying no `16 00` block and led straight to its onboarding
+later the same day (see above). And the accs "Offences" labels, long suspected of a slot misalignment,
 were never misaligned — the declared table shows 40 used == 40 live slots
 contiguous from 1. They came out in **French on the English path** for an unrelated
 and much older reason: a member label may carry a **trailing CR/LF** (one English

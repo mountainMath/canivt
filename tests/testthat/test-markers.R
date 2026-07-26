@@ -135,6 +135,33 @@ test_that("declared slot table decodes the documented 22-bit records", {
   expect_false(ivt_f2_dim_slot_table(bad, dirb)$codes_ok)
 })
 
+# §E.1: the `81 02 <alloc> 08 00` time-series member table declares the same two
+# things the `16 00` mid-section does -- how many members, and at which slots --
+# for the reference-period dimensions that carry no `16 00` block. It is only
+# accepted when the dates resolve, which is what keeps a flag-array lookalike out.
+test_that("the time table declares count and slot positions", {
+  # 4 slots, members at slots 1, 2 and 4 (slot 3 a deleted hole). Flags are
+  # byte-pair-swapped, so the stored order is 2,1,4,3.
+  flags <- c(0x01, 0x01, 0x01, 0x00)      # swapped -> slots 1, 2, 4 populated
+  d <- as.integer(as.Date(c("1998-01-01", "1999-01-01", "2000-01-01"))) +
+    306L + 719163L                        # days since 0000-03-01
+  dates <- as.integer(c(rbind(d %% 256L, (d %/% 256L) %% 256L, d %/% 65536L)))
+  blk <- as.raw(c(0x81, 0x02, 0x04, 0x00, 0x08, 0x00, flags, dates))
+  dir <- matrix(c(0L, length(blk)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  tm <- ivt_f2_time_members(blk, dir)
+  expect_equal(tm$count, 3L)
+  expect_equal(tm$slots, c(1L, 2L, 4L))
+  expect_equal(tm$labels, c("1998", "1999", "2000"))
+  # ... and that is what the count reconcile consumes, in the slot table's shape
+  st <- ivt_f2_dim_time_declared(blk, dir)
+  expect_equal(st$live, c(1L, 2L, 4L))
+  expect_equal(st$used, st$live)
+  expect_equal(st$deleted, integer(0))
+  # dates outside the plausible range are not a time table: no declaration
+  junk <- blk; junk[(length(blk) - 8L):length(blk)] <- as.raw(0x00)
+  expect_null(ivt_f2_dim_time_declared(junk, dir))
+})
+
 test_that("declared slot tables parse byte-exactly on the bundled sample", {
   f <- locate_sample_ivt("", "98100044")
   skip_if(!nzchar(f), "no bundled sample")
