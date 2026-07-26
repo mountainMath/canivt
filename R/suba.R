@@ -152,7 +152,20 @@ ivt_f2_suba_annotate <- function(raw, d) {
   geo_count <- suppressWarnings(as.integer(d$dims[[1L]]$count))
   idx0 <- ivt_idx0(raw); n <- length(raw)
   S <- ivt_f2_suba_dir_stride(raw, idx0, geo_count, n)
-  if (is.na(S)) return(d)
+  if (is.na(S)) {
+    # In this cluster the outer directory stride is a NON-DECLARED physical
+    # constant, so the model's stride is only ever believed once the page
+    # directory confirms it. With two or more outer members the directory MUST
+    # exhibit a stride; finding none means the outer geometry is unverified and
+    # the file must not decode on the assumed one. `SP_VB0LLW_PROVSIC4dec1997`
+    # lays 11 industry windows per province at entry slots 3..13 of a 16-slot
+    # group, against the model's 10 windows from slot 0 -- it decodes, but onto a
+    # shifted industry axis whose aggregate identities miss by millions. A single
+    # outer member (`EDDTAB16`, geography count 1) has no stride to measure and
+    # so nothing to verify -- it is left alone.
+    if (!is.na(geo_count) && geo_count > 1L) attr(d, "suba_unverified") <- TRUE
+    return(d)
+  }
   model_stride <- lay0$estride[length(lay0$estride)]  # outer (geography) stride
   if (S == model_stride) return(d)              # standard model already correct
 

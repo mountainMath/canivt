@@ -111,6 +111,39 @@ ivt_f2_entry_valid <- function(raw, o, n) {
   !is.null(e) && e$marker && e$off >= 1024L
 }
 
+# An UNWRITTEN entry slot: all eight bytes zero. The directory pads every level to
+# its declared allocation, so an entry the writer never populated is a zero record
+# -- the same absence a wholly suppressed geography leaves behind.
+ivt_dir_entry_blank <- function(raw, o, n = length(raw)) {
+  if (o + 8L > n) return(FALSE)
+  rd_u32(raw, o) == 0 && rd_u16(raw, o + 4L) == 0L && rd_u16(raw, o + 6L) == 0L
+}
+
+# How many leading unwritten slots a candidate directory base may carry before we
+# stop believing it is a directory at all. Generous (8 KiB of records) but bounded,
+# so a run of header padding cannot be walked into an unrelated page marker.
+IVT_DIR_LEAD_BLANK_MAX <- 1024L
+
+# The first POPULATED entry at or after `off`, stepping over a bounded run of
+# unwritten slots. Returns NULL when the run is broken by bytes that are neither a
+# blank record nor a page entry -- that is not a directory.
+#
+# The leading slots can legitimately be blank: entry indices are positional, so a
+# dimension whose live slots start above 0 (`Table-080`'s 3-member dimension
+# occupies slots 3..5 of its declared 8) leaves every entry below its first live
+# slot unwritten. Requiring entry 0 itself to be a page -- which is what this used
+# to do -- rejected the file's own correct pointer and sent the finder to the loud
+# marker scan, or, on the decode side, to `IVT_IDX0_DEFAULT`.
+ivt_f2_dir_first_entry <- function(raw, off, n = length(raw)) {
+  for (j in 0:IVT_DIR_LEAD_BLANK_MAX) {
+    o <- off + 8L * j
+    if (o + 8L > n) return(NULL)
+    if (ivt_f2_entry_valid(raw, o, n)) return(o)
+    if (!ivt_dir_entry_blank(raw, o, n)) return(NULL)
+  }
+  NULL
+}
+
 # Header field (0-based): u16 pointer to the page-directory start. The file states
 # where the directory is, so we do not have to scan for page markers to find it.
 IVT_HDR_DIR_PTR <- 558L
@@ -127,9 +160,18 @@ ivt_f2_dir_anchor_header <- function(raw) {
   if (n < IVT_HDR_DIR_PTR + 2L) return(NULL)
   lo <- rd_u16(raw, IVT_HDR_DIR_PTR)
   if (lo <= 0L) return(NULL)
-  for (k in 0:max(0L, (n - lo) %/% 65536L)) {
+  ks <- 0:max(0L, (n - lo) %/% 65536L)
+  # Pass 1 -- entry 0 itself is a page. Every table onboarded before 2026-07-26
+  # resolves here, and taking this pass across ALL wraps first keeps the tolerant
+  # pass below from ever preferring a blank-led k to a populated one.
+  for (k in ks) {
     off <- lo + k * 65536L
     if (ivt_f2_entry_valid(raw, off, n)) return(off)
+  }
+  # Pass 2 -- the base is still the pointer; its leading slots are just unwritten.
+  for (k in ks) {
+    off <- lo + k * 65536L
+    if (!is.null(ivt_f2_dir_first_entry(raw, off, n))) return(off)
   }
   NULL
 }
@@ -171,6 +213,10 @@ ivt_f2_find_directory_impl <- function(raw) {
         "the page directory was located by a marker scan instead."))
     }
   }
+  if (is.null(anchor)) return(NULL)
+  # The anchor is the directory BASE, whose leading slots may be unwritten; the
+  # contiguous-run walk below has to start from a populated record.
+  anchor <- ivt_f2_dir_first_entry(raw, anchor, n)
   if (is.null(anchor)) return(NULL)
 
   lo <- anchor

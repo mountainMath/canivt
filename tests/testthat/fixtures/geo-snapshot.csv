@@ -111,7 +111,7 @@
 "SP3_PAWNKX_PROVSIC3-1",0,"2159d192af12493c33828308333dfbc4","canivt_suba|canivt_suba_labels|canivt_fallback",NA,NA
 "SP3_PAWNKX_CACMA3-2",0,"2159d192af12493c33828308333dfbc4","canivt_fallback",NA,NA
 "SP3_PAWNKX_PROVSIC4-2",0,"2159d192af12493c33828308333dfbc4","canivt_fallback",NA,NA
-"SP_VB0LLW_PROVSIC4dec1997",0,"2159d192af12493c33828308333dfbc4","canivt_fallback",NA,NA
+"SP_VB0LLW_PROVSIC4dec1997",0,"2159d192af12493c33828308333dfbc4","canivt_chunked_count|canivt_fallback",NA,NA
 "SP3_RHUXA9_404",30,"0b065bec0662884fe5c9355cddee5f38","canivt_geo_datadim",NA,NA
 "SP3_RHUXA9_405",13,"562d6de6076640a0f987f6d710a302d8","canivt_geo_datadim",NA,NA
 "SP3_RHUXA9_501",13,"562d6de6076640a0f987f6d710a302d8","canivt_geo_datadim",NA,NA

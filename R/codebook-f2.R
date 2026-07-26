@@ -3602,12 +3602,50 @@ ivt_f2_slot_chunked_count <- function(raw, dir) {
   part <- sizes[sizes < 256L]
   # exactly one trailing partial chunk (all its copies the same size); an exact
   # multiple of 256 leaves no partial and cannot pin the tail -> decline
-  if (!length(part) || length(unique(part)) != 1L) return(NA_integer_)
+  if (!length(part) || length(unique(part)) != 1L)
+    return(ivt_f2_slot_chunk_multiset(sizes))
   psz <- part[1L]; R <- length(part)
   if (R < 1L || length(sizes) %% R != 0L) return(NA_integer_)
   n_chunks <- length(sizes) %/% R
   if (full %% R != 0L || full %/% R != n_chunks - 1L) return(NA_integer_)
   (n_chunks - 1L) * 256L + psz
+}
+
+# The same chunk-run arithmetic where the run carries MORE THAN ONE partial
+# chunk, so the "one trailing partial pins the tail" shortcut above cannot fire.
+# `SP_VB0LLW_PROVSIC4dec1997`'s SIC-4 industry dimension writes its 1,255 members
+# as `[94][256][256][256][256][137]` -- a LEADING partial (the "Total" + first
+# division) as well as a trailing one. The run is still laid down once per
+# attribute*language copy, so the multiset of array lengths must partition into
+# `R` IDENTICAL runs: every distinct size occurs a multiple of `R` times, and the
+# per-copy count is the size-weighted sum of those quotients. `R` is taken as the
+# gcd of the multiplicities and required to be >= 2 (a bilingual codebook), which
+# is what makes the partition an over-determined measurement rather than a guess:
+# a dimension with a lone odd array, or a monolingual run, declines here and stays
+# with the shortcut's verdict. Returns the recovered count (> 256) or NA. LOUD at
+# the call site (`canivt_chunked_count`).
+ivt_f2_slot_chunk_multiset <- function(sizes) {
+  if (!length(sizes)) return(NA_integer_)
+  tab <- table(sizes)
+  mult <- as.integer(tab)
+  szv <- as.integer(names(tab))
+  R <- ivt_gcd(mult)
+  if (is.na(R) || R < 2L) return(NA_integer_)
+  per <- mult %/% R
+  if (sum(per[szv == 256L]) < 2L) return(NA_integer_)  # < 2 full chunks: not chunked
+  if (!any(per[szv < 256L] > 0L)) return(NA_integer_)  # no partial: tail unpinned
+  cnt <- sum(szv * per)
+  if (cnt <= 256L) return(NA_integer_)
+  as.integer(cnt)
+}
+
+# gcd over a vector of positive integers.
+ivt_gcd <- function(x) {
+  x <- as.integer(x[!is.na(x) & x > 0L])
+  if (!length(x)) return(NA_integer_)
+  g <- x[1L]
+  for (v in x[-1L]) { while (v) { r <- v; v <- g %% v; g <- r } }
+  as.integer(g)
 }
 
 # The member CODES of a survey-generation code-array block (`81 02 <alloc> 00
@@ -3967,8 +4005,19 @@ ivt_f2_descriptor_impl <- function(raw) {
   # the older single-area survey lineage. Rebuild the descriptor from the header slot
   # table, which is present and valid on these files. Only reached when the block is
   # genuinely absent, so it never pre-empts a real descriptor read.
-  if (is.null(D) || is.na(D) || D < 1 || D + 18 > n)
-    return(ivt_f2_descriptor_from_slots(raw))
+  # This EARLY return has to reconcile too. Every other path reaches the
+  # `ivt_f2_dim_count_reconcile()` call at the bottom of this function; returning
+  # the rebuild directly skipped it, so a dimension whose `16 00` block declares
+  # LIVE SLOTS ABOVE 1 never got its `$slots` (LFHR `Table-080` declares "Sex" at
+  # slots 4..6 of 8, and the page directory's entries sit at exactly those slots).
+  # The rebuild sizes each dimension from its codebook; the reconcile is what reads
+  # the file's declaration of WHERE those members sit.
+  if (is.null(D) || is.na(D) || D < 1 || D + 18 > n) {
+    fs <- ivt_f2_descriptor_from_slots(raw)
+    if (is.null(fs)) return(NULL)
+    fs$dims <- ivt_f2_dim_count_reconcile(raw, fs$dims)
+    return(fs)
+  }
   D <- as.integer(D)
   ndim <- rd_u16(raw, D + 16L)
 
@@ -4419,6 +4468,10 @@ ivt_f2_decodable <- function(raw) {
   # 1996 EA table 95F0200XDB96003 reads n_dim = 1026 with 4 clean dimensions),
   # and the truly incompatible variants recover no data dimensions at all.
   if (is.null(d) || length(d$dims) < 2L || length(d$dims) > 32L) return(FALSE)
+  # The type-00 sub-A cluster stores its outer directory stride nowhere; when the
+  # page directory could not confirm the modelled one (`suba.R`), the container
+  # geometry is unverified and no decode from it may be published.
+  if (isTRUE(attr(d, "suba_unverified"))) return(FALSE)
   dd <- ivt_f2_data_dims(raw)
   if (!(length(dd$counts) >= 1L && all(!is.na(dd$counts) & dd$counts >= 1L)))
     return(FALSE)

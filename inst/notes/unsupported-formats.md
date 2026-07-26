@@ -49,7 +49,7 @@ These three do not reconcile, so the gate refuses them:
 |---|---|
 | `SP3_PAWNKX_CACMA3-2` | hierarchical CMA geography, 330 industry codes — the recovered slot map does not reconcile |
 | `SP3_PAWNKX_PROVSIC4-2` | SIC-4, 1254 classes — does not reconcile |
-| `SP_VB0LLW_PROVSIC4dec1997` | `idx0` mis-detection — the page-directory anchor does not resolve, so there is no layout to reconcile against |
+| `SP_VB0LLW_PROVSIC4dec1997` | SIC-4, 1,255 classes — the outer directory stride cannot be measured, so the modelled one is unverified (see below) |
 
 Further guards, unrelated to sub-A, whose diagnosis is in the deferred section
 below — they are in the local corpus, so they carry a ledger row (2026-07-25)
@@ -57,14 +57,40 @@ rather than sitting only in prose:
 
 | key | why |
 |---|---|
-| `SP3_NAZQV2_Table-210` | stale `@558` anchor **and** irregular directory packing that does not fit the power-of-two stride model — `ivt_page_preflight()` rejects |
-| `SP3_C2YSID_Table-080` | the `@558` anchor does not resolve; `ivt_idx0()` falls to the historical constant and no directory entry validates |
 | `SP_1ODZAS_PROVSIC2june1998` | Business-Register provincial SIC — span-and-overshoot pre-flight failure that the count witnesses do not resolve |
 | `SP_FPBMMO_PRVNAIC1dec1998` | same |
 
 (`PRSIC2june2001`, `PRVNAIC3_LOC-1` and `CDCSDNAIC3dec2006`, listed here as guards
 on 2026-07-25, were onboarded 2026-07-26 — see the sparse-directory section of
-[`coverage.md`](coverage.md).)
+[`coverage.md`](coverage.md). `SP3_C2YSID_Table-080` and `SP3_NAZQV2_Table-210`,
+also listed on 2026-07-25, were onboarded 2026-07-26 by the blank-led anchor work
+— see below.)
+
+### `SP_VB0LLW_PROVSIC4dec1997` — refused on an unverifiable stride (2026-07-26)
+
+Its `@558` anchor **does** resolve (that diagnosis was the blank-led-entry bug,
+fixed 2026-07-26), and its industry count is now recovered correctly: the codebook
+writes 1,255 SIC-4 members as `[94][256][256][256][256][137]` per language copy —
+a **leading** partial chunk as well as a trailing one, which the original
+trailing-partial-only recogniser declined (`ivt_f2_slot_chunk_multiset()` now
+resolves it; the sibling `PROVSIC4-2` reports ~1,254, so the figure is corroborated
+across the lineage).
+
+It still must not decode. The page directory lays **11 industry windows per
+province at entry slots 3..13** of a 16-slot group, where the positional model
+produces 10 windows from slot 0. `ivt_f2_suba_dir_stride()` finds no stride it can
+confirm, and in this cluster the outer stride is a non-declared physical constant —
+so the modelled geometry is unverified. Decoding anyway yields 41,260 cells on an
+industry axis running 419…1254 with no `Total` member, and `Canada == Σ provinces`
+misses by millions on all 445 complete slices. `ivt_f2_suba_annotate()` therefore
+flags the descriptor `suba_unverified` and `ivt_f2_decodable()` returns `FALSE`.
+The flag is raised **only** where there are ≥ 2 outer members — a single outer
+member (`EDDTAB16`, geography count 1) has no stride to measure and nothing to
+verify.
+
+The open question is where those 3 leading window slots come from: the shape
+matches a dimension whose live slots start above 1, which is exactly what the
+`16 00` slot table declares elsewhere. That is the next thing to measure here.
 
 Onboarded siblings, for contrast: `PROVINDjune1997` (dense DIVISIONS, 2,031
 cells), `PROVSIC3june1997` (chunked, total-far, 22,581), `PROVSIC3-1` (chunked,
@@ -81,23 +107,24 @@ the format issue, not the file. Entries here have **no ledger row** because the
 file is not in the local corpus; the ones that are were promoted to ledgered
 guards above on 2026-07-25 and keep their diagnosis here.
 
-**Directory relocation / anchor failure**
+**Directory relocation / anchor failure — CLOSED 2026-07-26**
 
-- `SP3_C2YSID_Table-080` — the `@558` anchor does not resolve; `ivt_idx0()` falls
-  to the historical constant and no directory entries validate. **Ledgered guard.**
-- `SP3_NAZQV2_Table-210` (LFHR: Geography 11 × Sex 3 × Age 9 × Characteristics 10
-  × Education 10 × Timeseries 240 monthly, 1990-01…2009-12) — `@558 = 34997` is
-  **stale**; the real directory is at **35197**, findable only by the marker scan
-  (`ivt_f2_find_directory()`, which `ivt_idx0()` deliberately does not use for the
-  decode path). Even from the right base the packing is irregular (validity
-  alternates 8/12 valid entries per 32-entry block; two page sizes) and does not
-  fit the power-of-two stride model: Characteristics decodes only 4 of 10 members
-  (missing Unemployment and the rates) and the in-page Education dimension is off
-  by one (member 1 phantom-absent). This is the Table-023/Table-024 geometry. The
-  `16 00` mid-section, once suspected of biting here, is now decoded (2026-07-25)
-  and does name the slot positions -- Education level occupies slots 10..19 of 32 --
-  but the irregular packing survives it, so the file stays rejected rather than
-  routed through the scan, which would **silently mis-decode**.
+Both entries here (`SP3_C2YSID_Table-080`, `SP3_NAZQV2_Table-210`) are onboarded.
+Neither anchor was stale: `@558` was correct on both, and the *validator* was
+wrong. It required entry 0 of the candidate base to be a page, but a directory
+pads every level to its declared allocation, so the leading slots of the base can
+be legitimately **unwritten** — 96 blank entries on Table-080, 1 on Table-210.
+`ivt_f2_dir_first_entry()` now walks up to `IVT_DIR_LEAD_BLANK_MAX` all-zero
+records before giving up, and `ivt_f2_dir_anchor_header()` takes the strict pass
+across **all** wraps first so no already-working file can change.
+
+Table-210's "irregular packing" was the same bug seen downstream: with the anchor
+resolved and the descriptor's slot positions attached, all 10 Characteristics and
+all 10 Education levels decode. The one further fix needed was that
+`ivt_f2_descriptor_impl()`'s `descriptor_from_slots` early return bypassed
+`ivt_f2_dim_count_reconcile()`, so a dimension declaring live slots **above 1**
+(Table-080's "Sex" at slots 4..6 of 8 — exactly where the directory's entries sit)
+never received its `$slots`. See [`coverage.md`](coverage.md) for the validation.
 
 **Sparse-directory modelling (Business-Register provincial SIC/NAIC)**
 
@@ -119,12 +146,13 @@ guards above on 2026-07-25 and keep their diagnosis here.
   worth of pages), and the sub-A recovery does not reconcile — so the gate refuses
   them.
 
-**Layout extent / overshoot**
+**Layout extent / overshoot — CLOSED**
 
-- `02560006`, `Table_6_c-2009` — small tables whose directory overshoots
-  the modelled cartesian; the extent guard rejects them. (`701`, listed here
-  before, was onboarded 2026-07-25 as `SP3_RHUXA9_701` by the under-declared-count
-  work, as was the `103` formerly listed under anchor failure.)
+- `02560006` (184 cells) and `Table_6_c-2009` (2,072) were onboarded 2026-07-25
+  by the slot-map work and carry `supported = TRUE` ledger rows; this entry was
+  stale prose, corrected 2026-07-26. `701` went the same way as `SP3_RHUXA9_701`
+  via the under-declared-count work, as did the `103` formerly listed under anchor
+  failure.
 
 **Corrupted source**
 

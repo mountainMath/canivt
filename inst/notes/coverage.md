@@ -596,6 +596,79 @@ metadata-driven:
   the positional attribute layout, a *custom* one names the file's own combined
   columns.
 
+## [x] A directory base may open with UNWRITTEN entries (2026-07-26)
+
+The `@558` header pointer was blamed for two LFHR tables that would not decode
+(`SP3_C2YSID_Table-080`, `SP3_NAZQV2_Table-210`, ledgered guards since
+2026-07-25). It was correct on both. **`ivt_f2_dir_anchor_header()`'s validator
+was wrong**: it required entry 0 of the candidate base to be a page marker, but
+the directory pads every level to its declared allocation, so the base's leading
+slots can be legitimately unwritten — the same absence a suppressed geography
+leaves (the sparse-directory model, above, one level up). Measured leading blanks:
+**96** entries on Table-080, **1** on Table-210, **3** on `PROVSIC4dec1997`.
+(`PROVSIC2june1998` and `PRVNAIC1dec1998` have **0** — the anchor was never their
+blocker, which is why they remain guards.)
+
+`ivt_dir_entry_blank()` recognises the all-zero 8-byte record;
+`ivt_f2_dir_first_entry()` walks up to `IVT_DIR_LEAD_BLANK_MAX` (1024) of them
+before declining, bounded so a run of header padding cannot be walked into an
+unrelated page marker. `ivt_f2_dir_anchor_header()` runs the **strict pass across
+every wrap first**, so a blank-led candidate can never be preferred to a populated
+one and no previously-working file changes. `ivt_f2_find_directory_impl()` starts
+its contiguous-run growth from the first populated record.
+
+One further fix was needed downstream: `ivt_f2_descriptor_impl()`'s
+`descriptor_from_slots` early return **bypassed `ivt_f2_dim_count_reconcile()`**,
+so a dimension whose `16 00` block declares **live slots above 1** never received
+its `$slots`. Table-080 declares "Sex" at slots 4..6 of 8 — exactly where the
+directory's entries sit — and without the slot positions the walk read slots 1,2,3
+and decoded 0 cells. The rebuild sizes each dimension from its codebook; the
+reconcile is what reads the file's declaration of *where* those members sit.
+
+Both tables now decode and reconcile on their own aggregate identities:
+
+| table | shape | cells | validation |
+|---|---|---|---|
+| `SP3_C2YSID_Table-080` | Geography 11 × Sex 3 × Age 9 × Industry 19 × Job permanency 7 × Timeseries 14 (1997–2010) | 260,724 | 10 additive identities, **100 %** exact on complete slices (~189 k comparisons, max abs. residual 0.1–0.3, mean ≈ 0) |
+| `SP3_NAZQV2_Table-210` | Geography 11 × Sex 3 × Age 9 × Characteristics 10 × Education 10 × Timeseries 240 (monthly 1990-01…2009-12) | 6,187,914 | 8 additive identities at **100.000 %**, plus three *cross-dimensional* rate identities (`U/LF`, `LF/Pop`, `E/Pop`) at 100 % over ~1.8 M comparisons |
+
+Two methodological notes, both of which made the first runs look like failures:
+
+- **Restrict aggregate identities to complete slices.** Suppressed small detail
+  cells are simply absent from the store, so `total ≥ Σ parts` with a positive
+  skew — not a decode error. Requiring every part present makes the test exact.
+- **Rate members are not additive.** Table-210's Characteristics 8/9/10 are rates;
+  summing them across any dimension is meaningless. Filtering to the count
+  members (1..7) took the pass rate from 71 % to 100 %.
+
+Both warn `canivt_descriptor_from_slots` + `canivt_geo_datadim` (LFHR files carry
+no descriptor block and no geography dimension), so both are ledgered
+`strict_clean = FALSE`.
+
+**The reconcile fix also corrected a third, already-"passing" table.**
+`SP3_Q2JJJO_table_5_c-ivt-2008` (UCR) rebuilds from the slot table too, and its
+`Offences` dimension declares **215 live slots at positions 1..216 — a hole at
+slot 98** (`codes_ok = TRUE`: the slot record's predicted code lengths walk the
+member-code array byte-exactly). Reading it dense misassigned every member above
+the hole by one and dropped slot 216 entirely; the ledger's old **35,237** was a
+silent mis-decode and the correct figure is **35,504**. The 215 labels are
+non-blank and the hierarchy indentation is coherent across the hole (97 "Unsafe
+storage of firearms" → 98 "Total prostitution", a genuine level change), ending at
+"Other federal statutes". Its own `Total`-vs-parts identities are unchanged by the
+fix (identical residuals before and after) — this UCR product's totals include
+not-stated categories and are not plain sums, so the slot table is the evidence,
+not an aggregate check.
+
+The third file the anchor fix un-gated, `SP_VB0LLW_PROVSIC4dec1997`, is
+**deliberately kept refused** — its industry count is now recovered correctly
+(1,255, via `ivt_f2_slot_chunk_multiset()`: a chunk run may carry a *leading*
+partial as well as a trailing one) but the page directory's outer stride cannot be
+confirmed, so the geometry is unverified. See
+[`unsupported-formats.md`](unsupported-formats.md). Its geo-snapshot row gains a
+`canivt_chunked_count` warning class from the recovered count; `n_geo` (0 — the
+file has no geography dimension) and both content hashes are unchanged, so the
+fixture update is warning-only.
+
 ## Summary
 
 For the reference tables (98-10-0241, 98-10-0023, 1003011) ~100 % of

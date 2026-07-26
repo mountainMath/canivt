@@ -302,6 +302,24 @@ layout.
 
 ## Change log
 
+- **2026-07-26** — **A chunk RUN may open with a partial** (§E.1a). The chunked
+  member arrays are laid down once per attribute*language copy, and the
+  trailing-partial shortcut in `ivt_f2_slot_chunked_count()` assumed the only
+  short chunk is the last. `SP_VB0LLW_PROVSIC4dec1997`'s SIC-4 industry codebook
+  writes `[94][256][256][256][256][137]` per copy = **1,255** members — a
+  **leading** partial too. `ivt_f2_slot_chunk_multiset()` takes the general form:
+  the multiset of array lengths must partition into `R` identical runs (`R` = gcd
+  of the multiplicities, required >= 2), per-copy count = the size-weighted sum.
+  Reached only when the shortcut declines, so no existing count moves.
+- **2026-07-26** — **A page-directory BASE may open with unwritten entries.** Not
+  a marker change but a recognizer one: `@558` was blamed for five files and was
+  correct on all of them. The directory pads every level to its declared
+  allocation, so entry 0 of the base can be an all-zero record (96 blanks on LFHR
+  `Table-080`, 1 on `Table-210`, 3 on `PROVSIC4dec1997`).
+  `ivt_f2_dir_first_entry()` steps over a bounded run of them
+  (`IVT_DIR_LEAD_BLANK_MAX = 1024`); the strict entry-0 pass still runs across
+  every 64 KiB wrap FIRST. Onboards `Table-080` (260,724 cells) and `Table-210`
+  (6,187,914).
 - **2026-07-25** — **The descriptor record is a count ORACLE** (new §D.1). When
   the doubled-name walk loses records (2001 prose-bleed) and the descriptor is
   rebuilt from the header slot table, every dimension sizes to its codebook member

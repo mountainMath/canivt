@@ -158,6 +158,38 @@ The *rules*; the measurements and original bugs behind them are in
 - The header dir pointer **`@558` stores only the LOW 16 BITS** of the directory
   offset — `ivt_idx0()` unwraps it (smallest `+ k·65536` whose entry validates).
   The page-directory entry floor is **1024**.
+- **A directory BASE may open with unwritten entries.** The directory pads every
+  level to its declared allocation, so entry 0 of a correct base can legitimately
+  be an all-zero record (96 of them on `Table-080`) — the sparse-directory rule
+  applied one level up. `ivt_f2_dir_first_entry()` walks up to
+  `IVT_DIR_LEAD_BLANK_MAX` (1024) blanks (`ivt_dir_entry_blank()`) before
+  declining, bounded so header padding cannot be walked into an unrelated page
+  marker; `ivt_f2_dir_anchor_header()` runs the **strict pass across every wrap
+  first**, so a blank-led candidate can never beat a populated one. **A failed
+  anchor is not evidence of a stale pointer** — on all five files once blamed on
+  `@558`, the pointer was right.
+- **`ivt_f2_descriptor_impl()`'s `descriptor_from_slots` early return reconciles
+  too.** The rebuild sizes each dimension from its codebook; only
+  `ivt_f2_dim_count_reconcile()` reads the file's declaration of **where** those
+  members sit, so skipping it drops `$slots` for any dimension whose `16 00` block
+  declares **live slots above 1** (`Table-080`'s "Sex" at slots 4..6 of 8 → 0 cells
+  decoded; `table_5_c-ivt-2008`'s "Offences", 215 live slots at 1..216 with a hole
+  at 98 → silently misassigned members and one dropped).
+- **A chunk run may carry a LEADING partial, not only a trailing one.**
+  `ivt_f2_slot_chunked_count()` pins the tail on a single trailing partial; when
+  that declines, `ivt_f2_slot_chunk_multiset()` takes the general form — the
+  multiset of member-array lengths must partition into `R` **identical** runs
+  (`R` = gcd of the multiplicities, required ≥ 2, i.e. a bilingual codebook), and
+  the per-copy count is the size-weighted sum. `PROVSIC4dec1997`'s SIC-4 industry
+  codebook is `[94][256][256][256][256][137]` = 1,255. LOUD
+  (`canivt_chunked_count`); only ever reached when the trailing-partial rule
+  declines, so no existing verdict moves.
+- **In the type-00 sub-A cluster the outer directory stride is non-declared, so an
+  unmeasurable stride is a REFUSAL.** With ≥ 2 outer members the page directory
+  must exhibit a stride; when `ivt_f2_suba_dir_stride()` finds none the modelled
+  geometry is unverified, `ivt_f2_suba_annotate()` sets `suba_unverified` and
+  `ivt_f2_decodable()` returns `FALSE`. A single outer member (`EDDTAB16`) has no
+  stride to measure and is left alone.
 - **`ivt_f2_decodable()` = descriptor + layout + `ivt_page_preflight()`** — the whole
   detection gate. The pre-flight checks extent within the entry size, exact fit for
   `b2 == 0` pages, presence count ≤ the page's real cell capacity, and that the
@@ -312,6 +344,12 @@ and member-code lengths, so `ivt_f2_dim_slot_expand()` is now only a fallback.
 - **type-00 sub-A industry labels are PROVISIONAL** (`R/suba.R`) — reconciliation
   validates sums, not code→member assignment, and no ground truth exists. Three
   files in that cluster stay UNSUPPORTED.
+- **`PROVSIC4dec1997`'s 3 leading window slots** — its industry count is now read
+  correctly (1,255) but the page directory lays **11 windows per province at entry
+  slots 3..13** of a 16-slot group, against the model's 10 from slot 0. The shape
+  matches a dimension whose live slots start above 1, which is exactly what a
+  `16 00` slot table declares elsewhere — that is the next thing to measure. Until
+  then the file stays refused on the unverifiable-stride rule.
 - **`Rcpp` fast path** — only if pure-R decode becomes a bottleneck (~5 s for 7.5M
   cells is fine).
 

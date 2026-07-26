@@ -1126,3 +1126,41 @@ original bugs behind each rule.
   consecutively). The legacy `ivt_geography_count()` (0x1000 stride, since removed)
   returned 348 here only as an artefact of striding a directory whose real
   per-geography stride is 0x2000.
+- **A directory base may open with UNWRITTEN entries** (2026-07-26). The `@558` anchor
+  validator required entry 0 of a candidate base to be a page marker. But the directory
+  pads every level to its declared allocation, so the *base's own* leading slots can be
+  legitimately unwritten — the sparse-directory model (2026-07-26) applied one level up.
+  Measured leading blanks: 96 entries (`Table-080`), 1 (`Table-210`), 3
+  (`PROVSIC4dec1997`); `PROVSIC2june1998` and `PRVNAIC1dec1998` have 0, which is how we
+  know the anchor was never *their* blocker. The bound (`IVT_DIR_LEAD_BLANK_MAX = 1024`)
+  keeps a run of header padding from being walked into an unrelated page marker, and the
+  strict pass runs across **all** wraps before the tolerant one so a blank-led `k` can
+  never be preferred to a populated one. Table-080's directory read from 1920 then gives
+  594 non-zero entries, every one a valid `88 01 20 08` page marker, exactly
+  `prod(ent_counts)`.
+- **The `descriptor_from_slots` early return must reconcile too** (2026-07-26). Every
+  other path in `ivt_f2_descriptor_impl()` reaches `ivt_f2_dim_count_reconcile()` at the
+  bottom; returning the rebuild directly skipped it, so a dimension whose `16 00` block
+  declares **live slots above 1** never got its `$slots`. `Table-080` declares "Sex" at
+  slots 4..6 of 8 — exactly where the directory's entries sit — so `slot_pos` stayed NULL,
+  the Sex level walked slots 1,2,3 (all zero entries), and the file decoded **0 cells**
+  while looking structurally fine. The rebuild sizes each dimension from its codebook;
+  the reconcile is what reads the file's declaration of *where* those members sit.
+- **A chunk run may carry a LEADING partial, not only a trailing one** (2026-07-26).
+  `ivt_f2_slot_chunked_count()` pinned the tail on "exactly one partial chunk size", which
+  `SP_VB0LLW_PROVSIC4dec1997` breaks: its SIC-4 industry codebook is
+  `[94][256][256][256][256][137]` per language copy = 1,255 members (the sibling
+  `PROVSIC4-2` reports ~1,254, corroborating). `ivt_f2_slot_chunk_multiset()` takes the
+  general form — the multiset of array lengths must partition into `R` identical runs, `R`
+  = gcd of the multiplicities and required to be ≥ 2 — which is what makes it a
+  measurement rather than a guess. It is only ever reached when the trailing-partial rule
+  declines, so no existing verdict moves.
+- **Aggregate-identity validation has two standing traps.** (i) Suppressed small cells are
+  *absent* from the store, so `total ≥ Σ parts` with a positive skew — restrict every
+  identity to slices where all parts are present or it will read as a decode error
+  (Table-080 first ran 20–60 % "exact", actually 100 %). (ii) **Rate members are not
+  additive** across any dimension: Table-210's Characteristics 8/9/10 are rates, and
+  including them held the pass rate at 71 % until they were filtered out. The strongest
+  check that remains is cross-dimensional: recomputing `U/LF`, `LF/Pop`, `E/Pop` from the
+  count members and matching the file's own published rate members (100 % over ~1.8 M
+  comparisons).
