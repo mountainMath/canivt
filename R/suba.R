@@ -62,6 +62,21 @@
 # reported. Only entries below `2 * extent` are ever scanned, so the candidate
 # sweep stays cheap.
 #
+# A written page whose presence record is entirely zero carries NO cells, so it
+# cannot witness where the members sit -- it is the same absence as an unwritten
+# entry slot, one level down (the sparse-directory model). Such stubs are counted
+# out of the tiling measurement below, because leaving them in makes the
+# geographies that carry one disagree with the ones that do not:
+# `PRVNAIC1dec1998` writes three of them at window slot 8 (provinces 5, 6 and 12
+# only; size 260 == the 4-byte marker + the 256-byte presence record + no values),
+# which is the whole reason its stride of 16 would not confirm. Presence records
+# are a fixed 2048 bits on every family, so the span is known without a layout.
+ivt_f2_page_blank <- function(raw, off, size, n = length(raw)) {
+  if (is.null(off) || is.na(off) || is.null(size) || is.na(size)) return(FALSE)
+  if (size < 4L + IVT_PRES_BYTES || off + 4L + IVT_PRES_BYTES > n) return(FALSE)
+  !any(as.integer(raw[(off + 5L):(off + 4L + IVT_PRES_BYTES)]) != 0L)
+}
+
 # Returns `list(stride, windows)` -- `windows` the 0-based window slots every
 # geography populates -- or NULL when no clean tiling is found.
 ivt_f2_suba_dir_stride <- function(raw, idx0, geo_count, n = length(raw)) {
@@ -75,7 +90,9 @@ ivt_f2_suba_dir_stride <- function(raw, idx0, geo_count, n = length(raw)) {
     add <- integer(lim - scanned); na <- 0L
     for (k in scanned:(lim - 1L)) {
       en <- ivt_dir_entry(raw, idx0 + k * 8L, n)
-      if (!is.null(en) && en$marker) { na <- na + 1L; add[na] <- k }
+      if (!is.null(en) && en$marker && !ivt_f2_page_blank(raw, en$off, en$size, n)) {
+        na <- na + 1L; add[na] <- k
+      }
     }
     hits <<- c(hits, add[seq_len(na)]); scanned <<- lim
     invisible(NULL)
@@ -160,6 +177,49 @@ ivt_f2_suba_industry_codes <- function(raw, dim_idx, slots_tbl) {
   list(detail = codes[ord],
        detail_labels = unlist(code_label[codes[ord]], use.names = FALSE),
        has_total = has_total)
+}
+
+# The industry dimension's member labels read as the BILINGUAL codebook writes
+# them: every member-value array in the block directory, in directory order,
+# taken in EN/FR PAIRS. The codebook chunks a long axis, and it writes each chunk
+# twice -- English array then its French copy (`ivt_f2_dim_dict_en_first()` reads
+# the dictionary's field order, so the language assignment is structural, not a
+# content guess). A pair is trusted only as far as the two copies AGREE: the
+# shorter length wins, which is what discards a stale record the writer left in
+# one language only (`PRVNAIC1dec1998`'s second chunk carries "Total" +
+# "00 - Not Classified" in both, plus an orphan 6-digit NAICS leaf in English
+# alone). An odd number of arrays means the pairing is not what this codebook
+# does, and the reader declines rather than guess.
+#
+# Unlike `ivt_f2_suba_industry_codes()` this counts and orders members WITHOUT
+# parsing their codes, which is the only thing that works on a NAICS axis: the
+# aggregate sectors are coded as ranges ("31-33", "44-45", "48-49"), so the
+# numeric-token rule silently drops three of twenty. Returns `list(en, fr)` in
+# codebook order, or NULL.
+ivt_f2_suba_member_arrays <- function(raw, dim_idx, slots_tbl) {
+  dir <- tryCatch(ivt_f2_dim_dir(raw, dim_idx, slots_tbl), error = function(e) NULL)
+  if (is.null(dir)) return(NULL)
+  arrs <- list()
+  for (r in seq_len(nrow(dir))) {
+    e <- tryCatch(ivt_f2_dir_entry_members(raw, dir[r, "off"], dir[r, "len"]),
+                  error = function(e) NULL)
+    if (is.null(e) || !is.character(e$values)) next
+    v <- trimws(e$values[!is.na(e$values)])
+    # separators, blank framing runs and the ordinal (Code) array are not members
+    if (!length(v) || any(!nzchar(v)) || ivt_f2_is_ordinal(v)) next
+    arrs[[length(arrs) + 1L]] <- v
+  }
+  if (!length(arrs) || length(arrs) %% 2L != 0L) return(NULL)
+  en_first <- isTRUE(tryCatch(ivt_f2_dim_dict_en_first(raw, dir), error = function(e) NA))
+  en <- fr <- character(0)
+  for (i in seq(1L, length(arrs), by = 2L)) {
+    a <- arrs[[i]]; b <- arrs[[i + 1L]]
+    m <- min(length(a), length(b))
+    if (!en_first) { t <- a; a <- b; b <- t }
+    en <- c(en, a[seq_len(m)]); fr <- c(fr, b[seq_len(m)])
+  }
+  if (!length(en)) return(NULL)
+  list(en = en, fr = fr)
 }
 
 # The sub-A recognizer + annotator. Returns `d` UNCHANGED unless every gate holds:
@@ -255,8 +315,10 @@ ivt_f2_suba_annotate <- function(raw, d) {
   # whose detail industries sum EXACTLY to the total page per geography x
   # employment-size; the real grand total dominates every cell, so among the
   # survivors pick the total slot with the largest aggregate. If none reconciles, the
-  # file is left UNSUPPORTED.
-  if (is.null(ic) || !ic$has_total) return(d)
+  # file is left UNSUPPORTED -- but not before the SPARSE-SLOT case below is tried,
+  # so `chunked()` returns NULL rather than the descriptor on every decline.
+  chunked <- function() {
+  if (is.null(ic) || !ic$has_total) return(NULL)
   D <- length(ic$detail)
   offset <- min(occ)                                  # 1-based lowest occupied slot
   hi <- max(occ)
@@ -299,7 +361,7 @@ ivt_f2_suba_annotate <- function(raw, d) {
     agg <- recon(cd$det, cd$tot)
     if (!is.na(agg) && agg > best_agg) { best <- cd; best_agg <- agg }
   }
-  if (is.null(best)) return(d)
+  if (is.null(best)) return(NULL)
   total_first <- best$tot == offset
   # provisional member labels in member-id order (matching `best$pos`): the total
   # takes the end the reconciliation placed it at.
@@ -309,6 +371,55 @@ ivt_f2_suba_annotate <- function(raw, d) {
   d$dims[[2L]]$slots <- as.integer(best$pos)
   attr(d, "suba") <- list(stride = S, kind = "chunked", provisional = TRUE,
                           total_first = total_first, labels = labels)
-  emit("chunked SIC/NAIC", TRUE)
+  d
+  }
+  dd <- chunked()
+  if (!is.null(dd)) { emit("chunked SIC/NAIC", TRUE); return(dd) }
+
+  # SPARSE-SLOT case: the members do not form a contiguous run at ALL, so no
+  # (offset, length) placement above can describe them. `PRVNAIC1dec1998` lays its
+  # 20 NAICS sectors at slots 1..20 and then puts its grand "Total" and its
+  # "00 - Not Classified" member alone in window 10, at slots 1363 and 1364 -- a
+  # 1,342-slot gap. Its member codes cannot even be counted (`31-33`, `44-45` and
+  # `48-49` are NAICS RANGES, not numeric tokens), so the code scan reports 19 of
+  # 22.
+  #
+  # There is nothing left to guess when the file states the member count TWICE and
+  # the two witnesses agree: the codebook's bilingual member arrays
+  # (`ivt_f2_suba_member_arrays()`, EN and FR agreeing record for record) and the
+  # number of occupied slots the measured stride produced. When those are equal the
+  # members ARE the occupied slots in ascending order -- the same storage-order
+  # convention the chunked case assumes, with no offset and no alignment left free.
+  # The reconciliation is correspondingly stricter: EXACTLY ONE slot must equal the
+  # sum of all the others over every geography x employment-size group, and its
+  # codebook label must be the one the codebook calls the total. That second
+  # clause is the only LABEL check anywhere in this module -- a shifted assignment
+  # would put a sector's name on the reconciling slot -- so it is required, not
+  # merely preferred.
+  sparse <- function() {
+    ma <- ivt_f2_suba_member_arrays(raw, 2L, slots_tbl)
+    if (is.null(ma) || length(ma$en) != length(occ)) return(NULL)
+    ok <- integer(0)
+    for (i in seq_along(occ)) {
+      t <- occ[i]
+      tot <- probe[probe$ind == t, ]
+      det <- probe[probe$ind != t, ]
+      if (!nrow(tot) || !nrow(det)) next
+      ts <- aggregate(val ~ g + emp, tot, sum)
+      ds <- aggregate(val ~ g + emp, det, sum)
+      mm <- merge(ds, ts, by = c("g", "emp"), suffixes = c(".d", ".t"))
+      if (nrow(mm) == nrow(ts) && nrow(mm) == nrow(ds) && all(mm$val.d == mm$val.t))
+        ok <- c(ok, i)
+    }
+    if (length(ok) != 1L) return(NULL)
+    if (!grepl("^(total|ensemble)\\b", ma$en[ok], ignore.case = TRUE)) return(NULL)
+    d$dims[[2L]]$count <- length(occ)
+    d$dims[[2L]]$slots <- as.integer(occ)
+    attr(d, "suba") <- list(stride = S, kind = "sparse", provisional = TRUE,
+                            labels = ma$en, labels_fr = ma$fr)
+    d
+  }
+  dd <- sparse()
+  if (!is.null(dd)) { emit("sparse NAICS slots", TRUE); return(dd) }
   d
 }

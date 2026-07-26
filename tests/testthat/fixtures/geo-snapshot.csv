@@ -129,6 +129,6 @@
 "SP_X8ECKY_PRNAIC6dec2000",14,"94bdf0ceedc824b2f5206d5ca9de174b","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
 "SP3_C2YSID_Table-080",11,"74cda1e44ea4a135e9b1ca6d2a7b6cf9","canivt_descriptor_from_slots|canivt_fallback|canivt_geo_datadim",NA,NA
 "SP_1ODZAS_PROVSIC2june1998",0,"2159d192af12493c33828308333dfbc4","canivt_suba|canivt_suba_labels|canivt_fallback",NA,NA
-"SP_FPBMMO_PRVNAIC1dec1998",0,"2159d192af12493c33828308333dfbc4","canivt_fallback",NA,NA
+"SP_FPBMMO_PRVNAIC1dec1998",0,"2159d192af12493c33828308333dfbc4","canivt_suba|canivt_suba_labels|canivt_fallback",NA,NA
 "SP_ORYADY_PRSIC2june2001",14,"c89e74890adf359c204f02c31025aa9c","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
 "SP3_PAWNKX_PRVNAIC3_LOC-1",14,"9574287d5901f97f88d8c8135f5ab625","canivt_descriptor_lenient|canivt_chunked_count|canivt_geo_by_name|canivt_geo_datadim",NA,NA

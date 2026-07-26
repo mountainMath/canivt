@@ -69,7 +69,7 @@ Key semantics:
 | `codebook-f2.R` | **the unified codebook.** `ivt_f2_geo_read(raw, full)` is the single geography dispatcher; `ivt_f2_geo_light()` (metadata default) and `ivt_f2_geographies()` (`geo_attributes = TRUE`) are thin wrappers. Stage 1 `ivt_f2_geo_entries()` locates the geo block directory once and exposes lazy memoized `records`/`strict`/`values` accessors shared by all six readers. Then an ordered specializer chain: flow → inline → schema → custom → bare; a complete uid array wins for big chunked DGUID tables; else Stage 3 `ivt_f2_geo_combined()` is the last-resort net (`canivt_geo_unparsed`, loud). Column identity is **metadata-driven** where declared — the `81 02` field dictionary (`ivt_f2_geo_field_schema()` + `ivt_f2_geo_field_roles()`) maps runs to `geo_name`/`geo_name_fr`/`geo_uid` by the file's own field names; only without a matching dictionary does it fall to content heuristics. Readers: `ivt_f2_geo_simple()` (cheap names+DGUIDs, schema-addressed), `ivt_f2_geo_attributes()` / `ivt_f2_geo_attrs_dir()` (the **primary** attribute reader — every attribute read positionally, per group `[display + schema fields]` × EN-then-FR runs, ordinals dropped, per-member footnote text blobs skipped via `ivt_f2_dir_is_text_block()`; stride path `ivt_f2_geo_root_dir()` retained but unreached), `ivt_f2_geo_inline()` (combined-string blocks: `"name (code) [type] flag [(pct%)]"` for 1991/2006/2011/2016, and the code-first `"<code> - <name>"` of the Business-Register CD/CSD lineage; runs where no schema is declared **or** the declared one is a `custom` field dictionary naming the file's own combined columns), `ivt_f2_geo_flow_dir()` / `ivt_f2_flow_sides()` (**origin-destination commuting flows**, geo type `0x0f`: a flow decodes as **two** geographies — the file's POR/POW schema → `geo_res_*`/`geo_work_*`, pair kept as `geo_uid`; anchored on the uid array, labels joined back by code), `ivt_f2_dim_member_labels()` (data-dim labels via the doubled-name marker). Two loud name fills guarantee a `geo_name` for every member: `ivt_f2_inline_name_subtract()` and `ivt_f2_geo_fill_label()` (both fill NAs only). Snapshot-guarded by `fixtures/geo-snapshot.csv`. **Slugs** (`ivt_dim_slug()`) are generic: lower-cased leading word of the dimension name, made unique. Also the slot declarations: `ivt_f2_time_members()` (`08 00` time table, fed to the count reconcile by `ivt_f2_dim_time_declared()`) and `ivt_f2_dim_slot_table()` (the `16 00` block's 22-bit per-slot records → `live`/`used`/`deleted`/`code_len`/`codes`/`codes_ok`), feeding `ivt_f2_dim_slot_alloc()`. |
 | `read-f2.R` | **unified metadata + tidy**: `ivt_f2_metadata()`; `ivt_f2_vl_pairs()` + `ivt_f2_dim_name()` (header Variable List names, matched to the descriptor by count); `ivt_f2_dimensions()` (per-dim `name/count/type/is_geography/members`); `ivt_f2_footnotes()` (table + dimension + member notes, renumbered by `ivt_f2_footnote_finalize()`, each with `scope`/`dimension`/`member_id`/`member_refs`) + `ivt_f2_legacy_footnotes()` / `ivt_f2_note_refs()` (the legacy `(N)` markers in labels); `ivt_f2_tidy()`; `ivt_data_colnames()`. |
 | `codebook.R` | shared codebook primitives: `ivt_find_member_blocks()` Pascal-run scanner, `ivt_header_text()` / `ivt_table_info()`, `ivt_footnote_texts()`. |
-| `suba.R` | the **type-00 sub-A** provincial Business-Patterns module (`ivt_f2_suba_annotate()`): measures the non-declared directory stride from the page directory, recovers the under-declared industry count from codebook chunks, and **commits only if the decode reconciles** (industry-Total == Σ detail, or Canada == Σ provinces) — else the file stays honestly UNSUPPORTED. Industry **labels are PROVISIONAL** (`canivt_suba_labels`, loud): reconciliation validates sums, not the code→member assignment. |
+| `suba.R` | the **type-00 sub-A** provincial Business-Patterns module (`ivt_f2_suba_annotate()`): measures the non-declared directory stride from the page directory (`ivt_f2_suba_dir_stride()`, ignoring blank pages via `ivt_f2_page_blank()`), recovers the under-declared industry count from codebook chunks (`ivt_f2_suba_industry_codes()`) or from the bilingual member arrays (`ivt_f2_suba_member_arrays()`), and **commits only if the decode reconciles** (industry-Total == Σ detail, or Canada == Σ provinces) — else the file stays honestly UNSUPPORTED. Three placement cases: `dense`, `chunked` (contiguous run + total) and `sparse` (members == the occupied slots). Industry **labels are PROVISIONAL** (`canivt_suba_labels`, loud): reconciliation validates sums, not the code→member assignment. |
 | `read.R` | public `read_ivt()`, `ivt_metadata()`, `ivt_tidy()`, `print.ivt` — one path for all families; `ivt_family()` detector + `ivt_is_supported()` gate. `ivt_tidy(dim_names=)` names columns by slug (default) or full label; `x$cells` always keeps slugs (the naming is an output-layer rename shared with `ivt_members()`). `ivt_tidy(language=)` gives EN (default) or FR labels, falling back per column. **Parquet paths carry a language marker** (`<key>_en/_fr.parquet`); `ivt_members_path()` strips it so one `_members.parquet` sidecar serves both. `ivt_parquet_language()`, `label_ivt_columns()`. Geography columns keep `geo_*` names; `geo_uid` is language-neutral. |
 | `collect.R` | **factor-level context**: `ivt_members(x)` (one row per tidy column × member with `member_id`/`ordinal`/`label`/`level`/`depth`); `collect_ivt(x, members, geography)` converts dimension columns to factors whose levels are the **full** member list in ordinal order (filtered-out members stay as levels; geography opt-in). Levels travel as a `<name>_members.parquet` sidecar. Ordinals from `ivt_f2_dim_dir_ordinals()` (must be a permutation of `1..count`). |
 | `catalogue.R` | scrapes the StatCan census datasets index into a product catalogue (`statcan_ivt_years()`, `statcan_ivt_catalogue()`, `statcan_ivt_resolve_url()`), cached as Parquet. Needs `rvest` + `xml2`. |
@@ -201,6 +201,23 @@ The *rules*; the measurements and original bugs behind them are in
   (`EDDTAB16`) has no periodicity to measure and is left alone. Placements —
   including the **detached total** (total alone in window 0, detail run
   right-aligned) — are always adopted on **exact reconciliation**, never on shape.
+- **A written page whose presence record is all zero is an ABSENCE, not a witness**
+  (`ivt_f2_page_blank()`). It carries no cells, so it says nothing about where the
+  members sit — the same absence as an unwritten entry slot, one level down. Such
+  entries are counted out of the sub-A tiling measurement: `PRVNAIC1dec1998` writes
+  three stubs (window slot 8, provinces 5/6/12; size 260 = marker + 256-byte
+  presence + no values) that otherwise make those groups' residue sets ragged so
+  that **no** stride confirms.
+- **Sub-A members need not be contiguous.** Where the codebook's **bilingual**
+  member arrays (`ivt_f2_suba_member_arrays()`: directory order, EN/FR pairs, each
+  pair trusted only as far as the two copies agree in length) and the count of
+  occupied slots agree, the members ARE the occupied slots in ascending order —
+  nothing left to guess. `PRVNAIC1dec1998` puts 20 NAICS sectors at slots 1..20 and
+  `Total` + `00 - Not Classified` alone in window 10 at 1363/1364. Its members
+  cannot be counted by code (`31-33`, `44-45`, `48-49` are NAICS **ranges**, not
+  numeric tokens), so this path never parses codes. Gate: **exactly one** slot
+  equals the sum of all the others over every group, **and** its codebook label is
+  the total — the only LABEL check in `suba.R`.
 - **`ivt_f2_decodable()` = descriptor + layout + `ivt_page_preflight()`** — the whole
   detection gate. The pre-flight checks extent within the entry size, exact fit for
   `b2 == 0` pages, presence count ≤ the page's real cell capacity, and that the
@@ -357,11 +374,13 @@ and member-code lengths, so `ivt_f2_dim_slot_expand()` is now only a fallback.
   Manual leaf-code evidence (855/855 populated members are SIC leaves at shift 0;
   shifts ±1/±2 scatter 272–318 onto aggregate codes) supports the current
   assignment but the parser deliberately does not run it, so the loud flag stays.
-  One file in the cluster (`PRVNAIC1dec1998`) stays UNSUPPORTED — its pages sit at
-  window slots 0 **and 10**, neither a contiguous run nor a detached total, so no
-  stride confirms. The `PROVSIC4dec1997` leading-window backlog item is **closed**
-  (2026-07-26): there is no `16 00` slot table anywhere in this cluster; the
-  directory's own tiling is the witness, and four files onboarded.
+  (On the sparse-slot path the TOTAL member's label *is* verified by the gate; the
+  rest of the axis stays provisional.) The `PROVSIC4dec1997` leading-window backlog
+  item is **closed** (2026-07-26): there is no `16 00` slot table anywhere in this
+  cluster; the directory's own tiling is the witness, and four files onboarded.
+  `PRVNAIC1dec1998` followed the same day via the blank-page + sparse-slot rules —
+  **the corpus refusal ledger is now empty** (`unsupported-formats.md`), with no
+  gate relaxed to get there.
 - **`Rcpp` fast path** — only if pure-R decode becomes a bottleneck (~5 s for 7.5M
   cells is fine).
 

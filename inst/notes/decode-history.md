@@ -746,8 +746,9 @@ suite FAIL 0 / PASS 1144 with the two long-standing loud fallbacks (98-10-0662's
 synthetic-aggregate `geo_name` fill and `ord-08035`'s inline name subtraction).
 
 The five that still fail the gate are ledgered `supported = FALSE` (`Table-080`,
-`PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1`; the
-last two were onboarded 2026-07-26, see "Sparse directories" below) — see
+`PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1`; all
+five were onboarded on 2026-07-26 — see "Sparse directories", the directory-tiling
+entry and the blank-page/sparse-slot entry below) — see
 [`unsupported-formats.md`](unsupported-formats.md). `test-corpus.R` now asserts
 that **every** corpus folder holding an `.ivt` has a ledger row, so a file cannot
 again sit un-regression-tested.
@@ -908,7 +909,9 @@ differing CDs carrying unlisted CSD detail (max 1,663), not misalignment.
 Still refused: `PROVSIC2june1998` and `PRVNAIC1dec1998`, whose directories put
 each province's pages at slot 0 **plus slot 10** (or 0 and 5) of a 16-entry
 stride, where the positional model produces consecutive window slots — a genuinely
-different packing, not a count problem.
+different packing, not a count problem. (Both onboarded later the same day: the
+first by the directory-tiling stride rule, the second by the blank-page and
+sparse-slot rules — see the two entries at the foot of this file.)
 
 ## Milestones — how the architecture arrived
 
@@ -1249,9 +1252,91 @@ that regression. Both read sites now pass `exact = TRUE` (`R/decode.R`,
 its member range, since the total-far sweep reuses one range across up to a few
 hundred candidates.
 
-Still refused: `PRVNAIC1dec1998`, whose pages sit at window slot 0 **plus slot 10**
-— neither a contiguous run nor a detached total, so no stride confirms and the
-geometry stays unverified. `ivt_f2_suba_dir_stride()` is unit-tested on synthetic
-directories (`tests/testthat/test-suba.R`) covering the blank-led run, the
+Still refused at that commit: `PRVNAIC1dec1998`, whose pages sit at window slot 0
+**plus slot 10** — neither a contiguous run nor a detached total, so no stride
+confirmed and the geometry stayed unverified. Closed the same day; see below.
+`ivt_f2_suba_dir_stride()` is unit-tested on synthetic directories
+(`tests/testthat/test-suba.R`) covering the blank-led run, the
 resumes-past-extent rejection, empty-geography tolerance, ragged residues and the
 single-outer-member decline.
+
+### `PRVNAIC1dec1998` — a blank page and a sparse axis (2026-07-26)
+
+The corpus's **last** `supported = FALSE` row, onboarded at **2,814 cells**. The
+refusal ledger is now empty, and nothing in the gate was relaxed to get there:
+`ivt_f2_decodable()` is untouched and the sub-A reconciliation gate is *stricter*
+on this path than on the chunked one.
+
+Two facts, found by measurement, had kept it out.
+
+**The three "extra" entries were stubs.** Ten of the thirteen provinces populate
+window slots `{0, 10}` of their 16-slot group; provinces 5, 6 and 12 populate
+`{0, 8, 10}`. Ragged residue sets, so the tiling rule declined and the file was
+refused as unverifiable. But the residue-8 pages decode to **nothing**: marker
+`82 01 00 08`, size 260 = 4 + the 256-byte presence record + no value run, presence
+popcount **0**. A page with no present bits carries no cells, so it cannot witness
+where the members sit — it is exactly the absence an unwritten entry slot is, one
+level down. Once `ivt_f2_page_blank()` counts them out the tiling is the plain
+`{0, 10}` at stride 16 that every province shares. This is the fourth time in this
+cluster that "the parser can't reach it" turned out to be "we read a correct
+directory wrongly."
+
+Blast radius, measured before anything else was touched: two other files carry one
+blank window each (`PROVSIC2june1998` and `CACMA3-2`, both slot 13, both dropping
+from `{0,13}` / `{0,1,2,3,13}` to `{0}` / `{0,1,2,3}`). Neither verdict nor any
+cell count moves — every one of the eleven other cluster files stays byte-identical
+to its ledger row.
+
+**The members are not contiguous, and cannot be counted by their codes.** Every
+placement the chunked case enumerates is an `(offset, length)` run plus a total.
+This file's 20 NAICS sectors sit at slots 1..20 and then `Total` and
+`00 - Not Classified` sit alone in window 10 at slots **1363 and 1364** — a
+1,342-slot gap. And `ivt_f2_suba_industry_codes()`, which counts members by taking
+each label's leading numeric token, reports 19 of 22: three of the twenty sectors
+are NAICS **ranges** (`31-33`, `44-45`, `48-49`), which are not numeric tokens, and
+it picks up a stray 6-digit leaf on top. The SIC vintages never exposed that because
+SIC divisions are single tokens.
+
+So the sparse-slot case does not parse codes at all. It reads the dimension's
+member arrays as the bilingual codebook writes them — in directory order, in EN/FR
+**pairs**, each pair trusted only as far as the two copies agree in length:
+
+```
+[5]  EN  20 records   "11 - Agriculture, Forestry, Fishing and Hunting", ...
+[7]  FR  20 records   "11 - Agriculture, foresterie, pêche et chasse", ...
+[16] EN   3 records   "Total", "00 - Not Classified", "523998 - All Other Misc..."
+[20] FR   2 records   "Total", "00 - Non classé"
+```
+
+`min(3, 2) = 2` discards the orphan English-only record (a stale 6-digit leaf the
+writer left behind), giving **22** members with both languages. The occupied slots
+under the measured stride number **22** as well. Two independent witnesses agreeing
+leaves nothing to guess: the members *are* the occupied slots in ascending order —
+no offset, no alignment, no candidate sweep. Language assignment stays structural
+(`ivt_f2_dim_dict_en_first()` reads the dictionary field order; this lineage uses
+`English Label` / `Etiquette`).
+
+The gate is tightened to match. Where the chunked case keeps the best-reconciling
+candidate, the sparse case requires that **exactly one** slot equal the sum of all
+the others over every geography × employment-size group — and that its codebook
+label be the one the codebook calls the total. That second clause is the only place
+in `suba.R` where a LABEL is checked rather than assumed: a shifted assignment puts
+a sector's name on the reconciling slot. Slot 1363 is the unique solution and its
+label is `Total`.
+
+Validation, all four identities exact over every cell of the table: sector `Total`
+== Σ other 21 (143/143 groups, maxdiff 0); `Canada` == Σ 12 provinces (235/235,
+maxdiff 0); `Total (A)` == `Indeterminate (B)` + `Subtotal (A − B)` (286/286); and
+`Subtotal (A − B)` == Σ 8 size classes (286/286). Cross-file against
+`PRSIC1dec1999`, which shares the universe and decodes by a path that never touches
+`suba.R`: Canada 1,795,130 (Dec 1998) → 1,996,322 (Dec 1999), every province moving
+by a plausible one-year rate, and the 1999 file carrying a fourteenth geography —
+**Nunavut**, created April 1999, correctly absent from the 1998 file, with NWT
+splitting 3,065 → 2,558 + 652. Labels stay PROVISIONAL for the rest of the axis.
+
+An incidental tightening while wiring the labels through: the `suba$labels`
+override in `ivt_f2_dimensions()` applied to *any* non-geography dimension whose
+count happened to match, and now applies only to the industry dimension. The French
+copy is carried through the same way (`suba$labels_fr`), which is what gives this
+file bilingual member labels at all — its `ivt_f2_dim_dir_labels()` read returns
+NULL for all three dimensions.

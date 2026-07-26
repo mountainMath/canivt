@@ -197,13 +197,18 @@ ivt_f2_dimensions <- function(raw) {
     # this GUARANTEES the labels align with the decoded member ids (the positional
     # reader may order its labels differently from the reconciled slot map).
     suba <- attr(d, "suba", exact = TRUE)   # not the `suba_unverified` flag
-    if (!is_geo && !is.null(suba) && !is.null(suba$labels) &&
-        length(suba$labels) == dim$count)
-      members <- suba$labels
+    suba <- if (i == 2L && !is.null(suba) && !is.null(suba$labels) &&
+                length(suba$labels) == dim$count) suba else NULL
+    if (!is.null(suba)) members <- suba$labels
     # French member labels + the French dimension name come from the slot
     # directory's second (Desc Francais) block; the scan fallbacks are English
     # only, so these are NULL/NA on a dimension the directories miss.
     members_fr <- if (is_geo) NULL else dl$fr
+    # the sparse-slot sub-A read pairs its member arrays bilingually, so it carries
+    # the French copy in the same recovered order (suba.R)
+    if (!is.null(suba) && !is.null(suba$labels_fr) &&
+        length(suba$labels_fr) == dim$count)
+      members_fr <- suba$labels_fr
     name_fr <- if (is_geo || is.null(dl)) NA_character_ else dl$name_fr
     # `dl$name_fr` already covers both sources: the "Total - <name>" member and,
     # where that is absent (the 02-gen survey facet/quantity dimensions), the

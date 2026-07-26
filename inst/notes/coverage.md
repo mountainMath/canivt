@@ -482,7 +482,8 @@ identities:
 | `Table-024` | 11 geo × 3 sex × 3 class × 33 occupation × 10 hours × 24 years (LFS 1987–2010) | 506,131 | Average usual hours == Total hours / Total employed within 0.05 on **68,312/68,589** cells; Canada 1987 = 12,333.0 and 2010 = 17,041.0 thousand employed, matching the published LFS. The additive identities (sex, class of worker, Canada == Σ provinces, occupation hierarchy, hours bands) hold to the **rounding bound**: residuals are one-sided — negative only to −0.1/−0.2/−0.3/−0.4 for 2/≤6/7/10 summands, i.e. never past ±0.05 per rounded component — with the positive tail (max 6.7) being the suppressed components the store does not carry |
 | `PRNAIC6dec2000` | 14 geo × 930 NAICS-6 × 11 employment sizes (Business Register) | 71,794 | **all four identities exact, zero residual**: Canada == Σ 13 provinces/territories 10,230/10,230; Total (A) == Indeterminate (B) + Subtotal 13,020/13,020; Subtotal == Σ the 8 size bands 13,020/13,020; NAICS Total == Σ the 929 industries 154/154 |
 
-The other five are ledgered `FALSE` as gate guards — see
+The other five were ledgered `FALSE` as gate guards at the time; all five have
+since been onboarded (2026-07-26) and the refusal ledger is now empty — see
 [`unsupported-formats.md`](unsupported-formats.md).
 
 ## [x] The 256-geography cap — the descriptor record is a count oracle (2026-07-25)
@@ -748,12 +749,91 @@ genuine leaves whose codes end in 0 — `4010 Residential Building and Developme
 `010 - Other Agricultural Industries, N.E.C.`) This is validation evidence only;
 the parser does not run it, so the loud provisional flag stays.
 
-`PRVNAIC1dec1998` still finds no confirmable stride — its pages sit at slot 0
-**plus slot 10**, neither a contiguous run nor a detached total — so it remains
-`suba_unverified` and ledgered `FALSE`. `ivt_f2_suba_dir_stride()` is unit-tested
-on synthetic directories (`test-suba.R`) covering the blank-led run, the
-resumes-past-extent rejection, empty-geography tolerance, ragged residues and the
+`ivt_f2_suba_dir_stride()` is unit-tested on synthetic directories
+(`test-suba.R`) covering the blank-led run, the resumes-past-extent rejection,
+empty-geography tolerance, ragged residues, the blank-page stubs and the
 single-outer-member decline.
+
+## [x] Blank pages and SPARSE industry slots — the last guard closed (2026-07-26)
+
+`SP_FPBMMO_PRVNAIC1dec1998` (Business Register, provincial NAICS-1, December 1998)
+was the corpus's last `supported = FALSE` row. **Onboarded at 2,814 cells**; the
+refusal ledger is now empty, with no gate relaxed to get there. Two independent
+facts had kept it out.
+
+**1. A written page with no present bits is not a witness.** Three of the thirteen
+provinces (5, 6 and 12) write an *extra* directory entry at window slot 8 whose
+page is a stub: size 260 = the 4-byte marker + the 256-byte presence record + no
+values, presence popcount **0**. Counted, it gives those three groups the residue
+set `{0, 8, 10}` against the other ten's `{0, 10}` — ragged, so no stride confirms
+and the file is refused. But a page with zero present bits carries no cells, so it
+cannot say anything about where the members sit: it is the same absence as an
+unwritten entry slot, one level down (the sparse-directory model). `ivt_f2_page_blank()`
+counts such entries out of the measurement, and the tiling is then the plain
+`{0, 10}` at stride 16 that every province shares. Blast radius across the cluster
+is two other blank windows (`PROVSIC2june1998` and `CACMA3-2`, both at slot 13);
+dropping them moves neither verdict nor one cell.
+
+**2. The members do not form a contiguous run at all.** Every placement the
+chunked case enumerates is an `(offset, length)` pair plus a total. This file's 20
+NAICS sectors sit at slots 1..20 and then `Total` and `00 - Not Classified` sit
+alone in window 10, at slots **1363 and 1364** — a 1,342-slot gap. Nor can its
+members be *counted* by the code scan: three of the twenty sectors are coded as
+NAICS **ranges** (`31-33`, `44-45`, `48-49`), which are not numeric tokens, so
+`ivt_f2_suba_industry_codes()` reports 19 of 22 (and picks up a stray 6-digit leaf).
+
+The file states the answer twice instead, and the new **sparse-slot** case takes it
+only when both witnesses agree:
+
+| witness | reading |
+|---|---|
+| codebook bilingual member arrays (`ivt_f2_suba_member_arrays()`) | `[20 EN][20 FR]` + `[3 EN][2 FR]` → pairs agree on **22** |
+| occupied slots under the measured stride | `{1..20, 1363, 1364}` → **22** |
+
+The English-only third record of the second chunk (an orphan 6-digit NAICS leaf the
+writer left behind) is discarded by the pairing rule — a bilingual codebook is
+trusted only as far as its two copies agree. With the counts equal the members
+simply *are* the occupied slots in ascending order; there is no offset and no
+alignment left to guess. Language assignment is structural
+(`ivt_f2_dim_dict_en_first()` reads the dictionary's field order), so the file
+yields EN **and** FR member labels.
+
+The gate is correspondingly stricter than the chunked one: **exactly one** slot
+must equal the sum of all the others over every geography × employment-size group,
+and its codebook label must be the one the codebook calls the total. That second
+clause is the only LABEL check anywhere in `suba.R` — a shifted assignment would
+put a sector's name on the reconciling slot — so it is required, not preferred.
+Here slot 1363 is the unique solution and its label is `Total`.
+
+All four of the file's aggregate identities are exact over every cell:
+
+| identity | comparisons | exact | maxdiff |
+|---|---|---|---|
+| sector `Total` == Σ other 21 (per prov × empclass) | 143 groups | 143 | 0 |
+| `Canada` == Σ 12 provinces (per sector × empclass) | 235 groups | 235 | 0 |
+| `Total (A)` == `Indeterminate (B)` + `Subtotal (A − B)` | 286 | 286 | 0 |
+| `Subtotal (A − B)` == Σ 8 size classes | 286 | 286 | 0 |
+
+**Cross-file corroboration** against `SP_XWJR2W_PRSIC1dec1999`, which shares the
+universe but decodes by an entirely different path (it never engages `suba.R`):
+one year apart, every province moves by a plausible growth rate and Canada goes
+1,795,130 → 1,996,322 establishments. The 1999 file carries a fourteenth
+geography, **Nunavut** — created April 1999, so absent from the 1998 file exactly
+as it should be — and NWT splits accordingly (3,065 → 2,558 + 652).
+
+| province | Dec 1998 (NAICS) | Dec 1999 (SIC) |
+|---|--:|--:|
+| Newfoundland | 23,280 | 24,976 |
+| Prince Edward Island | 9,389 | 10,104 |
+| Québec | 428,773 | 470,373 |
+| Ontario | 607,573 | 684,913 |
+| British Columbia | 261,488 | 288,478 |
+| Yukon | 2,566 | 2,762 |
+| **Canada** | **1,795,130** | **1,996,322** |
+
+Labels stay PROVISIONAL for the same reason as the rest of the cluster
+(`canivt_suba_labels`, loud): the total member's label is verified by the gate, the
+other 21 are the standard storage-order assignment.
 
 ## Summary
 

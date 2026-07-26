@@ -302,6 +302,19 @@ layout.
 
 ## Change log
 
+- **2026-07-26** — **A page whose presence record is all zero is an ABSENCE.** Not
+  a new marker: the page is a perfectly ordinary `[b0][01][00][08]` page with a
+  256-byte presence record of zero bits and no value run (size exactly
+  `4 + 256 = 260`). What is new is the reading — such a page carries no cells, so
+  it is evidence of nothing, the same absence as an unwritten directory entry one
+  level up (§H, the sparse-directory rule). `ivt_f2_page_blank()` counts these out
+  of the sub-A stride measurement, where three stub pages had made
+  `PRVNAIC1dec1998`'s residue sets ragged. Alongside it, the **sparse-slot**
+  industry placement: members need not be contiguous, and where the codebook's
+  bilingual member arrays (§E, EN/FR pairs agreeing record-for-record) and the
+  occupied slot count agree, the members are the occupied slots in ascending
+  order. Onboards `PRVNAIC1dec1998` (2,814) — the corpus's last refusal.
+
 - **2026-07-26** — **The sub-A outer directory stride is a TILING.** Not a marker
   change but a geometry one, recorded here because it governs how the page
   directory is read: in the type-00 sub-A cluster no dimension carries a

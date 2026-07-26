@@ -37,26 +37,28 @@ ever silently starts accepting the file.
 
 ## Ledgered guard files (in the corpus, `supported = FALSE`)
 
-The type-00 sub-A provincial Business-Patterns cluster (`byte 0 == 0x02`, no
-geography, `PROV/CAN|CA/CMA × INDUSTRY × EMPCLASS`). `R/suba.R` measures the
-directory stride from the page directory (it is a physical constant this
-generation does not declare), recovers the industry count from the codebook
-chunks, maps the members, and **commits only if the decode reconciles**
+**None.** As of 2026-07-26 every file in the local corpus carries
+`supported = TRUE`.
+
+The last guard was the type-00 sub-A provincial Business-Patterns cluster
+(`byte 0 == 0x02`, no geography, `PROV/CAN|CA/CMA × INDUSTRY × EMPCLASS`).
+`R/suba.R` measures the directory stride from the page directory (it is a physical
+constant this generation does not declare), recovers the industry count from the
+codebook, maps the members, and **commits only if the decode reconciles**
 (industry `Total` == Σ detail per geo × empclass, or geo `Canada` == Σ provinces).
-One file in the cluster still fails to reconcile, so the gate refuses it:
-
-| key | why |
-|---|---|
-| `SP_FPBMMO_PRVNAIC1dec1998` | Business-Register provincial NAIC — no stride the directory tiling can confirm, so the modelled geometry stays unverified (see below) |
-
-(Every other sub-A guard has been onboarded. `CACMA3-2`, `PROVSIC4-2`,
-`PROVSIC4dec1997` and `PROVSIC2june1998` were refused here until 2026-07-26 and now
-decode and reconcile exactly — see the directory-tiling section of
+The whole cluster now reconciles: `CACMA3-2`, `PROVSIC4-2`, `PROVSIC4dec1997` and
+`PROVSIC2june1998` were onboarded by the directory-tiling stride rule and
+`PRVNAIC1dec1998` by the blank-page and sparse-slot rules below — see
 [`coverage.md`](coverage.md). `PRSIC2june2001`, `PRVNAIC3_LOC-1` and
-`CDCSDNAIC3dec2006`, listed as guards on 2026-07-25, were onboarded 2026-07-26 —
-see the sparse-directory section there. `SP3_C2YSID_Table-080` and
-`SP3_NAZQV2_Table-210`, also listed on 2026-07-25, were onboarded 2026-07-26 by the
-blank-led anchor work — see below.)
+`CDCSDNAIC3dec2006`, listed as guards on 2026-07-25, were onboarded 2026-07-26 by
+the sparse-directory work; `SP3_C2YSID_Table-080` and `SP3_NAZQV2_Table-210`, also
+listed then, by the blank-led anchor work.
+
+**The refusal machinery stays exactly as it was** — nothing here was relaxed to
+reach an empty ledger. `ivt_f2_decodable()` is unchanged, and the sub-A gate still
+refuses any file whose stride cannot be measured or whose decode does not
+reconcile; there simply is no longer a file in the corpus that trips it. The next
+file that does gets a row again.
 
 ### The sub-A refusal rule, restated (2026-07-26)
 
@@ -74,6 +76,16 @@ the populated entries fall into `geo_count` groups with an identical residue set
 separates a real stride from a divisor of it. The rule tolerates a couple of
 wholly-empty groups, since suppression here is whole-geography and a geography with
 no cells writes no entries at all.
+
+**A written page whose presence record is entirely zero is not a witness either**
+(2026-07-26). It carries no cells, so it says nothing about where the members sit
+— the same absence as an unwritten entry slot, one level down. `PRVNAIC1dec1998`
+writes three such stubs (window slot 8 of provinces 5, 6 and 12; size 260 = the
+4-byte marker + the 256-byte presence record + no values), and counting them makes
+those three groups' residue sets differ from the other ten so that *no* stride
+confirms. `ivt_f2_page_blank()` counts them out. Two other files carry one blank
+window each (`PROVSIC2june1998` and `CACMA3-2`, both at slot 13); dropping it moves
+neither verdict nor a single cell.
 
 Reading the tiling rather than a progression is what un-gated four files: it does
 not assume window 0 is populated, so `PROVSIC4dec1997`'s 11 industry windows at
@@ -135,11 +147,15 @@ never received its `$slots`. See [`coverage.md`](coverage.md) for the validation
   maxdiff 0). It is also the strongest cross-file check in the cluster: rolling the
   independently-decoded `PROVSIC4-2` up by 2-digit SIC prefix reproduces it
   cell-for-cell (8,667/8,667, maxdiff 0, zero one-sided cells).
-- `PRVNAIC1dec1998` remains a **ledgered guard**. Its pages sit at slot 0 **plus
-  slot 10** of a 16-entry stride, which is neither a contiguous run nor a detached
-  total, and the tiling rule finds no stride it can confirm. Its industry count is
-  correspondingly under-read (20 against a directory carrying two windows' worth of
-  pages), so the geometry stays unverified and the gate refuses it.
+- `PRVNAIC1dec1998` was onboarded 2026-07-26 (2,814 cells), the last guard in the
+  corpus. Two things kept it out. Its stride would not confirm because three
+  provinces write an extra directory entry pointing at a **blank page** (see the
+  blank-page rule above); with those counted out the tiling is the plain
+  `{0, 10}` at stride 16 that every province shares. And its members do not form a
+  contiguous run *at all* — 20 NAICS sectors at slots 1..20, then `Total` and
+  `00 - Not Classified` alone in window 10 at slots 1363/1364, a 1,342-slot gap
+  that no `(offset, length)` placement describes. See the sparse-slot section of
+  [`coverage.md`](coverage.md).
 
 **Layout extent / overshoot — CLOSED**
 
