@@ -412,10 +412,13 @@ section-pointer table) carries one of two byte framings, decoded by
   some `DQF_NOTE` suppression notes — are stored truncated in the file itself).
 - **Bit-headed dense array** — `[81 01][u16 nbits][bitstream][80|01]` then
   **unterminated** records `[len][text]`. The bitstream occupies
-  `2*ceil(nbits/16)` bytes (u16-padded); its per-member coding is not yet
-  decoded. Absent members are **skipped** in the record run, so the values must
-  be re-aligned using the empty-slot pattern of a plain sibling block from the
-  same chunk.
+  `2*ceil(nbits/16)` bytes (u16-padded) and is **not** a per-member presence map
+  (unlike the `[84 01]` footnote bitmap): measured on 98-10-0662's dense arrays,
+  `nbits` far exceeds the member count and the popcount equals the records-region
+  byte length + 1 — it is a per-**byte** map of the packed records region. So it
+  cannot supply member positions. Absent members are **skipped** in the record
+  run, so the values are re-aligned using the empty-slot pattern of a plain
+  sibling block from the same chunk.
 
 The generic run-scanner (`ivt_find_member_blocks()`) mis-handles both: it splits
 a plain array at every empty record (an absent member or the pow-2 pad) and
@@ -558,15 +561,20 @@ when it can be mapped to a member unambiguously. No scale warning is emitted;
 `14687350, 9787420, 5870875, 3916550, 4899925, 576625, 4323300`. The pure-R
 decode of the whole file takes ~4–5 s.
 
-## The 1991 census variant (E9101 / `1003011.IVT`) — partial
+## The 1991 census variant (E9101 / `1003011.IVT`)
 
 The **1991 census** Beyond 20/20 format is the same container *family* as 2021.
 Reference table here is **E9101** (`1003011.IVT`, 26 MB) — "Population by Single
 Years of Age (110), Showing Sex (3)". 3 dimensions: Geography(41,859, incl.
-enumeration areas) × Age(110) × Sex(3) = 330 cells per geography. `read_ivt()`
-rejects it today via `ivt_is_supported()`. The status below was established by
-direct analysis against scraped per-geography ground truth (Canada + provinces,
-GIDs 1,2,3,9,10,11,13,14 — see the sibling `censusmapper-import` repo).
+enumeration areas) × Age(110) × Sex(3) = 330 cells per geography.
+
+**Fully decoded** — `read_ivt()` reads it through the same shared path as every
+other vintage, and it is one of the six cell-exact reference tables. This section
+is kept as the byte-level record of *how* the variant differs; the section
+headings below are historical, and the one marked "not yet cracked" was solved in
+place (see the note in it). The findings were established by direct analysis
+against scraped per-geography ground truth (Canada + provinces, GIDs
+1,2,3,9,10,11,13,14 — see the sibling `censusmapper-import` repo).
 
 ### What is solved & verified
 - **Container / page directory.** Pages begin with marker `82 01 80 08` (a
@@ -761,27 +769,30 @@ chunk is caught against the file's own declared count rather than trusted blindl
   the block; bytes **{54, 56..63}** are zero padding (an interspersed pad byte at
   54, then 8 trailing). All-present blocks are all-`0xee`.
 
-### The open problem: sparse-geo cell presence (NOT yet cracked)
+### Sparse-geo cell presence (solved: pair-swapped positional)
 Sparse geographies (every province that has *any* zero cell — i.e. most of them,
 GIDs 9/10/11/13/14 — and all enumeration areas) store **only their nonzero cells**
 (verified: GID9 = 279/330, GID11 = 222/330, GID10 = 55/330, each found as an exact
-contiguous int16 run). Reconstructing them into the 330-cell grid needs to know
-*which* cells are present, and that encoding is **not a verbatim positional
-bitmap**. Exhaustive search rules out the obvious models — for each sparse geo's
-known present-pattern, no match is found under: contiguous nibble-per-age (any
-bit assignment, hi/lo nibble order, age-pair swap); the 64-byte interspersed-pad
-layout learned from the dense blocks; tight 3-bit-per-age packing; nibble-padded
-packing.
+contiguous int16 run), so reconstructing the 330-cell grid needs to know *which*
+cells are present.
 
-**This was the wrong frame — sparse presence is CRACKED.** It is positional all
-along; the records are **byte-pair-swapped** (the same rule as 98100023 below). Each
-geo gets a 64-byte record (consecutive in the page's presence section, ages at byte
-positions {0..53,55}, marker `0xE`). Swap adjacent bytes (`B0↔B1, B2↔B3, …`), then
-read positional nibble-per-age with Sex bits `Total/Male/Female = 3/2/1`, `0` =
-absent. Verified against the 8 scraped GIDs: GID13/14 exact; GID9/10/11 (records at
-314297/314361/314425, 64 bytes apart) exact except the very last age (idx 109) — an
-off-by-one because 1991's odd byte-55 data byte lands in byte 54 *after* the swap (do
-the `{0..53,55}` byte-position mapping AFTER swapping). With that, every geo decodes.
+Presence is **positional after all** — the records are **byte-pair-swapped**, the
+same rule as 98100023 below. Each geo gets a 64-byte record (consecutive in the
+page's presence section, ages at byte positions {0..53,55}, marker `0xE`). Swap
+adjacent bytes (`B0↔B1, B2↔B3, …`), then read positional nibble-per-age with Sex
+bits `Total/Male/Female = 3/2/1`, `0` = absent. Verified against the 8 scraped
+GIDs: GID13/14 exact; GID9/10/11 (records at 314297/314361/314425, 64 bytes apart)
+exact except the very last age (idx 109) — an off-by-one because 1991's odd
+byte-55 data byte lands in byte 54 *after* the swap (do the `{0..53,55}`
+byte-position mapping AFTER swapping). With that, every geo decodes.
+
+*The dead end, kept as the record:* this was first framed as "the encoding is
+**not** a verbatim positional bitmap", because an exhaustive search matched no
+sparse geo's known present-pattern under contiguous nibble-per-age (any bit
+assignment, hi/lo nibble order, age-pair swap), the 64-byte interspersed-pad
+layout learned from the dense blocks, tight 3-bit-per-age packing, or
+nibble-padded packing. Every one of those searches read the bytes **unswapped**;
+the model was right and the byte order was wrong.
 
 ## 1991 vs 2021 — similarities & differences
 
