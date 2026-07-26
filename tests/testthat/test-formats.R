@@ -141,3 +141,78 @@ test_that("a signature-only file with no decodable descriptor is rejected cleanl
   expect_false(ivt_is_supported(raw))
   expect_true(is.na(ivt_family(raw)))
 })
+
+# ---- the descriptor record as a count oracle (markers.md D.1) ----------------
+#
+# A rebuilt descriptor sizes each dimension from its CODEBOOK member array, which
+# chunks at 256 -- so a >256-member dimension reads back as exactly 256. The
+# record itself is still present and correct; `ivt_f2_desc_declared_count()`
+# re-finds it by NAME. Synthetic bytes: no corpus needed.
+
+# lay a descriptor signature at `at`, then one record `[u16 count][type][01]<name>`
+fmt_desc_raw <- function(count, type, name, at = 1024L, size = 8192L,
+                         sep = 0x01L, prefix = character(0)) {
+  raw <- as.raw(rep(0L, size))
+  raw[1:4] <- as.raw(c(0x04, 0x00, 0x20, 0x00))
+  # the @32 descriptor pointer, so the offset resolves on the primary path
+  # (without it `ivt_f2_descriptor_offset()` falls back to the signature scan
+  # and warns -- correct behaviour, just noise for these cases)
+  raw[33:36] <- as.raw(c(at %% 256L, (at %/% 256L) %% 256L,
+                         (at %/% 65536L) %% 256L, at %/% 16777216L))
+  raw[at + (1:9)] <- as.raw(c(0x81, 0x01, 0x20, 0x00, 0xf0, 0x00, 0x00, 0x80, 0x03))
+  p <- at + 10L
+  for (s in prefix) {                      # extra records laid down first
+    body <- c(s$count %% 256L, s$count %/% 256L, s$type, 0x01L,
+              utf8ToInt(s$name))
+    raw[p + seq_along(body)] <- as.raw(body); p <- p + length(body) + 4L
+  }
+  body <- c(count %% 256L, count %/% 256L, type, sep, utf8ToInt(name))
+  raw[p + seq_along(body)] <- as.raw(body)
+  raw
+}
+
+test_that("a named descriptor record yields its declared u16 count", {
+  raw <- fmt_desc_raw(53488L, 0x10L, "Geography")
+  expect_identical(ivt_f2_desc_declared_count(raw, "Geography"), 53488L)
+})
+
+test_that("the count oracle declines what it cannot resolve", {
+  raw <- fmt_desc_raw(53488L, 0x10L, "Geography")
+  # a name that is not framed as a record
+  expect_true(is.na(ivt_f2_desc_declared_count(raw, "Tenure")))
+  # NULL / NA / empty names (ivt_f2_first_marker_name may hand back any of them)
+  expect_true(is.na(ivt_f2_desc_declared_count(raw, NULL)))
+  expect_true(is.na(ivt_f2_desc_declared_count(raw, NA_character_)))
+  expect_true(is.na(ivt_f2_desc_declared_count(raw, "")))
+  # a u8-COUNT storage tag cannot undercount a 256-chunk read, so it is ignored
+  expect_true(is.na(ivt_f2_desc_declared_count(fmt_desc_raw(300L, 0x08L, "Geography"),
+                                               "Geography")))
+  # the 0x01 record separator is required
+  expect_true(is.na(ivt_f2_desc_declared_count(
+    fmt_desc_raw(53488L, 0x10L, "Geography", sep = 0x02L), "Geography")))
+})
+
+test_that("the count oracle refuses a name that resolves to two different counts", {
+  raw <- fmt_desc_raw(53488L, 0x10L, "Geography",
+                      prefix = list(list(count = 999L, type = 0x10L, name = "Geography")))
+  expect_true(is.na(ivt_f2_desc_declared_count(raw, "Geography")))
+  # ... but agreeing duplicates are fine
+  raw2 <- fmt_desc_raw(53488L, 0x10L, "Geography",
+                       prefix = list(list(count = 53488L, type = 0x10L, name = "Geography")))
+  expect_identical(ivt_f2_desc_declared_count(raw2, "Geography"), 53488L)
+})
+
+# ---- ordinal runs are bounded by the member count ---------------------------
+test_that("consecutive member CODES are not mistaken for an ordinal delimiter", {
+  # a genuine ordinal delimiter: positions within the member list
+  expect_true(ivt_f2_is_ordinal(c(1, 2, 3, 4), n = 100L))
+  expect_true(ivt_f2_is_ordinal(c(2049, 2050, 2051), n = 4096L))
+  # 2001 census DA codes: consecutive, but far beyond the member count
+  expect_false(ivt_f2_is_ordinal(c(35210433, 35210434, 35210435), n = 53488L))
+  # unbounded callers keep the old behaviour
+  expect_true(ivt_f2_is_ordinal(c(35210433, 35210434, 35210435)))
+  expect_true(ivt_f2_is_ordinal(c(35210433, 35210434, 35210435), n = NA_integer_))
+  # non-consecutive is never ordinal, bound or no bound
+  expect_false(ivt_f2_is_ordinal(c(1, 2, 4), n = 100L))
+  expect_false(ivt_f2_is_ordinal(c(1, 2), n = 100L))
+})

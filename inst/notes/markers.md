@@ -109,6 +109,35 @@ previous name's tail, so the `v[k]==0x02` double-marker anchor is gated on a
 plausible small facet count (`count < 0x20`).
 Recognizer `ivt_f2_descriptor()` (`anchorA` / `bare02`).
 
+### D.1 The record framing as a count ORACLE (`ivt_f2_desc_declared_count()`)
+
+The walk above needs **both** name copies to anchor a record. Where the second
+copy is unusable the record is skipped and, if enough records are lost, the whole
+descriptor is rebuilt from the header slot table (§B) — which sizes each
+dimension from its **codebook member array**, and that array is CHUNKED at 256
+members per block. A large dimension then silently reads back as exactly **256**.
+
+But the record is still *there* and its count field is still correct. Given a
+dimension NAME (which the rebuild does recover, from the codebook), scan the
+descriptor block for the byte pattern
+
+```
+[u16 count LE] [type] 01 <name bytes>
+```
+
+with `type` in the u16-count storage set `{10, 0d, 0a, 0c, 09, 0f, 0b}` (§D:
+these are exactly the tags whose count field is u16, so only they can declare
+more than 255), and require the count to resolve **uniquely** — a name occurring
+at two different counts yields nothing. 2001 census `95f0437xcb01001` gives
+`f0 d0 10 01 "Geography"` = **53488**; `pid59227` gives `eb d0 10 01` = **53483**.
+
+Independently confirmed *by the container*: with the recovered count, the page
+directory's outer entry cartesian equals the page count **exactly**
+(418 == 418 and 6686 == 6686 respectively), which no other count produces.
+LOUD (`canivt_declared_count`) — the record was found by its name rather than by
+the doubled-name framing, so it is a fallback even though the bytes are a
+declaration.
+
 ## E. Codebook name markers (`81 02 [sub] 00`)
 
 The `81 02` prefix is a **generic block header** shared by several codebook record
@@ -273,6 +302,16 @@ layout.
 
 ## Change log
 
+- **2026-07-25** — **The descriptor record is a count ORACLE** (new §D.1). When
+  the doubled-name walk loses records (2001 prose-bleed) and the descriptor is
+  rebuilt from the header slot table, every dimension sizes to its codebook member
+  array — chunked at 256, so a large dimension reads back as exactly **256**.
+  `ivt_f2_desc_declared_count()` re-finds the record by NAME
+  (`[u16 count][type][01]<name>`, u16-count tags only, unique resolution) and
+  raises the count. Onboards `95f0437xcb01001` (53,488 geo) and `pid59227`
+  (53,483). Same commit: `ivt_f2_is_ordinal(t, n)` gains the member-count bound —
+  an ordinal run indexes members, so consecutive numeric CODES (2001 DAs) can no
+  longer masquerade as one and knock two blocks out of the chunk-group walk.
 - **2026-07-25** — **§F text-blob recognizer widened** — the `[01]` single-record
   byte is optional and a blob may be NUL-terminated, so the discriminator is now
   "the u16 record count does not fit the payload" + "no INTERIOR NUL". Closes the

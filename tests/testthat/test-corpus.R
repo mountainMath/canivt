@@ -50,25 +50,62 @@ test_that("every corpus folder has a ledger row", {
   expect_identical(sort(setdiff(dirs, ledger$key)), character(0))
 })
 
+# One table's whole measurement, as plain data (helper-parallel.R). Runs in a
+# forked worker, so it must not assert -- everything the ledger checks is
+# returned and asserted serially below.
+corpus_probe <- function(row) {
+  f <- corpus_file(row$key)
+  if (is.na(f)) return(list(key = row$key, absent = TRUE))
+  out <- list(key = row$key, absent = FALSE)
+  raw <- readBin(f, "raw", file.size(f))
+  gate <- ivt_test_capture(ivt_is_supported(raw))
+  rm(raw)
+  out$gate_error <- gate$error
+  out$supported <- gate$value
+  # an UNSUPPORTED row asserts the gate verdict only -- it must never decode
+  if (!isTRUE(row$supported)) return(out)
+  # strict mode is per-process state; `with_options` scopes it to this read even
+  # under `mc.preschedule = FALSE` (one child per job, but be explicit).
+  cap <- if (isTRUE(row$strict_clean)) {
+    ivt_test_capture(withr::with_options(list(canivt.strict = TRUE), read_ivt(f)))
+  } else {
+    ivt_test_capture(read_ivt(f))
+  }
+  out$read_error <- cap$error
+  out$warnings <- cap$warnings
+  out$fallback <- cap$fallback
+  out$n_cells <- if (is.null(cap$value)) NA_integer_ else nrow(cap$value$cells)
+  gc(verbose = FALSE)
+  out
+}
+
+corpus_probes <- if (corpus_on) {
+  ivt_test_pmap(split(ledger, seq_len(nrow(ledger))), corpus_probe)
+} else {
+  vector("list", nrow(ledger))
+}
+
 for (i in seq_len(nrow(ledger))) {
-  row <- ledger[i, ]
-  test_that(paste0("corpus: ", row$key), {
-    skip_if(!corpus_on, "corpus tests are opt-in: set CANIVT_CORPUS_TESTS=1 (and CANIVT_IVT_CACHE)")
-    f <- corpus_file(row$key)
-    skip_if(is.na(f), paste0("table ", row$key, " not in the local corpus"))
-    raw <- readBin(f, "raw", file.size(f))
-    expect_identical(ivt_is_supported(raw), row$supported)
-    if (!row$supported) return(invisible())
-    rm(raw)
-    if (isTRUE(row$strict_clean)) {
-      withr::local_options(canivt.strict = TRUE)
-      expect_no_warning(x <- read_ivt(f))
-    } else {
-      # a known fallback: must warn with the class, must not error
-      expect_warning(x <- read_ivt(f), class = "canivt_fallback")
-    }
-    expect_identical(nrow(x$cells), as.integer(row$n_cells))
-    rm(x)
-    gc(verbose = FALSE)
+  local({
+    row <- ledger[i, ]
+    got <- corpus_probes[[i]]
+    test_that(paste0("corpus: ", row$key), {
+      skip_if(!corpus_on, "corpus tests are opt-in: set CANIVT_CORPUS_TESTS=1 (and CANIVT_IVT_CACHE)")
+      expect_null(got$worker_error)
+      skip_if(isTRUE(got$absent), paste0("table ", row$key, " not in the local corpus"))
+      expect_null(got$gate_error)
+      expect_identical(got$supported, row$supported)
+      if (!row$supported) return(invisible())
+      expect_null(got$read_error)
+      if (isTRUE(row$strict_clean)) {
+        # strict + clean: the read resolved through the primary path with no
+        # warning at all (under strict a fallback would have ERRORED above)
+        expect_identical(got$warnings, character(0))
+      } else {
+        # a known fallback: must warn with the class, must not error
+        expect_gt(got$fallback, 0L)
+      }
+      expect_identical(got$n_cells, as.integer(row$n_cells))
+    })
   })
 }

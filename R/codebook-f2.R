@@ -1829,9 +1829,20 @@ ivt_f2_chunk_layout <- function(n, chunk = 256L) {
 # Is a member-array block a consecutive-integer ordinal delimiter (1,2,3,... or
 # 2049,2050,...)?  These sit between groups and must be skipped so they don't shift
 # positional block indexing.
-ivt_f2_is_ordinal <- function(t) {
+#
+# `n` bounds it by what an ordinal MEANS: a position in the member list, so it
+# cannot exceed the member count. Without that bound a chunk of consecutive
+# numeric CODES reads as an ordinal delimiter and is dropped from the positional
+# walk -- the 2001 census DA codebook (95f0437xcb01001) stores runs of
+# geographically consecutive dissemination areas, and two of its 256-member code
+# chunks are perfectly consecutive (`35210433, 35210434, ...`). Dropping them
+# left the chunk walk two blocks short of the group geometry, so the whole
+# geography fell to the dedup/regex scan and came back misordered. Pass it
+# wherever the member count is known; unbounded callers keep the old behaviour.
+ivt_f2_is_ordinal <- function(t, n = NULL) {
   iv <- suppressWarnings(as.integer(t))
-  !anyNA(iv) && length(iv) >= 3L && all(diff(iv) == 1L)
+  if (anyNA(iv) || length(iv) < 3L || !all(diff(iv) == 1L)) return(FALSE)
+  is.null(n) || is.na(n) || max(iv) <= n
 }
 
 # Is a directory entry a single free-text blob (a footnote/note record) rather than
@@ -2620,7 +2631,7 @@ ivt_f2_geo_inline_dir <- function(raw) {
   vb <- vector("list", ents$n); k <- 0L
   for (r in seq_len(ents$n)) {
     t <- ents$records(r)
-    if (length(t) >= 3L && length(t) <= 256L && !ivt_f2_is_ordinal(t)) {
+    if (length(t) >= 3L && length(t) <= 256L && !ivt_f2_is_ordinal(t, n_geo)) {
       k <- k + 1L
       vb[[k]] <- ents$values(r)                        # strict-first, records fallback
     }
@@ -3104,6 +3115,70 @@ ivt_f2_descriptor_name <- function(run, first_record = FALSE, count = NA_integer
   NA_character_
 }
 
+# The member count the DESCRIPTOR RECORD ITSELF declares for a named dimension.
+#
+# When the doubled-name walk fails, the whole descriptor is rebuilt from the
+# header slot table (`ivt_f2_dims_from_slots()`), which sizes each dimension by
+# its CODEBOOK member array. That array is CHUNKED for a large dimension -- the
+# codebook stores 256 members per block -- so a >256-member geography rebuilds
+# capped at exactly 256, the layout collapses to a fraction of the real entry
+# cartesian, and the file preflight-rejects. But the descriptor record is still
+# THERE and still correct: only its NAME copies were unusable (the 2001 census
+# lineage bleeds French prose between them -- "Geographyment.Geographydu tableau
+# est modifi"), never its framing. So read the count the file declares.
+#
+# The framing is the standard `[count_lo][count_hi][type][01]<name>` of the
+# normal walk, anchored on the dimension's own name (from the header slot
+# directory's name marker -- metadata, not a guess) rather than on the name
+# DOUBLING the prose destroyed. Three structural conditions gate it:
+#
+#   * the byte before the name is the 0x01 record separator;
+#   * the type byte is one of the u16-COUNT storage tags -- the only records
+#     whose count is 16-bit, and hence the only ones a 256-chunk codebook read
+#     can undercount (a u8-count data dimension cannot exceed 255, so its
+#     codebook length is already authoritative);
+#   * every occurrence of the name in the descriptor region must agree on the
+#     count, so an accidental match cannot outvote the record.
+#
+# The search window is the first 4 kB of the descriptor block -- enough for every
+# corpus vintage, and a record beyond it simply yields NA (no change), never a
+# wrong count. Returns the declared count, or NA when no such record frames the
+# name. The caller adopts it only when it EXCEEDS the codebook count (a declaration can
+# lift a chunk-capped read, never shrink a good one), and a wrong count still
+# has to survive `ivt_page_preflight()` -- which is what rejects these files
+# today -- so the gate can only convert an UNSUPPORTED verdict into a decode
+# that the directory span itself validates.
+ivt_f2_desc_declared_count <- function(raw, name, D = NULL) {
+  # `ivt_f2_first_marker_name()` can hand back NULL, not just NA
+  if (length(name) != 1L || is.na(name) || !nzchar(name)) return(NA_integer_)
+  if (is.null(D)) D <- tryCatch(ivt_f2_descriptor_offset(raw),
+                                error = function(e) NULL)
+  n <- length(raw)
+  if (is.null(D) || is.na(D) || D < 1 || D + 18 > n) return(NA_integer_)
+  D <- as.integer(D)
+  v <- as.integer(raw[(D + 1L):min(D + 4000L, n)])
+  nb <- utf8ToInt(enc2utf8(name))
+  nb <- nb[nb >= 32L & nb <= 255L]
+  L <- length(nb)
+  if (!L || L + 5L > length(v)) return(NA_integer_)
+  # u16-count storage tags, as in the descriptor walk's `geotypes`
+  u16types <- c(0x10L, 0x0dL, 0x0aL, 0x0cL, 0x09L, 0x0fL, 0x0bL)
+  hits <- which(v[seq.int(5L, length(v) - L + 1L)] == nb[1L]) + 4L
+  got <- integer(0)
+  for (p in hits) {                       # p = 1-based index of the name's first byte
+    if (!identical(v[p:(p + L - 1L)], nb)) next
+    if (v[p - 1L] != 0x01L) next
+    ty <- v[p - 2L]
+    if (!ty %in% u16types) next
+    cnt <- v[p - 4L] + 256L * v[p - 3L]
+    if (cnt < 1L || cnt > 1e6L) next
+    got <- c(got, cnt)
+  }
+  got <- unique(got)
+  if (length(got) != 1L) return(NA_integer_)
+  as.integer(got)
+}
+
 #' Parse the header dimension descriptor.
 #' @return list(n_dim, dims = list(name, count, type), title) or NULL.
 #' @keywords internal
@@ -3131,6 +3206,20 @@ ivt_f2_dims_from_slots <- function(raw, slots, ndim) {
     mc <- ivt_f2_dir_member_count(raw, nm, dir)
     cnt <- suppressWarnings(as.integer(mc$count))
     if (is.na(cnt) || cnt < 1L) return(NULL)
+    # The codebook member array is CHUNKED at 256 members per block, so this
+    # count is a chunk cap for any larger dimension. Where the descriptor record
+    # for this name declares a u16 count of its own, that declaration is the
+    # member count -- take it (never downward: a declaration lifts a capped read,
+    # it does not override a good one). LOUD: the record was located by its name
+    # rather than by the doubled-name framing the walk could not use.
+    dc <- ivt_f2_desc_declared_count(raw, nm)
+    if (!is.na(dc) && dc > cnt) {
+      ivt_fallback(sprintf(paste(
+        "Descriptor rebuild: dimension %d (\"%s\") sizes to %d from its chunked",
+        "codebook, but its descriptor record declares %d members; using the",
+        "declared count."), k, nm, cnt, dc), class = "canivt_declared_count")
+      cnt <- dc
+    }
     out[[k]] <- list(name = nm, count = cnt, type = 0L, double01 = FALSE)
   }
   out
@@ -3581,6 +3670,18 @@ ivt_f2_descriptor_from_slots <- function(raw) {
     # the reference-period dimension carries TWO name markers ("Timeseries" AND
     # "Date"), which the unique-marker reader declines; take the first named marker.
     if (is.na(nm)) nm <- ivt_f2_first_marker_name(raw, dir)
+    # `ivt_f2_slot_member_count()` reads the codebook, which chunks at 256
+    # members per block; where the descriptor record for this name declares a
+    # u16 count, that declaration is the member count. See
+    # `ivt_f2_desc_declared_count()`. Never downward. LOUD.
+    dc <- ivt_f2_desc_declared_count(raw, nm)
+    if (!is.na(dc) && dc > cnt) {
+      ivt_fallback(sprintf(paste(
+        "Descriptor rebuild: dimension %d (\"%s\") sizes to %d from its chunked",
+        "codebook, but its descriptor record declares %d members; using the",
+        "declared count."), k, nm, cnt, dc), class = "canivt_declared_count")
+      cnt <- dc
+    }
     dims[[k]] <- list(name = nm, count = as.integer(cnt), type = 0L, double01 = FALSE)
   }
   ivt_fallback(paste(

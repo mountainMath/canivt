@@ -191,6 +191,26 @@ The *rules*; the measurements and original bugs behind them are in
   (`canivt_underdeclared_count`). Runs before the double-01 pass and covers
   double-01 records (the SLID-era income lineage's `1e 05 01 01` geography, real
   count 30).
+- **A count of exactly 256 from a REBUILT descriptor is a chunk cap, not a count.**
+  When the doubled-name walk loses too many records (2001 prose-bleed) the
+  descriptor is rebuilt from the header slot table, which sizes each dimension
+  from its codebook member array — chunked at 256 members per block. The record
+  itself is still present and its count field still correct, so
+  `ivt_f2_desc_declared_count()` re-finds it **by name**:
+  `[u16 count][type][01]<name>`, `type` restricted to the u16-count storage tags
+  (only they can declare > 255) and the count required to resolve **uniquely**.
+  Wired into both rebuild paths (`ivt_f2_dims_from_slots()` **and**
+  `ivt_f2_descriptor_from_slots()`) and strictly one-directional — it RAISES a
+  chunk-capped count, never lowers a good one. LOUD (`canivt_declared_count`).
+  The container is the independent witness: with the right count the directory's
+  outer entry cartesian equals the page count exactly.
+- **An ordinal run indexes members, so it cannot exceed the member count.**
+  `ivt_f2_is_ordinal(t, n)` takes that bound where a count is in hand. Without it
+  a chunk of geographically consecutive numeric CODES (2001 DAs: `35210433,
+  35210434, …`) reads as an ordinal delimiter, and dropping two such blocks left
+  `ivt_f2_geo_inline_dir()` short of the chunk-group geometry — pushing geography
+  onto the dedup/regex scan, which reassembles chunks out of order (labels shifted
+  by 512 against correct values).
 - **Geography is the first descriptor dimension EXCEPT the profile lineage**
   (`ivt_f2_geo_dim_index()` — 97-570-X1981004 / 98F0172X / 95F0170X put a 1-member
   "Values" placeholder first and geography LAST). Dim 1 is the fast path; only when
@@ -238,8 +258,8 @@ Integration tests need real `.ivt` files and auto-skip without them:
 under `CANIVT_IVT_CACHE`) through `read_ivt()` and asserts, per table: the
 `ivt_is_supported()` verdict, strict-mode cleanliness (`strict_clean = FALSE` rows
 are the KNOWN fallbacks — they must *warn*, not error, so both a vanished warning
-and a new failure trip the test) and the exact non-zero cell count. ~150M cells in
-~4 min, so it is **opt-in**:
+and a new failure trip the test) and the exact non-zero cell count. ~150M cells,
+so it is **opt-in**:
 
 ```sh
 CANIVT_CORPUS_TESTS=1 Rscript -e 'devtools::test(filter = "corpus")'
@@ -247,6 +267,18 @@ CANIVT_CORPUS_TESTS=1 Rscript -e 'devtools::test(filter = "corpus")'
 
 When a gap is closed or a table onboarded, update the ledger row **and**
 `inst/notes/coverage.md` in the same commit.
+
+**The suite is parallel.** `Config/testthat/parallel: true` splits the unit files
+across processes, and the three corpus sweeps — which each loop over the whole
+ledger *inside one file*, so file-level splitting cannot touch them — do their
+reads through `ivt_test_pmap()` (`tests/testthat/helper-parallel.R`) in a pre-pass
+and then assert **serially** over the collected results. `expect_*()` must never
+be called from a forked child: testthat's reporter is process-local, so a child's
+expectations are silently lost. A sweep's worker therefore captures its own errors
+and warnings (`ivt_test_capture()`) and returns them as data. Workers default to
+half the physical cores (each holds a whole decoded table — memory is the binding
+constraint, not CPU); override with `CANIVT_TEST_CORES`, and `=1` restores the
+old serial behaviour exactly.
 
 `.ivt` and large `.csv` files are git-ignored; never commit them.
 

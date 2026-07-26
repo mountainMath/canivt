@@ -312,6 +312,7 @@ each lineage (narrative + validation records in
 | 1996 (94F0009XDB96078, 95F0250XDB96001, 95F0223XDB96001, 95F0200XDB96003, b28ea47, 95f0205xdb96003) | digit-initial descriptor names, `@558` `k = 2`, chunked counts |
 | 1981/1986 profiles (97-570-X1981004/1002, 97-570-X1986002) | geography-LAST lineage (`ivt_f2_geo_dim_index()`), double-01 count reconcile, INVERTED descriptor |
 | 2001 F-series (97F0020XCB2001070, 97F0015XCB2001041, 95f0487/95f0491/95f0494/95f0338/95F0377/97F0007) | `0x09` u16 width tag; prose-bleed name recovery; chunked-count reconcile |
+| 2001 census DA-level (95f0437xcb01001, pid59227) | the descriptor record as a count oracle — a rebuilt descriptor's "256" is the codebook chunk size (`ivt_f2_desc_declared_count()`); plus the member-count bound on ordinal runs, so consecutive DA codes stop faking a delimiter |
 | 2006 (97-563-XCB2006072/58, 97-554-XCB2006027, 97-555-XCB2006058, cro0172986) | b3 head-block rule + suppression tails; `canivt_geo_datadim` for uid-less custom geography |
 | 2016 `98-400-X` crosstabs (2016203/2016019/2016328/2016261/2016120/2016387) | `0x0a` u16 width tag; leading-block skip in the geo run walk; entry floor 1024 |
 | 2016 custom extracts (CRO0163850, CRO0166131, EO3278, EO2654) | accept-all descriptor walk, `81 02 01 00` name marker, geography laid out like a data dim, field-dictionary roles |
@@ -483,6 +484,49 @@ identities:
 
 The other five are ledgered `FALSE` as gate guards — see
 [`unsupported-formats.md`](unsupported-formats.md).
+
+## [x] The 256-geography cap — the descriptor record is a count oracle (2026-07-25)
+
+The header-harvest sweep flagged two 2001 census tables reporting **exactly 256
+geographies** — a suspicious number, and it was: 256 is the codebook's
+**chunk size**, not a count.
+
+The chain: 2001 census records bleed French prose *between* the two copies of a
+dimension name (`"Geographyment.Geographydu tableau est modifi…"`), so the
+doubled-name anchor loses records (2 of 3, 3 of 4). With too few records the
+descriptor is rebuilt from the header slot table (§B), which sizes each dimension
+from its codebook member array — and that array is chunked at 256 members per
+block. Every large dimension therefore reads back as 256.
+
+The fix is metadata, not a heuristic: the descriptor record *is still present and
+its count field is still correct* — only its name framing was unusable. Given the
+name (which the rebuild recovers from the codebook), `ivt_f2_desc_declared_count()`
+locates `[u16 count][type][01]<name>` in the descriptor block, restricted to the
+u16-count storage tags and required to resolve uniquely (markers.md §D.1). It is
+wired into **both** rebuild paths (`ivt_f2_dims_from_slots()` and
+`ivt_f2_descriptor_from_slots()`) and only ever raises a count, never lowers one.
+LOUD: `canivt_declared_count`.
+
+The container confirms the recovered counts independently — the page directory's
+outer entry cartesian equals the page count exactly (418 == 418, 6686 == 6686),
+which no other count produces — and both files now pass `ivt_page_preflight()`.
+
+**A second, distinct defect surfaced underneath it.** With the right count the
+geography *labels* were still shifted by 512 (two chunks) past a point: Ontario's
+4,219,410 sat at member 17342 while member 17854 was labelled "Ontario".
+`ivt_f2_is_ordinal()` classified two blocks of consecutive numeric **codes** as
+ordinal delimiters — the 2001 DA codebook stores geographically consecutive DAs,
+so a 256-member chunk can be perfectly consecutive (`35210433, 35210434, …`) and
+indistinguishable from an ordinal run. Bounding the test by the member count
+(`max(iv) <= n`: an ordinal run indexes members, so it cannot exceed the count)
+separates them. The positional reader now returns all 53,488 members with **zero
+duplicate uids**, replacing the loud dedup/regex scan that had been misordering
+chunks.
+
+| table | shape | cells | validation |
+|---|---|---|---|
+| `95f0437xcb01001` | 53,488 geo × 3 household sizes × Number/Average/Median/SE (2001 household income) | 539,931 | Canada == Σ 13 provinces on the additive member at every household size (residuals 0/−5/−5, one rounding step); 288 CDs — the true 2001 count — summing to +25 over 288 units; the household-size marginal 2,976,875 + 8,586,100 vs 11,562,980 Total, again one step. Every residual a multiple of 5, the random-rounding signature |
+| `pid59227` | 53,483 geo × 4 tenure × 9 period of construction × 4 condition | 2,334,008 | Canada == Σ 13 provinces: **all 144** dimension combinations residual ≡ 0 mod 5, range ±20, mean −0.4; over the 288 CDs all 144 likewise ≡ 0 mod 5, range ±85. Each dimension's Total == Σ its members with max deviation 25/40/20 — random rounding across the whole 4-dimensional nesting, which an incorrect layout cannot produce |
 
 ## Summary
 

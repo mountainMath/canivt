@@ -750,6 +750,81 @@ The five that still fail the gate are ledgered `supported = FALSE` (`Table-080`,
 that **every** corpus folder holding an `.ivt` has a ledger row, so a file cannot
 again sit un-regression-tested.
 
+### 95f0437xcb01001 / pid59227 — "256 geographies" was the chunk size (2026-07-25)
+
+The second header-harvest sweep turned up two 2001 census tables that decoded
+**cleanly** and reported exactly **256 geographies**. 256 is not a census
+geography count; it is the codebook's chunk size, and that is what it turned out
+to be.
+
+*How it happened.* Both files are the 2001 F-series prose-bleed lineage: French
+description text bleeds *between* the two copies of a dimension name
+(`"Geographyment.Geographydu tableau est modifi…"`). The doubled-name anchor
+therefore drops records — 2 of 3 recovered on one file, 3 of 4 on the other —
+and with too few records `ivt_f2_descriptor()` gives up and the descriptor is
+rebuilt from the header slot table. That rebuild has no count field of its own,
+so it sizes each dimension from its **codebook member array**, which is written
+in 256-member chunks. A 53,488-member geography reads back as one chunk: 256.
+
+Both files still passed the gate because a 256-geography layout is perfectly
+self-consistent — it just decodes 1/209th of the table (2,510 cells instead of
+539,931). This is the same class of failure as the 98-10-0174 mother-tongue
+collapse: the misread is in the *descriptor*, and everything downstream is
+faithful to it.
+
+*The fix is a declaration, not a heuristic.* The descriptor record was never
+missing — only its name framing was unusable. The rebuild does recover the
+dimension NAME (from the codebook), so `ivt_f2_desc_declared_count()` scans the
+descriptor block for `[u16 count][type][01]<name>`, restricted to the u16-count
+storage tags (§D.1 of markers.md — only those can declare > 255) and required to
+resolve **uniquely**. `f0 d0 10 01 "Geography"` = 53488; `eb d0 10 01` = 53483.
+Wired into both rebuild paths (`ivt_f2_dims_from_slots()` and
+`ivt_f2_descriptor_from_slots()` — the second file reaches only the latter) and
+strictly one-directional: a declaration may RAISE a chunk-capped count, never
+lower a good one. LOUD (`canivt_declared_count`).
+
+*The container is the witness.* With the recovered count the page directory's
+outer entry cartesian equals the page count **exactly** — 418 == 418 (ipc 128)
+and 6686 == 6686 (ipc 8). No other geography count produces that equality, so
+the file's own page geometry confirms the descriptor field independently of the
+codebook that mis-sized it. `ivt_page_preflight()` passes on both.
+
+*A second defect underneath.* With the right count the cells were right but the
+geography LABELS were shifted by 512 — two chunks — past a point: Ontario's real
+4,219,410 sat at member 17342 while member 17854 carried the "Ontario" label, and
+Toronto's 943,080 appeared at two adjacent members. The positional reader
+`ivt_f2_geo_inline_dir()` was assembling 622 of the 624 blocks the 209-chunk group
+geometry needs, because `ivt_f2_is_ordinal()` had classified two directory entries
+(396 and 771) as ordinal delimiters. They were not: the 2001 DA codebook stores
+geographically consecutive DAs, so a 256-member chunk can be perfectly consecutive
+(`35210433, 35210434, …`) and is byte-indistinguishable from an ordinal run. Two
+blocks short, geography fell through to the loud dedup/regex scan, which
+reassembles chunks in the wrong order.
+
+An ordinal run **indexes members**, so it cannot exceed the member count. Bounding
+the test on `n` (`max(iv) <= n`) separates the two cleanly — DA codes are eight
+digits, ordinals run to 53,488. Applied at the `ivt_f2_geo_inline_dir()` call site,
+which is the one with a count in hand. The positional reader now returns all
+53,488 members with **zero duplicate uids**.
+
+*Validation, on the files' own arithmetic.* Both are random-rounded to base 5, and
+that is exactly what makes them self-validating — every additive residual must be a
+multiple of 5 and bounded by the number of summands, which an incorrect layout
+cannot fake:
+
+- `95f0437xcb01001` (539,931 cells): of its four "2000 Household" members only
+  *Number* is additive (the others are average / median / standard error). On it,
+  Canada == Σ 13 provinces at all three household sizes with residuals 0 / −5 / −5,
+  and the 288 CDs — the true 2001 count — over-sum by 25 across 288 units. The
+  household-size marginal 2,976,875 + 8,586,100 vs 11,562,980 is one step again.
+  Canada's 11,562,980 households, 2,976,875 one-person households, $58,360 average
+  and $46,752 median 2000 household income all land in the right cells.
+- `pid59227` (2,334,008 cells, 53,483 geo × 4 tenure × 9 construction period × 4
+  condition): **all 144** dimension combinations have Canada − Σ provinces ≡ 0 mod 5,
+  range ±20, mean −0.4; across the 288 CDs all 144 likewise ≡ 0 mod 5, range ±85.
+  Each dimension's Total == Σ its members with max deviation 25 / 40 / 20. The
+  rounding signature holds across the whole four-dimensional nesting.
+
 ## Milestones — how the architecture arrived
 
 ### Unified cell decode & metadata

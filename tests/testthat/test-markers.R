@@ -255,15 +255,32 @@ mk_corpus_file <- function(key) {
 mk_ledger <- utils::read.csv(testthat::test_path("fixtures", "corpus-ledger.csv"),
                              stringsAsFactors = FALSE)
 
+# The inventory is pure observation, so it parallelizes cleanly
+# (helper-parallel.R): collect every file's marker set first, assert serially.
+mk_probe <- function(key) {
+  f <- mk_corpus_file(key)
+  if (is.na(f)) return(list(absent = TRUE))
+  raw <- readBin(f, "raw", file.size(f))
+  obs <- suppressWarnings(ivt_marker_observe(raw))
+  rm(raw); gc(verbose = FALSE)
+  list(absent = FALSE, obs = obs)
+}
+
+mk_probes <- if (corpus_on) {
+  ivt_test_pmap(mk_ledger$key, mk_probe)
+} else {
+  vector("list", nrow(mk_ledger))
+}
+
 for (i in seq_len(nrow(mk_ledger))) {
+  local({
   row <- mk_ledger[i, ]
+  got <- mk_probes[[i]]
   test_that(paste0("markers: ", row$key), {
     skip_if(!corpus_on, "marker corpus sweep is opt-in: set CANIVT_CORPUS_TESTS=1 (and CANIVT_IVT_CACHE)")
-    f <- mk_corpus_file(row$key)
-    skip_if(is.na(f), paste0("table ", row$key, " not in the local corpus"))
-    raw <- readBin(f, "raw", file.size(f))
-    obs <- suppressWarnings(ivt_marker_observe(raw))
-    rm(raw); gc(verbose = FALSE)
+    expect_null(got$worker_error)
+    skip_if(isTRUE(got$absent), paste0("table ", row$key, " not in the local corpus"))
+    obs <- got$obs
     # every marker this file exercises must be in the catalog
     expect_identical(ivt_marker_violations(obs), character(0))
     # the file signature is always an IVT one for a corpus table: shared tail
@@ -277,5 +294,6 @@ for (i in seq_len(nrow(mk_ledger))) {
     # a signature is present.
     if (isTRUE(row$supported) && !is.na(obs$descriptor_b9))
       expect_true(obs$descriptor_b9 %in% IVT_MARKER_SET$descriptor_b9)
+  })
   })
 }
