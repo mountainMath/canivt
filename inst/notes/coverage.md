@@ -145,9 +145,8 @@ every supported table:
   target must be a value page whose presence record and tightest value run fit the
   entry's allocated size. That separates a genuinely undecodable page from a
   codebook block coincidentally addressed when a **sparse** directory is
-  over-walked (`CDNAIC3_LOC-1` walks a 209×314 cartesian over 282 real pages,
-  resolving ~20 k absent coordinates onto 644 codebook offsets, NONE a real page —
-  additivity-validated complete without them). The tally dedups by offset.
+  over-walked (a whole unwritten window resolves onto codebook offsets, NONE of
+  them a real page — see "Sparse directories" below). The tally dedups by offset.
 - **Pre-flight** (`ivt_page_preflight()`) applies the above to the first pages plus
   a **capacity rule** (presence bits ≤ the page's real cell count) and a **span
   rule** (the highest valid directory entry must sit in the outer dimension's
@@ -330,6 +329,7 @@ each lineage (narrative + validation records in
 | historical Census of Agriculture (optab12, optab13) | no code change — ordinary `04`-gen containers, descriptor synthesised from the `@824` slot table |
 | UCR police-reported crime (table_5_c-2008, table_6_c-2007/2009) | `ivt_f2_descriptor_from_slots()`; slot-addressed member arrays; the widened text-blob recognizer (the per-dimension documentation blob) |
 | provincial Business Register NAICS (PRSIC1dec1999, PRNAIC6dec2000) | ordinary `02`-gen containers once the `16 00` slot table declared the industry counts |
+| CD/CSD Business Register NAICS (CDNAIC3_LOC-1, PRVNAIC3_LOC-1, CDCSDNAIC3dec2006) | the page directory as the third count witness (`ivt_dir_outer_count()`, `canivt_container_count`); positional geography codebook arrays; the code-first `"<code> - <name>"` combined form |
 | LFS historical review (Table-023, Table-024, Table-051) | the declared slot allocation; `ivt_f2_descriptor_from_slots()`; `canivt_geo_datadim` geography |
 | transition-home / victim-services surveys (02560006) | under-declared count reconcile + `b3 ∈ {08..0e}` page-head codes |
 | SLID-era income (SP3_RHUXA9 103/404/405/501/701/703) | under-declared count reconcile — the declared slot allocation is the second count witness (`> 4·nextpow2(count)` ⇒ take the codebook member array's length, `canivt_underdeclared_count`); page-head codes widened to `b3 ∈ {08..0e}` |
@@ -527,6 +527,74 @@ chunks.
 |---|---|---|---|
 | `95f0437xcb01001` | 53,488 geo × 3 household sizes × Number/Average/Median/SE (2001 household income) | 539,931 | Canada == Σ 13 provinces on the additive member at every household size (residuals 0/−5/−5, one rounding step); 288 CDs — the true 2001 count — summing to +25 over 288 units; the household-size marginal 2,976,875 + 8,586,100 vs 11,562,980 Total, again one step. Every residual a multiple of 5, the random-rounding signature |
 | `pid59227` | 53,483 geo × 4 tenure × 9 period of construction × 4 condition | 2,334,008 | Canada == Σ 13 provinces: **all 144** dimension combinations residual ≡ 0 mod 5, range ±20, mean −0.4; over the 288 CDs all 144 likewise ≡ 0 mod 5, range ±85. Each dimension's Total == Σ its members with max deviation 25/40/20 — random rounding across the whole 4-dimensional nesting, which an incorrect layout cannot produce |
+
+## [x] Sparse directories, and the container as the THIRD count witness (2026-07-26)
+
+The Business-Register cluster that had been ledgered "sparse / over-walked
+directory" is not sparse in any new sense. The page directory allocates
+`nextpow2(window_count)` entry slots per outer member — the same power-of-two
+padding every other level gets — and **a window the writer never populated is
+simply a zero entry**, exactly like a wholly-suppressed geography. What looked
+like a fragmented directory was a correct directory read against a *wrong
+count*.
+
+Measured on the two CD-level tables, whose sub-sector dimension spans 11 windows
+(1366 members, `ipc = 128`) padded to 16 entry slots per geography:
+
+| table | entries in cartesian | non-zero | at window slot |
+|---|---|---|---|
+| `CDNAIC3_LOC-1` | 5,024 (11 × 314, stride 16) | 314 | 0 only |
+| `CDCSDNAIC3dec2006` | 94,832 (11 × 5,927, stride 16) | 4,305 | 0 only |
+| `PRNAIC6dec2000` | 112 (8 × 14, stride 8) | 112 | all 8 |
+
+One page per geography, always the first window. The referenced pages are
+**byte-contiguous** — every inter-page gap is exactly 0 across the whole data
+region — so no unreferenced page hides between them: these products publish the
+3-digit NAICS level only (the file names say `NAIC3`), while the codebook ships
+the complete NAICS hierarchy (Total + 103 three-digit + 328 four + 2 five + 931
+six + 1 blank = 1366). The 6-digit sibling `PRNAIC6dec2000` populates every
+window of the same model, which is what makes the reading structural rather than
+a special case. **The stride is the witness for the count**: a 16-slot stride is
+the file declaring an 11-window dimension; had SUB-SECTORS really been the ~104
+members that carry data, the writer would have allocated one slot.
+
+**The page directory is the third count witness** (`ivt_dir_outer_count()`,
+decode.R), after the descriptor record and the codebook. It runs last, inside
+`ivt_f2_dim_count_reconcile()`, probing the geometry the earlier witnesses imply:
+it walks the outermost paged dimension across its own allocated capacity and
+extends the count to the last member whose entry **decodes and carries cells**.
+The walk cannot stop at the first gap (an empty geography is a real member) and
+cannot be fooled by codebook bytes (a non-page offset ends the scan). It only
+ever raises a count, only where slots have no holes, and is LOUD
+(`canivt_container_count`).
+
+Three tables onboarded on this model, all validated on the file's own internal
+identities and against each other — no external ground truth exists for the
+Business Register at this vintage:
+
+| table | shape | cells | validation |
+|---|---|---|---|
+| `CDNAIC3_LOC-1` | 314 geo (13 prov + provincial residues + CDs) × 1,366 NAICS × 11 employment sizes | 162,127 | **four identities exact, zero residual**: EMP Total == Indeterminate + Subtotal 26,438/26,438; Subtotal == Σ the 8 bands 24,899/24,899; NAICS Total == Σ the 103 three-digit industries 3,306/3,306; province == Σ its CDs + provincial residue 10,903/10,903. Plus a **cross-file** check: its 13 province rows equal `PRVNAIC3_LOC-1` cell-for-cell on 10,903 (geo, sub, emp) triples, max abs 0 — two files with *different dimension orders and different straddle geometry* agreeing exactly |
+| `PRVNAIC3_LOC-1` | 11 employment × 14 geo × 1,366 NAICS | 12,022 | Canada == Σ 13 provinces/territories 1,119/1,119 exact; the same three EMP/NAICS identities exact |
+| `CDCSDNAIC3dec2006` | 5,927 geo (prov + CD + CSD) × 1,366 NAICS × 11 employment | 740,237 | province == Σ its CDs **11,002/11,002 exact** (this covers the 13 members the container recovered); CD == Σ its CSDs exact on 98.83 % of rows, the 16 differing CDs carrying unlisted CSD detail (max 1,663), not misalignment; the 13 code-less members are exactly the provinces/territories, summing to 2,311,337 |
+
+`CDCSDNAIC3dec2006` needed three further pieces beyond the count witness, each
+metadata-driven:
+
+- its geography codebook arrays are **positional** — interior blank records are
+  members (blank-name slots), not padding, proven against the file's own `_Sort`
+  code array (1,024 values, exact match at the positional offset, 0 % at the
+  drop-blanks alignment);
+- the descriptor **under-declares geography by 13** (5,914 vs 5,927): the
+  container walk recovers exactly the 13 province-level members, two of which
+  have empty pages — which is why the walk scans the whole allocated capacity
+  rather than stopping at the first gap;
+- its geography labels are combined strings in a **code-first** shape,
+  `"<code> - <name>"` (`IVT_F2_INLINE_PAT4`), and its field dictionary
+  (`"English Label"`, `"Etiquette"`, `"Type"`, `"_Sort"` → `encoding == "custom"`)
+  is what licenses the inline reader to run at all: a *DGUID* schema still means
+  the positional attribute layout, a *custom* one names the file's own combined
+  columns.
 
 ## Summary
 

@@ -972,9 +972,21 @@ ivt_f2_geo_read <- function(raw, full = FALSE) {
 # the blocks do not divide evenly into whole runs (not a clean chunk roster).
 # Blocks come from Stage 1 (`ents$values`, strict-first); a single-chunk table
 # (`n_geo <= 256`, `total_chunks == 1`) degenerates to one run per block.
-ivt_f2_geo_assemble_runs <- function(ents, n_geo) {
+ivt_f2_geo_assemble_runs <- function(ents, n_geo, raw = NULL) {
   blocks <- list()
   for (r in seq_len(ents$n)) {
+    # a documentation blob is not a member array: the structural text-block
+    # recognizer (no interior NUL, payload length filling the block) keeps the
+    # per-dimension prose out of the roster. `CDCSDNAIC3dec2006` carries the
+    # "Census division - This is a general term applying to ..." blob among its
+    # geography blocks, and its records read as plausible display text, so the
+    # run assembly closed on prose and every one of the 5914 CD/CSD names came
+    # back as a sentence fragment.
+    # (a caller may hand over a bare `values`/`strict` entry object with no block
+    # addresses -- then there is nothing to test and the filter simply stands down)
+    if (!is.null(raw) && length(raw) &&
+        is.function(ents$off) && is.function(ents$len) &&
+        ivt_f2_dir_is_text_block(raw, ents$off(r), ents$len(r))) next
     v <- ents$values(r); if (is.null(v)) next
     v <- trimws(v)
     if (length(v) < 3L || length(v) > 256L || ivt_f2_is_ordinal(v)) next
@@ -1090,7 +1102,7 @@ ivt_f2_geo_field_has_uid <- function(raw) {
 # Returns a light-style column list, or NULL when the blocks are not a clean roster.
 ivt_f2_geo_combined <- function(raw, ents, n_geo) {
   if (is.null(ents) || is.na(n_geo) || n_geo < 1L) return(NULL)
-  runs <- ivt_f2_geo_assemble_runs(ents, n_geo)
+  runs <- ivt_f2_geo_assemble_runs(ents, n_geo, raw)
   if (is.null(runs) || !length(runs)) return(NULL)
   nn_of  <- function(v) v[!is.na(v) & nzchar(v)]
   spaces   <- function(v) { nn <- nn_of(v); if (!length(nn)) 0 else mean(grepl("[[:space:]]", nn)) }
@@ -2226,6 +2238,15 @@ IVT_F2_INLINE_PAT2 <- "^(.*?)\\s*\\(([0-9A-Za-z.]+)\\)\\s*$"
 # (none stores its code in brackets).
 IVT_F2_INLINE_PAT3 <- "^(.*?)\\s*\\[([0-9A-Za-z.]+)\\]\\s*$"
 
+# A fourth layout puts the code FIRST, separated by a dash -- "<code> - <name>"
+# ("1001101 - Division No.  1, Subd. V", "3520 - Toronto Division"): the
+# Business-Register CD/CSD lineage (`CDCSDNAIC3dec2006`) stores its geography
+# that way. The code must be at least three digits, so an ordinary name that
+# happens to carry a dash ("Region 1 - North") cannot be mistaken for one; tried
+# last, after all three code-trailing forms, so no vintage that stores its code at
+# the end is affected.
+IVT_F2_INLINE_PAT4 <- "^\\s*([0-9]{3,12})\\s+-\\s+(.*?)\\s*$"
+
 # A geography-type abbreviation stored as a NAME SUFFIX: the custom-order
 # exports (cro/ord) append it to the display name as ", <ABBR>" ("East Kootenay,
 # RD", "Elkford, DM", "British Columbia, PR") instead of the token position the
@@ -2283,6 +2304,14 @@ ivt_f2_parse_inline <- function(v) {
     idx <- which(miss)[ok3]
     nm[idx]   <- vapply(m3[ok3], `[`, "", 2L)
     code[idx] <- vapply(m3[ok3], `[`, "", 3L)
+  }
+  miss <- is.na(code) & !is.na(v)                      # code-first "<code> - <name>"
+  if (any(miss)) {
+    m4 <- regmatches(v[miss], regexec(IVT_F2_INLINE_PAT4, v[miss], perl = TRUE))
+    ok4 <- vapply(m4, function(g) length(g) >= 3L, logical(1))
+    idx <- which(miss)[ok4]
+    code[idx] <- vapply(m4[ok4], `[`, "", 2L)
+    nm[idx]   <- vapply(m4[ok4], `[`, "", 3L)
   }
   ty[!is.na(ty) & ty == ""] <- NA_character_
   # suffix-stored type (cro/ord): fill only where the token position carried none
@@ -2616,7 +2645,16 @@ ivt_f2_flow_sides <- function(label) {
 }
 
 ivt_f2_geo_inline_dir <- function(raw) {
-  if (!is.null(ivt_f2_geo_schema(raw))) return(NULL)   # modern layout: not inline
+  # A DGUID-family schema means the modern attribute layout, which is read
+  # positionally (`ivt_f2_geo_attrs_dir()`), never as combined strings. A "custom"
+  # field dictionary is a different matter: it names the file's own columns
+  # ("English Label", "Etiquette", "Type", "_Sort" on the Business-Register CD/CSD
+  # tables) and its label columns ARE combined strings, laid down in exactly the
+  # chunk runs this walk assembles. Declining on the mere PRESENCE of a schema
+  # kept those tables off this path; the walk still self-detects (chunk sizes must
+  # fit and the run must parse as combined strings), so nothing else changes.
+  if (!is.null(ivt_f2_geo_schema(raw)) &&
+      !identical(ivt_f2_geo_encoding(raw), "custom")) return(NULL)
   ents <- ivt_f2_geo_entries(raw)                       # Stage 1 (shared)
   if (is.null(ents)) return(NULL)
   n_geo <- ivt_f2_geo_count(raw)

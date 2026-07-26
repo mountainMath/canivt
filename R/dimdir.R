@@ -592,18 +592,28 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   # it returns NA unless the codebook physically stores >= 2 full 256-member arrays
   # plus a consistent trailing partial, so a single-chunk (<= 256-member) dimension
   # is never touched and no count is fabricated -- the members it counts are all
-  # present in the file. Trust it over the descriptor whenever it exceeds the stated
-  # count (never when it is equal or smaller: a correctly-read chunked count, or a
-  # descriptor OVER-count, is left to the double-01 reconcile below). This is the
-  # generic-path analogue of the recovery already wired into `ivt_f2_descriptor_02()`
-  # for the byte-0 == 0x02 generation; without it the layout under-spans the page
-  # directory and the file preflight-rejects. LOUD (canivt_chunked_count).
+  # present in the file. Trust it over the descriptor whenever the two DISAGREE.
+  #
+  # It contradicts the descriptor in both directions. Under-count: the descriptor
+  # caps at the first block or reports the chunk count (above). OVER-count: the
+  # descriptor's count field was read at the wrong WIDTH -- the Business-Register
+  # NAICS lineage frames its classification dimension `09 68 0b 01 <name>`, and
+  # type 0x0b is a u16-count tag (the 2016 commuting-flow geography needs it), so
+  # the count reads 0x6809 = 26633 against a codebook holding 1366 members
+  # (`PRVNAIC3_LOC-1`; `CDCSDNAIC3dec2006` reads 26628 the same way). A dimension
+  # cannot have more members than its codebook stores, and a chunk run that ENDS
+  # IN A PARTIAL chunk is complete -- that trailing partial is what
+  # `ivt_f2_slot_chunked_count()` requires before it returns anything, so it is a
+  # count, not a floor. This is the generic-path analogue of the recovery already
+  # wired into `ivt_f2_descriptor_02()` for the byte-0 == 0x02 generation; without
+  # it the layout mis-spans the page directory and the file preflight-rejects.
+  # LOUD (canivt_chunked_count).
   for (k in seq_along(dims)) {
     c0 <- as.integer(dims[[k]]$count)
     if (is.na(c0) || isTRUE(dims[[k]]$double01)) next
     dir <- ivt_f2_dim_dir(raw, k, slots)
     cc <- tryCatch(ivt_f2_slot_chunked_count(raw, dir), error = function(e) NA_integer_)
-    if (!is.na(cc) && cc > c0) {
+    if (!is.na(cc) && cc != c0) {
       nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
       ivt_fallback(sprintf(paste(
         "Dimension %d (\"%s\") descriptor count %d is contradicted by a chunked",
@@ -655,7 +665,7 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   amb <- which(vapply(dims, function(d)
     !isTRUE(d$declared) &&
       (isTRUE(d$double01) || identical(as.integer(d$count), 0L)), logical(1)))
-  if (!length(amb)) return(dims)
+  if (!length(amb)) return(ivt_f2_dim_count_container(raw, dims))
   for (k in amb) {
     zero <- identical(as.integer(dims[[k]]$count), 0L)
     fix_zero <- function() {                          # count-0 last resort: 1, loud
@@ -680,6 +690,26 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
     if (!is.na(mc$count) && mc$count >= 1L) dims[[k]]$count <- mc$count
     else if (zero) fix_zero()
   }
+  ivt_f2_dim_count_container(raw, dims)
+}
+
+# The LAST count witness, and the one the codebook cannot outvote: the page
+# directory itself (`ivt_dir_outer_count()`, decode.R). Runs after every codebook
+# reconcile above, so it probes the geometry those counts imply and can only
+# extend the outermost paged dimension into pages that decode with cells. LOUD
+# (`canivt_container_count`) -- the count is read from the container, not from
+# the dimension's own declaration.
+ivt_f2_dim_count_container <- function(raw, dims) {
+  ext <- tryCatch(ivt_dir_outer_count(raw, dims), error = function(e) NULL)
+  if (is.null(ext)) return(dims)
+  k <- ext$dim; c0 <- as.integer(dims[[k]]$count)
+  nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
+  ivt_fallback(sprintf(paste(
+    "Dimension %d (\"%s\") declares %d members but the page directory carries",
+    "decodable data pages through member %d -- using the container's count."),
+    k, nm, c0, ext$count), class = "canivt_container_count")
+  dims[[k]]$count <- ext$count
+  dims[[k]]$slots <- NULL; dims[[k]]$slot_used <- NULL; dims[[k]]$declared <- NULL
   dims
 }
 
@@ -850,8 +880,15 @@ ivt_f2_geo_dim_index_impl <- function(raw, d = NULL) {
   # dimension explicitly ("REGION", "Provinces", "Geography") but carry no UID /
   # GEO_NAME schema and no inline pattern, so no dimension matches a geography
   # SIGNATURE -- the header name is the only geography evidence the file gives.
+  # `prov` (not just "province") covers the Business-Register lineage's own
+  # abbreviation: `PRVNAIC3_LOC-1` orders its dimensions EMP. SIZE RANGE /
+  # PROV/CAN / SUB-SECTORS, so the dimension-1 default names the employment-size
+  # dimension "geo" while the file's provinces sit at dimension 2. Its sibling
+  # `PRSIC2june2001` puts PROV/CAN first and is untouched (dimension 1 already
+  # wins above), which is exactly the point: the two files then agree on which
+  # dimension is geography.
   geo_named <- which(vapply(d$dims, function(x)
-    grepl("^\\s*(geograph|g\u00e9ograph|region|r\u00e9gion|province)",
+    grepl("^\\s*(geograph|g\u00e9ograph|region|r\u00e9gion|prov)",
           dim_name(x), ignore.case = TRUE), logical(1)))
   # The `02 00 20 00` survey generation has NO geography dimension in the
   # package's sense: its regional dimensions ("REGION", "GEOGRAPHY", "Provinces")
@@ -969,17 +1006,29 @@ ivt_f2_dim_dir_label_chunks <- function(raw, cnt, dir, mk) {
   }
   a <- character(0); b <- character(0)
   ei <- 1L
-  nonempty <- function(x) sum(!is.na(x) & nzchar(trimws(x)))
+  last_at <- function(ix) if (length(ix)) ix[length(ix)] else 0L
+  # where the block's records really END, under either padding convention: the
+  # padding slots read back as NA (unwritten) on one vintage and as empty text on
+  # another, so take the last record that is present under each and let either
+  # match the wanted chunk size.
+  ends <- function(x) c(last_at(which(!is.na(x))),
+                        last_at(which(!is.na(x) & nzchar(trimws(x)))))
   take_run <- function(need) {
     # consume the next blocks whose record counts match `need` (in order),
     # skipping non-matching framing entries between runs. A partial final chunk
     # may be stored either at its true length OR padded to a full 256-slot block
     # with trailing empty records (Canadian Business Patterns: NAICS(929)'s last
     # chunk is 161 real members in a 256-slot block); accept such a block when
-    # its NON-empty count equals the wanted size and slice it to that size.
+    # its records END at the wanted size and slice it to that size. The measure
+    # is a record POSITION, not the non-empty COUNT: what is being detected is
+    # trailing slot padding, and a member inside the chunk may legitimately carry
+    # an empty label -- the Business-Register `PRVNAIC3_LOC-1`'s last SUB-SECTORS
+    # chunk holds 86 members whose 86th label is blank, so the count read 85 and
+    # the whole chunk walk (hence every label on a 1366-member classification)
+    # was lost.
     fits <- function(v, want)
       length(v) == want ||
-      (want < 256L && length(v) == 256L && nonempty(v) == want)
+      (want < 256L && length(v) == 256L && want %in% ends(v))
     run <- character(0)
     for (want in need) {
       while (ei <= length(vals) && !fits(vals[[ei]], want)) ei <<- ei + 1L

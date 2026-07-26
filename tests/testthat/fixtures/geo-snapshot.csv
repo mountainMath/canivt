@@ -55,7 +55,7 @@
 "CBP2007DA",50988,"b9866184eaa023498ecd8c4d25ba8d2d","canivt_descriptor_lenient|canivt_geo_bare_codes","44f5f01aa72cbbda00c703c7567370d0","canivt_descriptor_lenient|canivt_geo_bare_codes"
 "CBP2008DA",51144,"e406342890b7059cdb8f65600efb97f9","canivt_descriptor_lenient|canivt_geo_bare_codes",NA,NA
 "CBP2010DA",45383,"5419aaba76b854138536abf83ec22a4b","canivt_descriptor_lenient|canivt_geo_bare_codes",NA,NA
-"SP3_PAWNKX_CDNAIC3_LOC-1",314,"d5ef629b6769145ccec70f4258094089","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
+"SP3_PAWNKX_CDNAIC3_LOC-1",314,"823d70e9ad6fe16ba35b1541068635ba","canivt_descriptor_lenient|canivt_chunked_count|canivt_geo_datadim",NA,NA
 "SP3_6OXWOP_ucr2.2_3-2006",1,"96d9c5d7851b29fa46d857eda2ec3d6e","canivt_geo_by_name|canivt_geo_datadim",NA,NA
 "SP3_HHP4CZ_h2530002-1974-2010",1,"a0c31675c4f79751e2e92310d5553781","canivt_descriptor_from_slots|canivt_geo_datadim",NA,NA
 "SP3_C2YSID_Table-051",1,"a0c31675c4f79751e2e92310d5553781","canivt_descriptor_from_slots|canivt_fallback|canivt_geo_datadim",NA,NA
@@ -121,7 +121,7 @@
 "SP3_RHUXA9_801",1,"a0c31675c4f79751e2e92310d5553781","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
 "SP_BXW0XU_optab12",11,"5ad1621b27bac3140d1d0f87dc13b4ff","canivt_descriptor_from_slots|canivt_geo_datadim",NA,NA
 "SP_U649IE_optab13",11,"51e4381b4149c634a8699be0dfe81bd7","canivt_descriptor_from_slots|canivt_geo_datadim",NA,NA
-"SP_IE56KT_CDCSDNAIC3dec2006",5914,"6493f51eab180793cb0b739c8eb1de9b","canivt_descriptor_lenient|canivt_geo_unparsed",NA,NA
+"SP_IE56KT_CDCSDNAIC3dec2006",5927,"a38c7ef26809717d2cdcc9b7cce6fb0c","canivt_descriptor_lenient|canivt_chunked_count|canivt_container_count|canivt_fallback",NA,NA
 "SP3_NAZQV2_Table-210",11,"74cda1e44ea4a135e9b1ca6d2a7b6cf9","canivt_descriptor_from_slots|canivt_fallback|canivt_geo_datadim",NA,NA
 "SP3_A2FD0W_02560006",15,"6becd725862a827e45d1534cd131a54e","canivt_geo_datadim",NA,NA
 "SP3_6OXWOP_Table_6_c-2009",1,"275a088a7d6d2647c9c501fa812cb302","canivt_geo_datadim",NA,NA
@@ -131,4 +131,4 @@
 "SP_1ODZAS_PROVSIC2june1998",0,"2159d192af12493c33828308333dfbc4","canivt_fallback",NA,NA
 "SP_FPBMMO_PRVNAIC1dec1998",0,"2159d192af12493c33828308333dfbc4","canivt_fallback",NA,NA
 "SP_ORYADY_PRSIC2june2001",14,"c89e74890adf359c204f02c31025aa9c","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
-"SP3_PAWNKX_PRVNAIC3_LOC-1",11,"a1db760f72984307c61ad88fe20f6502","canivt_descriptor_lenient|canivt_geo_datadim",NA,NA
+"SP3_PAWNKX_PRVNAIC3_LOC-1",14,"9574287d5901f97f88d8c8135f5ab625","canivt_descriptor_lenient|canivt_chunked_count|canivt_geo_by_name|canivt_geo_datadim",NA,NA

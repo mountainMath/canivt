@@ -248,3 +248,16 @@ test_that("ivt_offline_grace lets non-connection errors propagate", {
   expect_error(ivt_offline_grace(stop("boom")), "boom")
   expect_equal(ivt_offline_grace(41L + 1L), 42L)
 })
+
+test_that("the container count witness stays silent when it has nothing to say", {
+  # `ivt_dir_outer_count()` is the LAST count witness and runs on every read, so
+  # its failure mode matters more than its success: a container it cannot lay out
+  # must yield NULL, not an error, and `ivt_f2_dim_count_container()` must then
+  # hand back the dimensions untouched and unwarned. (The witness's positive path
+  # is exercised by the corpus ledger -- CDCSDNAIC3dec2006's 5,914 -> 5,927.)
+  dims <- list(list(name = "Geography", count = 13L, type = 0x00),
+               list(name = "Industry",  count = 77L, type = 0x00))
+  expect_null(ivt_dir_outer_count(raw(0), dims))
+  expect_no_warning(out <- ivt_f2_dim_count_container(raw(0), dims))
+  expect_identical(out, dims)
+})

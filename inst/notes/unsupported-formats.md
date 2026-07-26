@@ -58,12 +58,13 @@ rather than sitting only in prose:
 | key | why |
 |---|---|
 | `SP3_NAZQV2_Table-210` | stale `@558` anchor **and** irregular directory packing that does not fit the power-of-two stride model — `ivt_page_preflight()` rejects |
-| `SP_IE56KT_CDCSDNAIC3dec2006` | `SUB-SECTORS` misread as 26 628 (type `0x0b`) plus a sparse fragmented directory — pre-flight rejects |
 | `SP3_C2YSID_Table-080` | the `@558` anchor does not resolve; `ivt_idx0()` falls to the historical constant and no directory entry validates |
-| `SP_1ODZAS_PROVSIC2june1998` | Business-Register provincial SIC — sparse / over-walked directory, span-and-overshoot pre-flight failure |
+| `SP_1ODZAS_PROVSIC2june1998` | Business-Register provincial SIC — span-and-overshoot pre-flight failure that the count witnesses do not resolve |
 | `SP_FPBMMO_PRVNAIC1dec1998` | same |
-| `SP_ORYADY_PRSIC2june2001` | same |
-| `SP3_PAWNKX_PRVNAIC3_LOC-1` | same, with the `_LOC-1` combined NAICS × location dimension |
+
+(`PRSIC2june2001`, `PRVNAIC3_LOC-1` and `CDCSDNAIC3dec2006`, listed here as guards
+on 2026-07-25, were onboarded 2026-07-26 — see the sparse-directory section of
+[`coverage.md`](coverage.md).)
 
 Onboarded siblings, for contrast: `PROVINDjune1997` (dense DIVISIONS, 2,031
 cells), `PROVSIC3june1997` (chunked, total-far, 22,581), `PROVSIC3-1` (chunked,
@@ -100,20 +101,23 @@ guards above on 2026-07-25 and keep their diagnosis here.
 
 **Sparse-directory modelling (Business-Register provincial SIC/NAIC)**
 
-- `PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1` —
-  sparse / over-walked directory, span-and-overshoot pre-flight failure. All four
-  are now in the local corpus and **ledgered guards**. (`PRNAIC6dec2000`, listed
-  here before, was onboarded 2026-07-25: the `16 00` slot table declares its
-  930-member NAICS-6 dimension, and the decode reconciles exactly on all four of
-  the file's internal identities — see [`coverage.md`](coverage.md).)
-- `SP_IE56KT_CDCSDNAIC3dec2006` (Business Patterns Dec 2006, CD/CSD 5914 ×
-  SUB-SECTORS × EMP 12) — the descriptor reads SUB-SECTORS = **26628**
-  (type `0x0b`), a misread: for this CD/CSD-separated variant SUB-SECTORS is pure
-  3-digit NAICS (~104 — the u8 `0x68` of the u16 `0x6804`). The sibling
-  `CDNAIC3_LOC-1`'s 26628 is a **genuine** NAICS × location combined dimension, so
-  the type byte alone cannot separate them. Plus a sparse fragmented directory
-  (4,306 markers, finder `n_pages = 1`). Needs a descriptor-count fix **and**
-  directory relocation — the hardest of the sampled set.
+- **Largely closed 2026-07-26.** The "sparseness" was a correct directory read
+  against a wrong count: the directory allocates `nextpow2(window_count)` entry
+  slots per outer member and leaves unwritten windows as zero entries. With the
+  page directory added as the third count witness (`ivt_dir_outer_count()`),
+  `PRSIC2june2001`, `PRVNAIC3_LOC-1` and `CDCSDNAIC3dec2006` all decode and
+  reconcile exactly on the files' own identities — see the sparse-directory
+  section of [`coverage.md`](coverage.md). `PRNAIC6dec2000` had already gone that
+  way on 2026-07-25 via the `16 00` slot table.
+- `PROVSIC2june1998`, `PRVNAIC1dec1998` remain **ledgered guards**. They are
+  `byte 0 == 0x02` sub-A files, and their directories are irregular in a way the
+  onboarded siblings' are not: within a 16-entry stride per province the pages
+  sit at slot 0 **plus slot 10** (`PRVNAIC1dec1998`) or slots 0 and 5
+  (`PROVSIC2june1998`), where the positional model produces consecutive window
+  slots (`PROVSIC3june1997`, onboarded, packs 0,1,2,3). Their industry counts are
+  correspondingly under-read (20 and 77 against a directory carrying two windows'
+  worth of pages), and the sub-A recovery does not reconcile — so the gate refuses
+  them.
 
 **Layout extent / overshoot**
 
@@ -127,14 +131,25 @@ guards above on 2026-07-25 and keep their diagnosis here.
 - `Dec09DA` (Canadian Business Patterns) — the downloaded file itself is corrupt,
   not a format gap.
 
-## Known limitation on a *supported* file
+## Closed: the "known limitation" on `CDNAIC3_LOC-1` (2026-07-26)
 
-`SP3_PAWNKX_CDNAIC3_LOC-1` (type `0x0b`, NAICS × location combined dimension) is
-in the ledger at **133,217** cells, additivity-validated over the pages it
-resolves (its sparse directory is over-walked by the cartesian, which
-`ivt_skip_is_lost_page()` correctly reports as non-pages). A chunk-count reconcile
-(`cc != c0`, dimdir.R) fixes the 26628 → 1366 over-read but was **reverted**: with
-it the layout is still unmodelled — only sub-members 1..104 of 1366 decode (one
-page per geography, stride 16, no per-window sub-pages), giving 162,127 cells with
-no ground truth to prefer either number. Honest partial coverage beats a silent
-mis-decode; closing it needs structural work *and* ground truth.
+This section used to record `SP3_PAWNKX_CDNAIC3_LOC-1` as knowingly partial —
+ledgered at **133,217** cells with its `SUB-SECTORS` count over-read as 26,628,
+because the chunk-count reconcile that fixes it (1,366) left only sub-members
+1..104 decoding and there was no ground truth to prefer 162,127 over 133,217.
+
+Both halves are now settled, structurally:
+
+- **1,366 is right**, and the container says so: the directory allocates 16 entry
+  slots per geography = `nextpow2(11 windows)`, which is the file declaring an
+  11-window dimension. A ~104-member dimension would have been allocated one slot.
+- **162,127 is the whole file.** Only window 0 is ever populated (one page per
+  geography), and the referenced pages are byte-contiguous with zero gaps, so
+  there is no unwritten-window data hiding anywhere: the product publishes the
+  3-digit NAICS level only, while the codebook carries the full hierarchy. The
+  6-digit sibling `PRNAIC6dec2000` populates all 8 of its windows under the same
+  model.
+
+Validated on four internal identities (all exact, zero residual) and cell-for-cell
+against `PRVNAIC3_LOC-1`, a file with a different dimension order and straddle
+geometry — details in [`coverage.md`](coverage.md). Ledger row raised to 162,127.

@@ -353,11 +353,10 @@ corrupted source download).
   GEOMETRY (recognised width/page nibbles, and the presence record + tightest possible
   value run fitting the entry's allocated size) instead of counting every unrecognised
   marker — a real page fits by construction, a codebook block does not. 0 false skips
-  here; the doctored-`b3` unit test still fires. *Known limitations*: EMP.SIZE labels are
+  here; the doctored-`b3` unit test still fires. *Known limitation*: EMP.SIZE labels were
   shifted (a fixed-width `[80 10][len]…` member array the generic scans misread — values
-  and member ids are correct, additivity proves it), and see
-  [`unsupported-formats.md`](unsupported-formats.md) for the 133,217 vs 162,127 cell
-  question.
+  and member ids are correct, additivity proves it). The 133,217 vs 162,127 cell question
+  was settled on 2026-07-26 in favour of **162,127** — see "Sparse directories" below.
 
   **To (re-)validate this lineage**: pivot `x$cells` by `emp` within each `(geo, sub)`
   group and assert `member1 = member2 + member3` and `member3 = Σ(member4…member11)`
@@ -745,7 +744,8 @@ suite FAIL 0 / PASS 1144 with the two long-standing loud fallbacks (98-10-0662's
 synthetic-aggregate `geo_name` fill and `ord-08035`'s inline name subtraction).
 
 The five that still fail the gate are ledgered `supported = FALSE` (`Table-080`,
-`PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1`) — see
+`PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1`; the
+last two were onboarded 2026-07-26, see "Sparse directories" below) — see
 [`unsupported-formats.md`](unsupported-formats.md). `test-corpus.R` now asserts
 that **every** corpus folder holding an `.ivt` has a ledger row, so a file cannot
 again sit un-regression-tested.
@@ -824,6 +824,89 @@ cannot fake:
   range ±20, mean −0.4; across the 288 CDs all 144 likewise ≡ 0 mod 5, range ±85.
   Each dimension's Total == Σ its members with max deviation 25 / 40 / 20. The
   rounding signature holds across the whole four-dimensional nesting.
+
+### Sparse directories — the container is the third count witness (2026-07-26)
+
+The last sizeable UNSUPPORTED cluster was labelled "sparse / over-walked
+directory": the Business-Register CD/CSD and provincial NAICS tables, plus the
+`CDNAIC3_LOC-1` file that *was* supported but knowingly partial. The label was
+wrong in an instructive way — **nothing about those directories is sparse in a new
+sense.** The directory pads the outer levels to powers of two exactly like every
+other level, and a window the writer never populated is a zero entry, the same
+"absent" the decoder already understands for a wholly suppressed geography. What
+made them look fragmented was reading a correct directory against a **wrong
+count**.
+
+*The measurement that settles it.* `CDNAIC3_LOC-1`'s sub-sector dimension spans
+11 windows (1,366 members at `ipc = 128`), so the directory allocates
+`nextpow2(11) = 16` entry slots per geography. Walking its 5,024-entry cartesian:
+314 non-zero entries, **every one at window slot 0**. `CDCSDNAIC3dec2006`: 94,832
+entries, 4,305 non-zero, all at slot 0. And the referenced pages are
+**byte-contiguous** — every inter-page gap is exactly 0 across the data region —
+so no unreferenced page hides between them. These products publish the 3-digit
+NAICS level only (their names say `NAIC3`) while the codebook ships the whole
+hierarchy: Total + 103 three-digit + 328 four + 2 five + 931 six + 1 blank = 1,366.
+The 6-digit sibling `PRNAIC6dec2000` populates all 8 windows of the identical
+model, which is what makes this structural rather than a special case.
+
+That also answers the older 133,217 vs 162,127 question. **The stride is the count
+witness**: 16 slots per geography is the file declaring an 11-window dimension —
+a ~104-member dimension gets one slot — so 1,366 is right and 162,127 cells is the
+whole file, not a partial read.
+
+*The general lesson, wired in.* There were two count witnesses (the descriptor
+record, then the codebook). The container is the third, and the only one that can
+outvote both: `ivt_dir_outer_count()` (decode.R) builds the layout the earlier
+witnesses imply, walks the **outermost paged dimension** across its own allocated
+capacity, and extends the count to the last member whose entry decodes **and
+carries cells**. Three gates keep it honest:
+
+- it needs ≥ 2 paged levels — with one, the entries count *windows*, not members;
+- it declines where the dimension has slot holes (the declared slot map already
+  owns that geometry);
+- the scan cannot stop at the first gap, because an empty geography is a real
+  member — `CDCSDNAIC3dec2006` has two of those among the 13 members it recovers —
+  and it cannot run away into the codebook, because an offset that is not a page
+  ends the scan.
+
+It runs last inside `ivt_f2_dim_count_reconcile()`, only ever raises, and is LOUD
+(`canivt_container_count`).
+
+*What `CDCSDNAIC3dec2006` needed beyond the count.* Its descriptor under-declares
+geography by 13 (5,914 vs 5,927 — the recovered members are exactly the provinces
+and territories, summing to 2,311,337). Its geography codebook arrays are
+**positional**: interior blank records are members, not padding. The first
+alignment attempt dropped blanks and the leading record, and CD == Σ CSD then held
+on only 9 % of rows with absurd values; the file's own `_Sort` code array (entry
+17, 1,024 values) decided it — a 100 % match at the positional offset, so blanks
+are members and record 1 ("Newfoundland and Labrador") is a real province-level
+member. Positional assembly gives CD == Σ CSD exact on 142,948 rows. Its labels are
+combined strings in a **code-first** shape, `"<code> - <name>"` ("1001101 -
+Division No.  1, Subd. V"), added as `IVT_F2_INLINE_PAT4` — the code must be ≥ 3
+digits and the pass runs last, after all three code-trailing forms, so no existing
+vintage is touched. And the inline reader had to be allowed to run at all: it used
+to decline on the mere *presence* of a geography field dictionary. A **DGUID**
+schema does mean the positional attribute layout, but a **custom** dictionary
+(`"English Label"`, `"Etiquette"`, `"Type"`, `"_Sort"`) names the file's own
+combined columns, so the guard now distinguishes the two.
+
+*Validation, on the files' own arithmetic and against each other* (no external
+ground truth exists for the Business Register at this vintage): `CDNAIC3_LOC-1`
+162,127 cells with four identities exact and zero residual (EMP Total ==
+Indeterminate + Subtotal 26,438/26,438; Subtotal == Σ the 8 bands 24,899/24,899;
+NAICS Total == Σ the 103 three-digit industries 3,306/3,306; province == Σ its CDs
++ residue 10,903/10,903). Cross-file: its 13 province rows equal
+`PRVNAIC3_LOC-1`'s cell-for-cell on 10,903 (geo, sub, emp) triples, max abs 0 —
+two files whose dimension order and straddle geometry differ, agreeing exactly.
+`PRVNAIC3_LOC-1` 12,022 cells, Canada == Σ 13 provinces 1,119/1,119.
+`CDCSDNAIC3dec2006` 740,237 cells, province == Σ CD 11,002/11,002 exact (which
+covers the 13 recovered members); CD == Σ CSD exact on 98.83 % of rows, the 16
+differing CDs carrying unlisted CSD detail (max 1,663), not misalignment.
+
+Still refused: `PROVSIC2june1998` and `PRVNAIC1dec1998`, whose directories put
+each province's pages at slot 0 **plus slot 10** (or 0 and 5) of a 16-entry
+stride, where the positional model produces consecutive window slots — a genuinely
+different packing, not a count problem.
 
 ## Milestones — how the architecture arrived
 

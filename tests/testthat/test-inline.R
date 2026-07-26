@@ -34,6 +34,27 @@ test_that("ivt_f2_parse_inline captures name/code/flag/type/tnr per form", {
   expect_true(is.na(ivt_f2_parse_tnr("some note")))
 })
 
+test_that("the code-first form parses, and only where the code is unambiguous", {
+  # the Business-Register CD/CSD lineage (CDCSDNAIC3dec2006) writes "<code> - <name>";
+  # every code-trailing form is tried first, so this pass only ever sees leftovers
+  v <- c(
+    "1001101 - Division No.  1, Subd. V",   # code-first: 7-digit CSD
+    "3520 - Toronto Division",              # code-first: 4-digit CD
+    "Region 1 - North",                     # NOT a code: 1 digit, name keeps the dash
+    "Sault Ste. Marie - Wawa",              # NOT a code: no leading digits at all
+    "East Kootenay, RD (5901)"              # code-trailing wins, untouched
+  )
+  p <- ivt_f2_parse_inline(v)
+  expect_equal(p$code[1], "1001101")
+  expect_equal(p$name[1], "Division No.  1, Subd. V")
+  expect_equal(p$code[2], "3520")
+  expect_equal(p$name[2], "Toronto Division")
+  expect_true(is.na(p$code[3]))
+  expect_true(is.na(p$code[4]))
+  expect_equal(p$code[5], "5901")
+  expect_equal(p$name[5], "East Kootenay, RD")
+})
+
 test_that("ivt_f2_split_bilingual splits language pairs, not dual English names", {
   nm <- c(
     "Newfoundland | Terre-Neuve",                          # 1991 "|": always split

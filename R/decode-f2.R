@@ -75,3 +75,23 @@ ivt_bits_pairswap_msb <- function(bytes, bit) {
 # Returns a logical vector aligned with the cell grid (TRUE = cell present).
 ivt_f2_record_present <- function(raw, ps, rec_bytes, bit)
   ivt_bits_pairswap_msb(as.integer(raw[(ps + 1L):(ps + rec_bytes)]), bit)
+
+IVT_POPCOUNT <- vapply(0:255, function(b) sum(bitwAnd(bitwShiftR(b, 0:7), 1L)),
+                       integer(1))
+
+# How many values the page carries, straight from its presence record: the
+# popcount of the WHOLE record, not of the bits the layout models. The
+# byte-pair-swap only permutes bytes, so it does not affect a popcount and is
+# skipped -- this is a 256-entry lookup over `rec_bytes` bytes, cheap enough to
+# pay on every page.
+#
+# The distinction matters because the two can differ. The presence record spans
+# the dimension's DECLARED SLOT ALLOCATION, while the cell grid spans its MEMBER
+# COUNT, and a writer may flag a slot the codebook never allocated: the
+# Business-Register `PRSIC2june2001` stores 11 values at slot 79 of an alloc-128
+# `MAJOR GROUPS` whose `16 00` slot table declares 78 live slots (they duplicate
+# the page's own Total row). The record is the file's own statement of how many
+# values follow the presence bytes, so it -- not our grid -- is what the page's
+# byte extent must be measured against.
+ivt_f2_record_popcount <- function(raw, ps, rec_bytes)
+  sum(IVT_POPCOUNT[as.integer(raw[(ps + 1L):(ps + rec_bytes)]) + 1L])

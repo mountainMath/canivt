@@ -107,6 +107,71 @@ ivt_value_trailer <- function(b0, b2, b3 = 0x08L) {
   2L * (b2 %/% 16L) + 2L * as.integer(bitwAnd(b2, 0x0FL) > 0L) + head
 }
 
+# THE CONTAINER IS THE THIRD COUNT WITNESS. The descriptor states each dimension's
+# member count and the codebook states it again (`ivt_f2_dim_count_reconcile()`);
+# the PAGE DIRECTORY states it a third time, and it is the only witness that
+# cannot be short: a member with data has a page, and that page has a directory
+# entry at the index the nesting puts it. So when the entry ONE PAST the
+# outermost dimension's declared extent still resolves to a page that decodes
+# with data, the declared count is short -- those cells exist in the file and
+# would otherwise be silently dropped.
+#
+# The Business-Register `CDCSDNAIC3dec2006` is the case in point: its CD/CSD
+# record declares 5,914 members, its codebook holds 5,927 label records, and the
+# directory carries decodable pages through geography 5,927 and exactly one
+# entry of zeroes after -- the 13 missing members are BC's last census divisions
+# and the three territories'. (Validated: with the container's count every
+# census division equals the sum of its census subdivisions, 142,948 rows exact.)
+#
+# Gated hard, because a directory legitimately holds EMPTY pages in the slots
+# past the real counts (the padding to the declared slot allocation):
+#   * only the OUTERMOST paged dimension -- the one whose entries are strided
+#     furthest apart -- is probed, where an extension cannot be confused with an
+#     inner dimension's padding;
+#   * each probed entry must be a real page that DECODES AND CARRIES CELLS under
+#     the same layout, so allocation slack (empty pages) stops the walk at once;
+#   * the walk is contiguous from the declared extent and capped at the level's
+#     power-of-two allocation -- it can only RAISE a count, never lower one.
+# LOUD (`canivt_container_count`).
+ivt_dir_outer_count <- function(raw, dims) {
+  lay <- tryCatch(ivt_layout_impl(raw, d = list(dims = dims)), error = function(e) NULL)
+  if (is.null(lay)) return(NULL)
+  t <- length(lay$ent_counts)
+  # t == 1 means the only paged level is the straddle dimension's WINDOW level,
+  # whose entries count windows, not members -- not a member-count witness.
+  if (t < 2L) return(NULL)
+  jo <- lay$ent_idx[t]                       # the outermost paged dimension
+  n0 <- as.integer(lay$ent_counts[t]); stride <- as.numeric(lay$estride[t])
+  if (is.na(n0) || n0 < 1L || !is.finite(stride) || stride < 1) return(NULL)
+  if (!identical(as.integer(lay$counts[jo]), n0)) return(NULL)   # slot holes: leave alone
+  cap <- ivt_f2_nextpow2(n0)                 # the level's own allocated capacity
+  if (cap <= n0) return(NULL)
+  idx0 <- tryCatch(ivt_idx0(raw), error = function(e) NA_integer_)
+  if (is.na(idx0)) return(NULL)
+  n <- length(raw); got <- n0
+  # Scan the whole allocated capacity and take the LAST member with data. The walk
+  # cannot stop at the first gap: a geography with no stored cells (wholly
+  # suppressed, or simply empty) is a real member whose entry is zero or a minimal
+  # empty page, and `CDCSDNAIC3dec2006` has two of those inside its 13 undeclared
+  # members. Only entries that DECODE AND CARRY CELLS extend the count; everything
+  # between is skipped, and a garbage entry (an offset that cannot be a page) ends
+  # the scan.
+  for (i in n0:(cap - 1L)) {
+    k <- i * stride
+    if (!ivt_entry_addressable(k, idx0)) break
+    o <- idx0 + 8L * as.integer(k)
+    if (o + 8L > n) break
+    off <- rd_u32(raw, o); size <- rd_u16(raw, o + 4L)
+    if (is.na(off) || is.na(size)) break
+    if (off == 0L || size == 0L) next                      # unallocated slot
+    if (off < 1L || size < 4L || off + size > n) break     # not a page: stop
+    pg <- tryCatch(ivt_quietly(ivt_decode_page(raw, off, lay, size)),
+                   error = function(e) NULL)
+    if (!is.null(pg) && nrow(pg$tuples)) got <- i + 1L
+  }
+  if (got > n0) list(dim = jo, count = as.integer(got)) else NULL
+}
+
 # Derive the full layout from the header descriptor: how the dimensions split into
 # in-page / straddle / paged roles, the in-page presence bit grid, the directory
 # entry strides, and the per-page presence record size. Geography is dimension 1
@@ -273,23 +338,43 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   if (b0 < 0x80L) return(ivt_decode_page_dense(raw, off, lay, size, width, is_float))
   vstart <- 4L + lay$rec_bytes + ivt_value_trailer(b0, b2, b3)
 
+  # The value run is as long as the presence record says (`ivt_f2_record_popcount()`
+  # -- the WHOLE record), which is what the page's byte extent must be measured
+  # against. The grid's own popcount only says how many of those values this
+  # layout has a cell for; the two agree everywhere the members fill their
+  # declared slot allocation, so the extra popcount is the only cost paid there.
+  nvf <- ivt_f2_record_popcount(raw, off + 4L, lay$rec_bytes)
+  if (nvf == 0L) return(NULL)
   pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
   nv <- sum(pres)
-  if (nv == 0L) return(NULL)
-  vend <- vstart + nv * width
+  vend <- vstart + nvf * width
   if ((!is.na(size) && vend > size) || off + vend > length(raw)) {
     cli::cli_abort(c(
       "IVT page at byte {off}: the computed value run ends at page byte {vend} but the directory allocates {size} bytes.",
       i = "The page marker ({sprintf('%02x %02x %02x %02x', as.integer(raw[off + 1L]), as.integer(raw[off + 2L]), as.integer(raw[off + 3L]), as.integer(raw[off + 4L]))}) was likely misread (wrong value width or trailer)."
     ), class = "canivt_page_overrun")
   }
+  if (nv == 0L && nvf == nv) return(NULL)
   bytes <- raw[(off + vstart + 1L):(off + vend)]
   vals <- if (is_float) {
-    readBin(bytes, "double", n = nv, size = 8L, endian = "little")
+    readBin(bytes, "double", n = nvf, size = 8L, endian = "little")
   } else {
-    as.numeric(readBin(bytes, "integer", n = nv, size = width, signed = TRUE, endian = "little"))
+    as.numeric(readBin(bytes, "integer", n = nvf, size = width, signed = TRUE, endian = "little"))
   }
-  list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals)
+  if (nvf == nv)                                   # every stored value is a cell
+    return(list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals,
+                extra = 0L, extra_nz = 0L))
+  # The record flags positions the grid does not model, so a value's index in the
+  # run is its RANK AMONG ALL PRESENT BITS, not among the modelled ones. Take that
+  # rank explicitly rather than assuming the unmodelled bits sit past the last
+  # modelled one (they do on the one corpus file that has any, but nothing in the
+  # container guarantees it, and getting it wrong would shift a whole page).
+  full <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes,
+                                seq.int(0L, lay$rec_bytes * 8L - 1L))
+  vi <- cumsum(full)[lay$grid$bit[pres] + 1L]
+  keepv <- logical(nvf); keepv[vi] <- TRUE      # `-vi` would empty an all-extra page
+  list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals[vi],
+       extra = nvf - nv, extra_nz = sum(vals[!keepv] != 0))
 }
 
 # The DENSE page variant (marker high nibble 0x0; the 1991 profile tables
@@ -323,8 +408,10 @@ ivt_decode_page_dense <- function(raw, off, lay, size, width, is_float) {
   }
   keep <- vals != 0
   if (!any(keep)) return(NULL)
+  # A dense page has no presence record, so it cannot flag an undeclared slot:
+  # it stores one value per GRID position and the run past `ngrid` is padding.
   list(tuples = lay$grid$tuples[seq_len(k), , drop = FALSE][keep, , drop = FALSE],
-       vals = vals[keep])
+       vals = vals[keep], extra = 0L, extra_nz = 0L)
 }
 
 # Cheap structural pre-flight for the decodability gate: the first few
@@ -374,9 +461,16 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     }
     tr <- tryCatch(ivt_value_trailer(b0, b2, b3), error = function(e) NULL)
     if (is.null(tr)) return(FALSE)
+    # The extent is measured against the run the PRESENCE RECORD declares (its
+    # full popcount); the grid's popcount is only how many of those values this
+    # layout claims a cell for, and it is the capacity bound below. Measuring the
+    # extent against the grid instead made a page carrying values at undeclared
+    # member slots look like a 44-byte trailing gap and rejected the whole file
+    # (the Business-Register PRSIC2june2001).
+    nvf <- ivt_f2_record_popcount(raw, off + 4L, lay$rec_bytes)
+    if (nvf == 0L) next
     nv <- sum(ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit))
-    if (nv == 0L) next
-    end <- 4L + lay$rec_bytes + tr + nv * w
+    end <- 4L + lay$rec_bytes + tr + nvf * w
     if (end > s1 || off + end > n || nv > cap) return(FALSE)
     # Exact fit is the norm for pages that carry no auxiliary head and no
     # suppression tail: b2 == 0 (no trailer) AND b3 == 0x08 (head = 0). Pages
@@ -523,6 +617,7 @@ ivt_decode <- function(raw, lay = NULL) {
 
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
   skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
+  extra_vals <- 0L; extra_nz <- 0L
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
@@ -544,6 +639,7 @@ ivt_decode <- function(raw, lay = NULL) {
     }
     pg <- ivt_decode_page(raw, off, lay, size = s1)
     if (is.null(pg)) next
+    extra_vals <- extra_vals + pg$extra; extra_nz <- extra_nz + pg$extra_nz
     np <- length(pg$vals)
     md <- matrix(0L, np, m)
     for (t in seq_along(inpage_dim)) {
@@ -587,6 +683,16 @@ ivt_decode <- function(raw, lay = NULL) {
       "{hole_vals} non-zero value{?s} sat at DELETED member slots (the codebook",
       "slot table marks those positions as holes); {?it was/they were} dropped."),
       class = "canivt_slot_hole")
+  }
+  # Values the presence records flagged at slots BEYOND the members the codebook
+  # declares -- never-allocated positions with no member id, no code and no label,
+  # so there is no cell to put them in. They are dropped, loudly: an undeclared
+  # slot carrying data could equally mean the member count was read short.
+  if (extra_vals > 0L) {
+    ivt_fallback(paste(
+      "{extra_vals} stored value{?s} ({extra_nz} non-zero) sat at member slots the",
+      "codebook does not declare; {?it was/they were} dropped."),
+      class = "canivt_undeclared_slot")
   }
 
   if (ci == 0L) {

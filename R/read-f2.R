@@ -498,10 +498,19 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
   n_members <- if (!is.null(g$geo_uid)) length(g$geo_uid)
                else if (!is.null(g$geo_name)) length(g$geo_name)
                else if (!is.na(n_geo)) as.integer(n_geo) else 0L
+  # The ROSTER is the descriptor's member count, not the codebook reader's tally.
+  # `cells$geo` carries member ids 1..n_geo whatever the codebook yielded, so a
+  # short read must leave those members present-but-unlabelled rather than absent,
+  # or a join against the cells silently loses them. The shortfall is already LOUD
+  # (`ivt_f2_check_geo_count()` above); this only keeps the table addressable.
+  # Never the other way round -- a read LONGER than declared is left alone so the
+  # extra members stay visible next to the warning.
+  if (!is.na(n_geo) && n_geo > n_members) n_members <- as.integer(n_geo)
   geographies <- list(member_id = seq_len(n_members))
   for (col in ivt_geo_col_order(setdiff(names(g), "member_id"))) {
     v <- g[[col]]
     if (is.null(v)) next
+    if (length(v) < n_members) length(v) <- n_members     # pad short columns to NA
     # all-NA attribute columns are dropped; geo_name / geo_uid are kept even
     # all-NA (their presence is the path marker downstream consumers key on)
     if (!col %in% c("geo_name", "geo_uid") && all(is.na(v))) next
