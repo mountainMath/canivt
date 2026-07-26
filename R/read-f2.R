@@ -196,7 +196,7 @@ ivt_f2_dimensions <- function(raw) {
     # recovered slot-map order, so prefer them whenever they cover the whole axis --
     # this GUARANTEES the labels align with the decoded member ids (the positional
     # reader may order its labels differently from the reconciled slot map).
-    suba <- attr(d, "suba")
+    suba <- attr(d, "suba", exact = TRUE)   # not the `suba_unverified` flag
     if (!is_geo && !is.null(suba) && !is.null(suba$labels) &&
         length(suba$labels) == dim$count)
       members <- suba$labels

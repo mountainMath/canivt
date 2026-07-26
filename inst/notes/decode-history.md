@@ -399,7 +399,9 @@ Onboarded: `PROVINDjune1997` (dense DIVISIONS, **2,031** cells), `PROVSIC3june19
 (chunked total-far, **22,581**), `PROVSIC3-1` (chunked total-first, **29,463**). Left
 honestly UNSUPPORTED and ledgered `FALSE` as gate guards: `CACMA3-2` (hierarchical, 330
 codes over 415 slots), `PROVSIC4-2` (SIC-4, 1,254 classes), `PROVSIC4dec1997` (an `idx0`
-mis-detection).
+mis-detection). (All three were onboarded 2026-07-26 once the stride was measured as a
+directory TILING rather than a progression, and the `idx0` diagnosis turned out to be the
+blank-led-entry bug — see the tiling entry at the end of this file.)
 
 **What reconciliation cannot verify is the LABEL assignment** — a uniform relabel leaves
 the sums unchanged — so the industry axis labels are surfaced PROVISIONAL via the loud
@@ -1164,3 +1166,92 @@ original bugs behind each rule.
   check that remains is cross-dimensional: recomputing `U/LF`, `LF/Pop`, `E/Pop` from the
   count members and matching the file's own published rate members (100 % over ~1.8 M
   comparisons).
+
+### The sub-A outer stride is a TILING, not a progression (2026-07-26)
+
+The last open onboarding-backlog item asked a specific question about
+`SP_VB0LLW_PROVSIC4dec1997`: its page directory lays **11 industry windows per
+province at entry slots 3..13** of a 16-slot group, against the positional model's
+10 windows from slot 0. The shape matches a dimension whose live slots start above
+1 — exactly what a `16 00` slot table declares elsewhere — so the item was to
+measure whether such a table declares them here.
+
+**It does not, and the hypothesis was wrong.** No dimension in any file of this
+cluster carries a `16 00` slot table: `ivt_f2_dim_slot_table()` returns NULL
+throughout. There is no declaration to read. That is the whole reason the stride is
+a *measured* physical constant in this cluster and an unmeasurable one is a
+refusal — the file states nothing about it.
+
+The real defect was in how it was being measured. `ivt_f2_suba_dir_stride()` looked
+for a **progression** in the populated entry indices, which quietly assumes the run
+begins at window 0. It never does on this file, so the rule found nothing it could
+confirm and the gate refused. The directory's actual invariant is a **tiling**:
+every geography occupies `S` consecutive entry slots and writes the *same* window
+residues inside them. Rewritten to test periodicity, the rule takes the smallest
+`S` for which the populated entries fall into `geo_count` groups with an identical
+residue set and nothing is populated beyond `geo_count · S`. That last clause is
+load-bearing — without it a divisor of the true stride passes, which is how
+`PRNAIC6dec2000` (true 8) had been reading as 4. A couple of wholly-empty groups
+are tolerated, since suppression here is whole-geography and a geography with no
+cells writes no entries at all. The stride on `PROVSIC4dec1997` was **16 all
+along**; only the blank leading window hid it.
+
+Measuring the stride was necessary but not sufficient. The file strides exactly as
+the positional model does, so the "model is already correct" early return fired and
+the geometry was still read as 10 windows from slot 0 — `ceil(1255/128)`, sized
+from the member count alone. That reads a prefix of the axis: 41,260 cells running
+419…1254 with no `Total` member, whose aggregate identities miss by millions. The
+window residues the rule now returns are the witness for how far the axis actually
+reaches, so they gate the early return too.
+
+A second placement was added alongside: the **detached total** — the `Total` member
+alone in window 0 with the detail run right-aligned to the top of the group, which
+is how `PROVSIC2june1998` lays out (its pages at window slots 0 and 5 had been
+written off as "irregular"). Every candidate placement stays gated on exact
+reconciliation, so nothing is ever adopted on shape alone.
+
+Four files onboarded — `PROVSIC4dec1997` **63,305**, `PROVSIC4-2` **63,872**,
+`CACMA3-2` **152,628**, `PROVSIC2june1998` **8,809** — with every
+previously-supported file in the cluster byte-identical and the whole 13-file
+cluster running in 12.6 s. `PROVSIC4dec1997` reconciles on five independent
+identities with **zero residual** (industry `Total` == Σ detail, 142/142 groups;
+`Canada` == Σ provinces, 8,369/8,369 cells with no one-sided cell; and three
+employment-class identities at 9,209/9,075/9,209). The EMPCLASS labels read
+`Total`, `0`, `Total (excl. 0)`, …, `500 +`, corroborating the arithmetic from the
+metadata side.
+
+**The decisive check is cross-file.** `PROVSIC4-2` and `PROVSIC2june1998` come from
+different Borealis deposits, carry different classifications (1,255 SIC-4 vs 77
+SIC-2 members), and decode via different candidate placements — yet report the
+identical grand total 7,945,034, and rolling the SIC-4 file up by 2-digit SIC
+prefix reproduces the SIC-2 file **cell-for-cell: 8,667/8,667 exact, maxdiff 0,
+zero one-sided cells**. Two independent decodes of the same underlying data
+agreeing at every cell is the strongest evidence available in a cluster with no
+published ground truth. (`PROVSIC3-1` carries a different grand total, 7,290,572,
+so it is a different reference period and correctly does not roll up to either.)
+
+Industry **labels remain PROVISIONAL** (`canivt_suba_labels`, loud). Reconciliation
+validates sums, not the code → member assignment. Manual evidence gathered here
+goes past what reconciliation can do: in SIC only leaf codes carry establishments,
+and at shift 0 **855/855** populated members are leaves, where shifts −2/−1/+1/+2
+scatter 272–318 members onto aggregate codes. Two members that first looked like
+populated aggregates were genuine leaves whose codes happen to end in 0 (`4010
+Residential Building and Development`, `010 - Other Agricultural Industries,
+N.E.C.`) — worth recording, because that false signal nearly became a "misalignment"
+finding. The parser does not run this test, so the loud flag stays.
+
+Two incidental fixes. `attr()` **partial-matches by default**: `attr(d, "suba")`
+was resolving to the sibling `suba_unverified` flag added the day before, returning
+an atomic `TRUE` and throwing `$ operator is invalid for atomic vectors` — so the
+file was *erroring*, not mis-striding, and the earlier diagnosis was partly reading
+that regression. Both read sites now pass `exact = TRUE` (`R/decode.R`,
+`R/read-f2.R`). And the detail aggregate in the reconciliation sweep is memoized on
+its member range, since the total-far sweep reuses one range across up to a few
+hundred candidates.
+
+Still refused: `PRVNAIC1dec1998`, whose pages sit at window slot 0 **plus slot 10**
+— neither a contiguous run nor a detached total, so no stride confirms and the
+geometry stays unverified. `ivt_f2_suba_dir_stride()` is unit-tested on synthetic
+directories (`tests/testthat/test-suba.R`) covering the blank-led run, the
+resumes-past-extent rejection, empty-geography tolerance, ragged residues and the
+single-outer-member decline.

@@ -659,15 +659,101 @@ fix (identical residuals before and after) — this UCR product's totals include
 not-stated categories and are not plain sums, so the slot table is the evidence,
 not an aggregate check.
 
-The third file the anchor fix un-gated, `SP_VB0LLW_PROVSIC4dec1997`, is
-**deliberately kept refused** — its industry count is now recovered correctly
-(1,255, via `ivt_f2_slot_chunk_multiset()`: a chunk run may carry a *leading*
-partial as well as a trailing one) but the page directory's outer stride cannot be
-confirmed, so the geometry is unverified. See
-[`unsupported-formats.md`](unsupported-formats.md). Its geo-snapshot row gains a
-`canivt_chunked_count` warning class from the recovered count; `n_geo` (0 — the
-file has no geography dimension) and both content hashes are unchanged, so the
-fixture update is warning-only.
+The third file the anchor fix un-gated, `SP_VB0LLW_PROVSIC4dec1997`, had its
+industry count recovered correctly here (1,255, via
+`ivt_f2_slot_chunk_multiset()`: a chunk run may carry a *leading* partial as well
+as a trailing one) but stayed refused on an unconfirmable outer stride. That is
+closed in the next section. Its geo-snapshot row gains a `canivt_chunked_count`
+warning class from the recovered count; `n_geo` (0 — the file has no geography
+dimension) and both content hashes are unchanged, so that fixture update was
+warning-only.
+
+## [x] The sub-A outer stride is a directory TILING (2026-07-26)
+
+The type-00 sub-A cluster's outer directory stride is a non-declared physical
+constant — **measured**, not derived. The old rule looked for a *progression* in
+the populated entry indices, which silently assumes the run starts at window 0.
+`SP_VB0LLW_PROVSIC4dec1997` lays 11 industry windows per province at entry slots
+**3..13** of a 16-slot group, so the progression rule found nothing it could
+confirm and the file was refused.
+
+The backlog item asked whether a `16 00` slot table declares those live slots above
+1. **It does not** — measured: no dimension in any file of this cluster has a `16
+00` slot table at all (`ivt_f2_dim_slot_table()` returns NULL throughout). The
+declaration does not exist, so the directory itself has to be the witness.
+
+`ivt_f2_suba_dir_stride()` now measures the **tiling**: every geography occupies
+`S` consecutive entry slots and writes the *same* window residues inside them. It
+accepts the smallest `S` for which the populated entries fall into `geo_count`
+groups with an identical residue set **and** nothing is populated beyond
+`geo_count · S` — that last clause separating a real stride from a divisor of it.
+A couple of wholly-empty groups are tolerated (suppression is whole-geography; a
+geography with no cells writes no entries). It returns the window residues as well
+as the stride, and those residues also gate the early return: a file may stride
+exactly as the positional model does yet reach *further* than the model's window
+enumeration, which is `PROVSIC4dec1997` — `ceil(1255/128) = 10` windows from slot 0
+against the directory's 3..13. Reading only that prefix drops the top four windows
+and the grand-total member.
+
+The rule is strictly tighter than the one it replaces: it also corrects
+`PROVSIC4-2` (reported 4, true 16) and `PRNAIC6dec2000` (reported 4, true 8).
+Neither had produced a wrong verdict, because the reconciliation gate rejected the
+garbage probes — but neither was being measured correctly.
+
+A second shape was added alongside it, the **detached total**: the `Total` member
+alone in window 0 with the detail run right-aligned to the top of the group, which
+is how `PROVSIC2june1998` and two siblings lay out. All candidate placements remain
+gated on exact reconciliation, so nothing is adopted on shape alone.
+
+Four files onboarded, every previously-supported file in the cluster byte-identical
+(whole cluster, 13 files, 12.6 s):
+
+| table | shape | cells | validation |
+|---|---|---|---|
+| `SP_VB0LLW_PROVSIC4dec1997` | PROV/CAN 13 × SIC-4 1,255 × EMPCLASS 11 | 63,305 | 5 identities, **100 %** exact, maxdiff 0 (below) |
+| `SP3_PAWNKX_PROVSIC4-2` | PROV/CAN 13 × SIC-4 1,255 × EMPCLASS 11 | 63,872 | 142/142 groups exact, maxdiff 0; **cross-file** vs `PROVSIC2june1998` |
+| `SP3_PAWNKX_CACMA3-2` | CA/CMA × SIC-3 × EMPCLASS 11 | 152,628 | 1,539/1,539 groups exact, maxdiff 0 |
+| `SP_1ODZAS_PROVSIC2june1998` | PROV/CAN 13 × SIC-2 77 × EMPCLASS 11 | 8,809 | 142/142 groups exact, maxdiff 0; **cross-file** (below) |
+
+`PROVSIC4dec1997`'s five identities, all with zero residual:
+
+| identity | comparisons | exact | maxdiff |
+|---|---|---|---|
+| industry `Total` == Σ detail (per geo × empclass) | 142 groups | 142 | 0 |
+| `Canada` == Σ provinces (per industry × empclass) | 8,369 | 8,369 (100.000 %) | 0, zero one-sided cells |
+| `Total` == `0` + `Total (excl. 0)` | 9,209 | 9,209 | 0 |
+| `Total (excl. 0)` == Σ size classes | 9,075 | 9,075 | 0 |
+| `Total` == `0` + Σ size classes | 9,209 | 9,209 | 0 |
+
+The metadata corroborates the arithmetic independently: EMPCLASS reads `Total`,
+`0`, `Total (excl. 0)`, …, `200-499`, `500 +` — exactly the structure the sums
+imply — and PROV/CAN ends in `Canada`.
+
+**The strongest check in the cluster is cross-file.** `PROVSIC4-2` and
+`PROVSIC2june1998` come from different Borealis deposits, carry different
+classifications (1,255 SIC-4 vs 77 SIC-2 members) and decode by different candidate
+placements, yet report the identical grand total 7,945,034. Rolling the SIC-4 file
+up by 2-digit SIC prefix reproduces the SIC-2 file **cell-for-cell: 8,667/8,667
+exact, maxdiff 0, zero one-sided cells**. (`PROVSIC3-1` carries a different grand
+total, 7,290,572, so it is a different reference period and is not expected to roll
+up to either; it was already supported and its cell count is unchanged.)
+
+**Industry labels stay PROVISIONAL** (`canivt_suba_labels`, loud). Reconciliation
+validates sums, not the code → member assignment — a uniform relabel leaves every
+sum unchanged. Manual evidence gathered here goes beyond what reconciliation can
+do: in SIC only leaf codes carry establishments, and at shift 0 **855/855**
+populated members are leaves, where shifts −2/−1/+1/+2 scatter 272–318 members onto
+aggregate codes. (Two members first flagged as aggregate-coded turned out to be
+genuine leaves whose codes end in 0 — `4010 Residential Building and Development`,
+`010 - Other Agricultural Industries, N.E.C.`) This is validation evidence only;
+the parser does not run it, so the loud provisional flag stays.
+
+`PRVNAIC1dec1998` still finds no confirmable stride — its pages sit at slot 0
+**plus slot 10**, neither a contiguous run nor a detached total — so it remains
+`suba_unverified` and ledgered `FALSE`. `ivt_f2_suba_dir_stride()` is unit-tested
+on synthetic directories (`test-suba.R`) covering the blank-led run, the
+resumes-past-extent rejection, empty-geography tolerance, ragged residues and the
+single-outer-member decline.
 
 ## Summary
 

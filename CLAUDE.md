@@ -184,12 +184,23 @@ The *rules*; the measurements and original bugs behind them are in
   codebook is `[94][256][256][256][256][137]` = 1,255. LOUD
   (`canivt_chunked_count`); only ever reached when the trailing-partial rule
   declines, so no existing verdict moves.
-- **In the type-00 sub-A cluster the outer directory stride is non-declared, so an
-  unmeasurable stride is a REFUSAL.** With ≥ 2 outer members the page directory
-  must exhibit a stride; when `ivt_f2_suba_dir_stride()` finds none the modelled
-  geometry is unverified, `ivt_f2_suba_annotate()` sets `suba_unverified` and
-  `ivt_f2_decodable()` returns `FALSE`. A single outer member (`EDDTAB16`) has no
-  stride to measure and is left alone.
+- **In the type-00 sub-A cluster the outer directory stride is non-declared (no
+  file in the cluster has a `16 00` slot table at all), so an unmeasurable stride
+  is a REFUSAL.** It is measured as a **TILING, not a progression** — a progression
+  assumes the run starts at window 0, and `PROVSIC4dec1997` lays 11 windows per
+  province at entry slots 3..13 of a 16-slot group.
+  `ivt_f2_suba_dir_stride()` takes the smallest `S` for which the populated entries
+  fall into `geo_count` groups with an **identical residue set** and nothing is
+  populated beyond `geo_count · S` (that clause separates a real stride from a
+  divisor of it), tolerating a couple of wholly-empty groups (whole-geography
+  suppression). It returns the window residues too, and **those gate the early
+  return**: a file may stride exactly as the positional model does yet reach past
+  the model's window enumeration, which drops members silently. When no stride
+  confirms, the geometry is unverified, `ivt_f2_suba_annotate()` sets
+  `suba_unverified` and `ivt_f2_decodable()` returns `FALSE`. A single outer member
+  (`EDDTAB16`) has no periodicity to measure and is left alone. Placements —
+  including the **detached total** (total alone in window 0, detail run
+  right-aligned) — are always adopted on **exact reconciliation**, never on shape.
 - **`ivt_f2_decodable()` = descriptor + layout + `ivt_page_preflight()`** — the whole
   detection gate. The pre-flight checks extent within the entry size, exact fit for
   `b2 == 0` pages, presence count ≤ the page's real cell capacity, and that the
@@ -342,14 +353,15 @@ mid-section is **decoded** (2026-07-25) — the file declares its live/deleted s
 and member-code lengths, so `ivt_f2_dim_slot_expand()` is now only a fallback.
 
 - **type-00 sub-A industry labels are PROVISIONAL** (`R/suba.R`) — reconciliation
-  validates sums, not code→member assignment, and no ground truth exists. Three
-  files in that cluster stay UNSUPPORTED.
-- **`PROVSIC4dec1997`'s 3 leading window slots** — its industry count is now read
-  correctly (1,255) but the page directory lays **11 windows per province at entry
-  slots 3..13** of a 16-slot group, against the model's 10 from slot 0. The shape
-  matches a dimension whose live slots start above 1, which is exactly what a
-  `16 00` slot table declares elsewhere — that is the next thing to measure. Until
-  then the file stays refused on the unverifiable-stride rule.
+  validates sums, not code→member assignment, and no published ground truth exists.
+  Manual leaf-code evidence (855/855 populated members are SIC leaves at shift 0;
+  shifts ±1/±2 scatter 272–318 onto aggregate codes) supports the current
+  assignment but the parser deliberately does not run it, so the loud flag stays.
+  One file in the cluster (`PRVNAIC1dec1998`) stays UNSUPPORTED — its pages sit at
+  window slots 0 **and 10**, neither a contiguous run nor a detached total, so no
+  stride confirms. The `PROVSIC4dec1997` leading-window backlog item is **closed**
+  (2026-07-26): there is no `16 00` slot table anywhere in this cluster; the
+  directory's own tiling is the witness, and four files onboarded.
 - **`Rcpp` fast path** — only if pure-R decode becomes a bottleneck (~5 s for 7.5M
   cells is fine).
 

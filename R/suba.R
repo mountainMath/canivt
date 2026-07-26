@@ -39,33 +39,64 @@
 # unless the tight signature holds AND the standard model mis-strides AND the
 # reconciliation gate passes -- so no other corpus table is touched.
 
-# Measure the outer directory stride S (windows allocated per geography) from the
-# page directory itself. Each geography's window-0 page always exists (its first
-# industry chunk carries data), so the geography-block START entries form an
-# arithmetic progression 0, S, 2S, .., (geo_count-1)*S with a power-of-two common
-# difference S. Pick the SMALLEST power-of-two S whose progression is (almost)
-# entirely present among the marker entries. This ignores the sparse SPURIOUS
-# entries that appear far past the real directory (codebook / text bytes that
-# coincidentally parse as an entry -- PROVIND has 6 of them beyond its 13-block
-# directory), which a max()-based estimate is fooled by. Returns S, or NA when no
-# clean progression is found.
+# Measure the outer directory stride S (entry slots allocated per geography) AND
+# the window slots each geography populates, from the page directory itself.
+#
+# The directory TILES: every geography gets S consecutive entry slots and writes
+# the same window slots inside them, because the industry axis is laid out
+# identically for every province. So the populated entry indices, read modulo a
+# candidate S, must fall into `geo_count` groups with an IDENTICAL residue set.
+# That periodicity is the measurement, and unlike the progression 0, S, 2S, .. it
+# replaces, it does not assume window 0 is populated -- which is exactly what
+# defeated the previous rule: `PROVSIC4dec1997` lays its industry windows at slots
+# 3..13 of each 16-slot group, leaving every entry the progression looked for
+# blank. It is also strictly tighter: the same file's spurious S=4 "progression"
+# (13 consecutive groups, but residue sets {3}, {0,1,2,3}, {0,1}, ..) is rejected,
+# as is `PROVSIC4-2`'s, where the old rule returned 4 against a true stride of 16.
+#
+# Entries beyond the directory's own extent (`geo_count * S`) are codebook or text
+# bytes that coincidentally parse as an entry -- PROVIND has 6 of them, ~7x past
+# its 13-block directory. They are ignored, but only when clearly separated: a
+# directory that RESUMES immediately past the extent means S is too small, which
+# is what distinguishes `PRNAIC6dec2000`'s true stride of 8 from the 4 the old rule
+# reported. Only entries below `2 * extent` are ever scanned, so the candidate
+# sweep stays cheap.
+#
+# Returns `list(stride, windows)` -- `windows` the 0-based window slots every
+# geography populates -- or NULL when no clean tiling is found.
 ivt_f2_suba_dir_stride <- function(raw, idx0, geo_count, n = length(raw)) {
-  if (is.na(geo_count) || geo_count < 2L) return(NA_integer_)
-  is_marker <- function(k) {
-    o <- idx0 + k * 8L
-    if (o + 8L > n) return(FALSE)
-    en <- ivt_dir_entry(raw, o, n)
-    !is.null(en) && en$marker
+  if (is.na(geo_count) || geo_count < 2L) return(NULL)
+  avail <- (n - idx0) %/% 8L
+  if (avail < geo_count) return(NULL)
+  hits <- integer(0); scanned <- 0L
+  extend <- function(lim) {
+    lim <- min(as.integer(lim), avail)
+    if (lim <= scanned) return(invisible(NULL))
+    add <- integer(lim - scanned); na <- 0L
+    for (k in scanned:(lim - 1L)) {
+      en <- ivt_dir_entry(raw, idx0 + k * 8L, n)
+      if (!is.null(en) && en$marker) { na <- na + 1L; add[na] <- k }
+    }
+    hits <<- c(hits, add[seq_len(na)]); scanned <<- lim
+    invisible(NULL)
   }
   for (S in c(4L, 8L, 16L, 32L, 64L, 128L, 256L)) {
-    expected <- seq.int(0L, (geo_count - 1L) * S, by = S)
-    if (idx0 + (max(expected) + 1L) * 8L > n) break
-    present <- sum(vapply(expected, is_marker, logical(1)))
-    # a clean tiling: nearly every geography's window-0 entry is where S predicts
-    # (allow a couple of wholly-empty geographies)
-    if (present >= geo_count - 2L && present >= (geo_count * 4L) %/% 5L) return(S)
+    ext <- geo_count * S
+    if (ext > avail) break
+    extend(min(2L * ext, avail))
+    inside <- hits[hits < ext]
+    if (!length(inside)) next
+    grp <- inside %/% S
+    # allow a couple of wholly-empty (suppressed) geographies
+    if (length(unique(grp)) < geo_count - 2L) next
+    res <- split(inside %% S, grp)
+    w <- sort(unique(res[[1L]]))
+    if (!all(vapply(res, function(z) identical(sort(unique(z)), w), logical(1)))) next
+    beyond <- hits[hits >= ext]
+    if (length(beyond)) next          # the directory continues: S is too small
+    return(list(stride = S, windows = w))
   }
-  NA_integer_
+  NULL
 }
 
 # Decode-probe every page under a MEASURED stride S using the model layout's
@@ -151,23 +182,30 @@ ivt_f2_suba_annotate <- function(raw, d) {
 
   geo_count <- suppressWarnings(as.integer(d$dims[[1L]]$count))
   idx0 <- ivt_idx0(raw); n <- length(raw)
-  S <- ivt_f2_suba_dir_stride(raw, idx0, geo_count, n)
-  if (is.na(S)) {
+  ds <- ivt_f2_suba_dir_stride(raw, idx0, geo_count, n)
+  if (is.null(ds)) {
     # In this cluster the outer directory stride is a NON-DECLARED physical
     # constant, so the model's stride is only ever believed once the page
     # directory confirms it. With two or more outer members the directory MUST
-    # exhibit a stride; finding none means the outer geometry is unverified and
-    # the file must not decode on the assumed one. `SP_VB0LLW_PROVSIC4dec1997`
-    # lays 11 industry windows per province at entry slots 3..13 of a 16-slot
-    # group, against the model's 10 windows from slot 0 -- it decodes, but onto a
-    # shifted industry axis whose aggregate identities miss by millions. A single
-    # outer member (`EDDTAB16`, geography count 1) has no stride to measure and
-    # so nothing to verify -- it is left alone.
+    # tile; finding no tiling means the outer geometry is unverified and the file
+    # must not decode on the assumed one. A single outer member (`EDDTAB16`,
+    # geography count 1) has no stride to measure and so nothing to verify -- it
+    # is left alone.
     if (!is.na(geo_count) && geo_count > 1L) attr(d, "suba_unverified") <- TRUE
     return(d)
   }
+  S <- ds$stride
   model_stride <- lay0$estride[length(lay0$estride)]  # outer (geography) stride
-  if (S == model_stride) return(d)              # standard model already correct
+  # The standard model is already correct only if it strides the same AND its
+  # window enumeration reaches every window the directory actually populates.
+  # `PROVSIC4dec1997` strides 16 exactly as the model does, but its industry
+  # members start at window 3 and run to window 13, where the model -- sizing the
+  # window count from the member count alone, `ceil(1255/128) = 10` -- enumerates
+  # 0..9. Reading only that prefix silently drops the top four windows and the
+  # grand-total member: 41,260 cells on an industry axis running 419..1254, whose
+  # aggregate identities miss by millions. The directory's own residues are the
+  # witness for how far the axis reaches, so they gate the early return too.
+  if (S == model_stride && max(ds$windows) < lay0$ent_counts[1L]) return(d)
 
   probe <- ivt_f2_suba_probe(raw, idx0, lay0, S, geo_count, n)
   if (is.null(probe) || !nrow(probe)) return(d)
@@ -205,24 +243,39 @@ ivt_f2_suba_annotate <- function(raw, d) {
   }
 
   # CHUNKED case: the codebook stores D detail members (> the descriptor count) plus
-  # a grand-total. The detail members occupy a contiguous D-slot run from the lowest
-  # occupied slot; the total sits at one of a few file-specific positions -- FIRST
-  # (member 1, immediately below the detail run -- the PAWNKX vintage / the dense
-  # DIVISIONS convention), CONTIGUOUS-LAST (just past the run), or FAR (alone at a
-  # high window -- the OWUF3P vintage). Enumerate those candidate placements and
-  # keep every one whose detail industries sum EXACTLY to the total page per
-  # geography x employment-size; the real grand total dominates every cell, so among
-  # the survivors pick the total slot with the largest aggregate. If none
-  # reconciles, the file is left UNSUPPORTED.
+  # a grand-total. The detail members occupy a contiguous D-slot run; the total sits
+  # at one of a few file-specific positions -- FIRST (member 1, immediately below the
+  # run -- the PAWNKX vintage / the dense DIVISIONS convention), CONTIGUOUS-LAST
+  # (just past the run), FAR (alone at a high window -- the OWUF3P vintage), or FIRST
+  # BUT DETACHED: the total alone in window 0 with the detail run right-aligned to
+  # the last occupied slot, a whole empty gap between them (`PROVSIC4-2` totals at
+  # slot 1 with detail at 417..1670; `CACMA3-2` at 87..416; `PROVSIC2june1998` at
+  # 20..95). Anchoring the run on `min(occ)` cannot see that shape, so it is anchored
+  # on `max(occ)` instead. Enumerate the candidate placements and keep every one
+  # whose detail industries sum EXACTLY to the total page per geography x
+  # employment-size; the real grand total dominates every cell, so among the
+  # survivors pick the total slot with the largest aggregate. If none reconciles, the
+  # file is left UNSUPPORTED.
   if (is.null(ic) || !ic$has_total) return(d)
   D <- length(ic$detail)
   offset <- min(occ)                                  # 1-based lowest occupied slot
+  hi <- max(occ)
+  # the detail aggregate depends only on the RANGE, and the FAR sweep below reuses
+  # one range across up to a few hundred candidates -- memoize it
+  det_cache <- new.env(parent = emptyenv())
+  det_sum <- function(rng) {
+    key <- paste0(min(rng), ":", max(rng))
+    if (is.null(det_cache[[key]])) {
+      det <- probe[probe$ind %in% rng, ]
+      det_cache[[key]] <- if (nrow(det)) aggregate(val ~ g + emp, det, sum) else NA
+    }
+    det_cache[[key]]
+  }
   recon <- function(det_range, tslot) {               # exact-reconcile test
     tot <- probe[probe$ind == tslot, ]
-    det <- probe[probe$ind %in% det_range, ]
-    if (!nrow(tot) || !nrow(det)) return(NA_real_)
+    ds <- det_sum(det_range)
+    if (!nrow(tot) || !is.data.frame(ds)) return(NA_real_)
     ts <- aggregate(val ~ g + emp, tot, sum)
-    ds <- aggregate(val ~ g + emp, det, sum)
     mm <- merge(ds, ts, by = c("g", "emp"), suffixes = c(".d", ".t"))
     if (!nrow(mm) || nrow(mm) != nrow(ts) || any(mm$val.d != mm$val.t)) return(NA_real_)
     sum(tot$val)                                      # aggregate (for tie-break)
@@ -234,6 +287,9 @@ ivt_f2_suba_annotate <- function(raw, d) {
     list(pos = offset + 0:D,         det = (offset + 1L):(offset + D), tot = offset),
     # total CONTIGUOUS-LAST (member D+1 just past the detail run)
     list(pos = offset + 0:D,         det = offset:(offset + D - 1L),   tot = offset + D))
+  if (hi - D + 1L > offset)                           # total FIRST, run DETACHED
+    cands[[length(cands) + 1L]] <-
+      list(pos = c(offset, (hi - D + 1L):hi), det = (hi - D + 1L):hi, tot = offset)
   for (far in sort(unique(occ[occ > offset + D])))    # total FAR (isolated window)
     cands[[length(cands) + 1L]] <-
       list(pos = c(offset:(offset + D - 1L), far), det = offset:(offset + D - 1L), tot = far)

@@ -302,6 +302,20 @@ layout.
 
 ## Change log
 
+- **2026-07-26** — **The sub-A outer directory stride is a TILING.** Not a marker
+  change but a geometry one, recorded here because it governs how the page
+  directory is read: in the type-00 sub-A cluster no dimension carries a
+  `81 02 <alloc> 16 00` slot table at all (measured — `ivt_f2_dim_slot_table()`
+  returns NULL throughout), so the outer stride is undeclared and must be
+  measured. `ivt_f2_suba_dir_stride()` measures **periodicity, not progression**:
+  every geography occupies `S` consecutive entry slots writing the same window
+  residues, and the accepted `S` is the smallest with `geo_count` identical-residue
+  groups and nothing populated beyond `geo_count * S`. A progression assumes the
+  run starts at window 0; `PROVSIC4dec1997` runs at slots **3..13** of 16. The
+  returned residues also bound the axis extent, so a file that strides as the model
+  does but reaches further is not truncated. Onboards `PROVSIC4dec1997` (63,305),
+  `PROVSIC4-2` (63,872), `CACMA3-2` (152,628), `PROVSIC2june1998` (8,809).
+
 - **2026-07-26** — **A chunk RUN may open with a partial** (§E.1a). The chunked
   member arrays are laid down once per attribute*language copy, and the
   trailing-partial shortcut in `ivt_f2_slot_chunked_count()` assumed the only

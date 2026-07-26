@@ -43,62 +43,53 @@ directory stride from the page directory (it is a physical constant this
 generation does not declare), recovers the industry count from the codebook
 chunks, maps the members, and **commits only if the decode reconciles**
 (industry `Total` == Σ detail per geo × empclass, or geo `Canada` == Σ provinces).
-These three do not reconcile, so the gate refuses them:
+One file in the cluster still fails to reconcile, so the gate refuses it:
 
 | key | why |
 |---|---|
-| `SP3_PAWNKX_CACMA3-2` | hierarchical CMA geography, 330 industry codes — the recovered slot map does not reconcile |
-| `SP3_PAWNKX_PROVSIC4-2` | SIC-4, 1254 classes — does not reconcile |
-| `SP_VB0LLW_PROVSIC4dec1997` | SIC-4, 1,255 classes — the outer directory stride cannot be measured, so the modelled one is unverified (see below) |
+| `SP_FPBMMO_PRVNAIC1dec1998` | Business-Register provincial NAIC — no stride the directory tiling can confirm, so the modelled geometry stays unverified (see below) |
 
-Further guards, unrelated to sub-A, whose diagnosis is in the deferred section
-below — they are in the local corpus, so they carry a ledger row (2026-07-25)
-rather than sitting only in prose:
+(Every other sub-A guard has been onboarded. `CACMA3-2`, `PROVSIC4-2`,
+`PROVSIC4dec1997` and `PROVSIC2june1998` were refused here until 2026-07-26 and now
+decode and reconcile exactly — see the directory-tiling section of
+[`coverage.md`](coverage.md). `PRSIC2june2001`, `PRVNAIC3_LOC-1` and
+`CDCSDNAIC3dec2006`, listed as guards on 2026-07-25, were onboarded 2026-07-26 —
+see the sparse-directory section there. `SP3_C2YSID_Table-080` and
+`SP3_NAZQV2_Table-210`, also listed on 2026-07-25, were onboarded 2026-07-26 by the
+blank-led anchor work — see below.)
 
-| key | why |
-|---|---|
-| `SP_1ODZAS_PROVSIC2june1998` | Business-Register provincial SIC — span-and-overshoot pre-flight failure that the count witnesses do not resolve |
-| `SP_FPBMMO_PRVNAIC1dec1998` | same |
+### The sub-A refusal rule, restated (2026-07-26)
 
-(`PRSIC2june2001`, `PRVNAIC3_LOC-1` and `CDCSDNAIC3dec2006`, listed here as guards
-on 2026-07-25, were onboarded 2026-07-26 — see the sparse-directory section of
-[`coverage.md`](coverage.md). `SP3_C2YSID_Table-080` and `SP3_NAZQV2_Table-210`,
-also listed on 2026-07-25, were onboarded 2026-07-26 by the blank-led anchor work
-— see below.)
+In this cluster the outer directory stride is a **non-declared physical constant**:
+no `16 00` slot table exists for any dimension in these files (measured — every
+`ivt_f2_dim_slot_table()` call returns NULL), so nothing in the file states it and
+it can only be measured from the page directory. An **unmeasurable stride is a
+refusal**, because the modelled geometry would then be unverified.
 
-### `SP_VB0LLW_PROVSIC4dec1997` — refused on an unverifiable stride (2026-07-26)
+What "measurable" means is the directory's **tiling**, not a progression: every
+geography occupies `S` consecutive entry slots and writes the *same* window
+residues inside them. `ivt_f2_suba_dir_stride()` accepts the smallest `S` for which
+the populated entries fall into `geo_count` groups with an identical residue set
+**and** nothing is populated beyond `geo_count · S`. That last clause is what
+separates a real stride from a divisor of it. The rule tolerates a couple of
+wholly-empty groups, since suppression here is whole-geography and a geography with
+no cells writes no entries at all.
 
-Its `@558` anchor **does** resolve (that diagnosis was the blank-led-entry bug,
-fixed 2026-07-26), and its industry count is now recovered correctly: the codebook
-writes 1,255 SIC-4 members as `[94][256][256][256][256][137]` per language copy —
-a **leading** partial chunk as well as a trailing one, which the original
-trailing-partial-only recogniser declined (`ivt_f2_slot_chunk_multiset()` now
-resolves it; the sibling `PROVSIC4-2` reports ~1,254, so the figure is corroborated
-across the lineage).
+Reading the tiling rather than a progression is what un-gated four files: it does
+not assume window 0 is populated, so `PROVSIC4dec1997`'s 11 industry windows at
+entry slots **3..13** of a 16-slot group are measured correctly (the stride was 16
+all along; the blank leading window was the whole problem). `ivt_f2_suba_annotate()`
+raises `suba_unverified` — and `ivt_f2_decodable()` returns `FALSE` — only where
+there are ≥ 2 outer members: a single outer member (`EDDTAB16`, geography count 1)
+has no periodicity to measure and nothing to verify, so it is left alone.
 
-It still must not decode. The page directory lays **11 industry windows per
-province at entry slots 3..13** of a 16-slot group, where the positional model
-produces 10 windows from slot 0. `ivt_f2_suba_dir_stride()` finds no stride it can
-confirm, and in this cluster the outer stride is a non-declared physical constant —
-so the modelled geometry is unverified. Decoding anyway yields 41,260 cells on an
-industry axis running 419…1254 with no `Total` member, and `Canada == Σ provinces`
-misses by millions on all 445 complete slices. `ivt_f2_suba_annotate()` therefore
-flags the descriptor `suba_unverified` and `ivt_f2_decodable()` returns `FALSE`.
-The flag is raised **only** where there are ≥ 2 outer members — a single outer
-member (`EDDTAB16`, geography count 1) has no stride to measure and nothing to
-verify.
-
-The open question is where those 3 leading window slots come from: the shape
-matches a dimension whose live slots start above 1, which is exactly what the
-`16 00` slot table declares elsewhere. That is the next thing to measure here.
-
-Onboarded siblings, for contrast: `PROVINDjune1997` (dense DIVISIONS, 2,031
-cells), `PROVSIC3june1997` (chunked, total-far, 22,581), `PROVSIC3-1` (chunked,
-total-first, 29,463). Their industry **labels are provisional** — reconciliation
-validates SUMS, not the SIC-code → member assignment (a uniform relabel leaves the
-sums unchanged), and there is no ground truth: Borealis/Odesi carry only `.ivt`,
-and the open CBC CSVs are a different vintage *and* classification (web- and
-Dataverse-API-checked 2026-07-24).
+Across the whole cluster the industry **labels remain provisional**
+(`canivt_suba_labels`, loud) — reconciliation validates SUMS, not the SIC-code →
+member assignment (a uniform relabel leaves the sums unchanged), and there is no
+published ground truth: Borealis/Odesi carry only `.ivt`, and the open CBC CSVs are
+a different vintage *and* classification (web- and Dataverse-API-checked
+2026-07-24). See [`coverage.md`](coverage.md) for the manual code→member evidence
+gathered 2026-07-26, which the parser deliberately does not run.
 
 ## Known but not in the corpus (deferred, no ledger row)
 
@@ -136,15 +127,19 @@ never received its `$slots`. See [`coverage.md`](coverage.md) for the validation
   reconcile exactly on the files' own identities — see the sparse-directory
   section of [`coverage.md`](coverage.md). `PRNAIC6dec2000` had already gone that
   way on 2026-07-25 via the `16 00` slot table.
-- `PROVSIC2june1998`, `PRVNAIC1dec1998` remain **ledgered guards**. They are
-  `byte 0 == 0x02` sub-A files, and their directories are irregular in a way the
-  onboarded siblings' are not: within a 16-entry stride per province the pages
-  sit at slot 0 **plus slot 10** (`PRVNAIC1dec1998`) or slots 0 and 5
-  (`PROVSIC2june1998`), where the positional model produces consecutive window
-  slots (`PROVSIC3june1997`, onboarded, packs 0,1,2,3). Their industry counts are
-  correspondingly under-read (20 and 77 against a directory carrying two windows'
-  worth of pages), and the sub-A recovery does not reconcile — so the gate refuses
-  them.
+- `PROVSIC2june1998` was onboarded 2026-07-26 (8,809 cells). Its directory is not
+  "irregular": the pages sit at window slots 0 and 5 of a 16-entry stride because
+  the industry axis is a **detached total** — the `Total` member alone in window 0,
+  the detail run right-aligned at the top of the group. The directory-tiling stride
+  rule measures that shape, and the file then reconciles exactly (142/142 groups,
+  maxdiff 0). It is also the strongest cross-file check in the cluster: rolling the
+  independently-decoded `PROVSIC4-2` up by 2-digit SIC prefix reproduces it
+  cell-for-cell (8,667/8,667, maxdiff 0, zero one-sided cells).
+- `PRVNAIC1dec1998` remains a **ledgered guard**. Its pages sit at slot 0 **plus
+  slot 10** of a 16-entry stride, which is neither a contiguous run nor a detached
+  total, and the tiling rule finds no stride it can confirm. Its industry count is
+  correspondingly under-read (20 against a directory carrying two windows' worth of
+  pages), so the geometry stays unverified and the gate refuses it.
 
 **Layout extent / overshoot — CLOSED**
 

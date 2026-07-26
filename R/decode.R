@@ -282,7 +282,9 @@ ivt_layout_impl <- function(raw, d = NULL) {
   # outer stride (`suba.R`); when the descriptor annotation measured it from the
   # page directory, honour it (the DIVISIONS files use one window per geography
   # but still stride by the full allocation).
-  suba <- attr(d, "suba")
+  # `exact = TRUE`: `attr()` partial-matches by default, and the sibling
+  # `suba_unverified` flag shares this prefix.
+  suba <- attr(d, "suba", exact = TRUE)
   if (!is.null(suba) && !is.null(suba$stride)) ws <- max(ws, as.integer(suba$stride))
   ent_idx <- straddle; ent_counts <- win; ent_pad <- ws
   if (straddle > 1L) for (j in (straddle - 1L):1L) {
