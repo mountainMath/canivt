@@ -193,7 +193,8 @@ ivt_f2_dim_members_from_dir <- function(raw, dim, dir, include_notes = TRUE) {
   # genuinely unreadable dimension still returns NULL below.
 
   # --- collect the clean member-value runs (length cnt) ---
-  runs <- ivt_f2_dim_member_runs(raw, dir, scnt, mk)
+  runs <- ivt_f2_dim_member_runs(raw, dir, scnt, mk,
+                                 slots = dim$slot_used %||% dim$slots)
   if (!length(runs)) return(finish(alt_members()))
 
   # --- classify each run by role ---
@@ -355,14 +356,14 @@ ivt_f2_member_run_clean <- function(t) {
 # chunk assembler. Runs are strict-first (`ivt_f2_dir_member_arrays()`), rejecting
 # control-character / empty records so footnote and definition blocks (which the
 # Pascal scanner reads as ~cnt-length runs) are excluded.
-ivt_f2_dim_member_runs <- function(raw, dir, cnt, mk) {
+ivt_f2_dim_member_runs <- function(raw, dir, cnt, mk, slots = NULL) {
   if (cnt > 256L && mk > 0L) {
     ck <- ivt_f2_dim_dir_label_chunks(raw, cnt, dir, mk)
     return(if (is.null(ck)) list() else ck)
   }
   rows <- if (mk > 0L && mk < nrow(dir)) (mk + 1L):nrow(dir) else seq_len(nrow(dir))
   runs <- ivt_f2_dir_member_arrays(raw, dir, cnt, rows = rows, max_keep = 8L,
-                                   accept = ivt_f2_member_run_clean)
+                                   accept = ivt_f2_member_run_clean, slots = slots)
   if (length(runs)) return(runs)
   # The older `04 00 20 00` survey tables store a singleton reference dimension's
   # member (ucr2.2_3-2006's "Year" -> "2006") NOT as a `[01 01]` member array but as

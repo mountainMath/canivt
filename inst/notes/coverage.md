@@ -295,7 +295,7 @@ declared `UID/IDU` uids (the heuristic had mis-picked the `Geo Code` column);
 validated by `ivt_f2_check_geo_count()`) — still heuristic, see Open gaps.
 
 The whole read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` —
-light for all 122 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
+light for all 131 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
 geography identity feeds only the slug/metadata, never the positional cell decode.
 
 ## [x] Lineage coverage
@@ -327,6 +327,10 @@ each lineage (narrative + validation records in
 | type-00 sub-A provincial Business Patterns (PROVINDjune1997, PROVSIC3june1997, PROVSIC3-1) | `R/suba.R` — stride MEASURED from the directory, count from codebook chunks, **commits only if the decode reconciles**; labels provisional |
 | 2021 postal/electoral (98100019 FSA, 98100010 FED, 98100013 ADA) | no code change for cells; full attribute read needed `ivt_f2_dir_is_text_block()` (per-member footnote text blocks in the directory tail) |
 | historical Census of Agriculture (optab12, optab13) | no code change — ordinary `04`-gen containers, descriptor synthesised from the `@824` slot table |
+| UCR police-reported crime (table_5_c-2008, table_6_c-2007/2009) | `ivt_f2_descriptor_from_slots()`; slot-addressed member arrays; the widened text-blob recognizer (the per-dimension documentation blob) |
+| provincial Business Register NAICS (PRSIC1dec1999, PRNAIC6dec2000) | ordinary `02`-gen containers once the `16 00` slot table declared the industry counts |
+| LFS historical review (Table-023, Table-024, Table-051) | the declared slot allocation; `ivt_f2_descriptor_from_slots()`; `canivt_geo_datadim` geography |
+| transition-home / victim-services surveys (02560006) | under-declared count reconcile + `b3 ∈ {08..0e}` page-head codes |
 | SLID-era income (SP3_RHUXA9 103/404/405/501/701/703) | under-declared count reconcile — the declared slot allocation is the second count witness (`> 4·nextpow2(count)` ⇒ take the codebook member array's length, `canivt_underdeclared_count`); page-head codes widened to `b3 ∈ {08..0e}` |
 
 ## [x] The `04`-gen "doubled-window" survey directory — RESOLVED (2026-07-23)
@@ -435,6 +439,50 @@ plus the published 1992-base cut-offs; detail in
 [`decode-history.md`](decode-history.md). The community-size check is the sharpest
 — those labels sort alphabetically into a different order than their ordinals, so
 it confirms the ordinals drive the nesting.
+
+## [x] Member arrays can be addressed by SLOT (2026-07-25)
+
+The declared slot map turns out to describe the **codebook arrays** too, not only
+the presence bitmap. A dimension's label array is normally one record per member,
+padded with empty records to the next power of two — which the trailing-NA trim
+recovers. But it may instead be written **one record per allocated slot**, empty
+at the slots that were never allocated: `Table_6_c-2009`'s 225 offences occupy
+slots 1..107 and 109..226 of 256, and its EN and FR arrays are 256 records long
+with holes at 108 and 227..256. An INTERIOR hole defeats the trim, the array was
+rejected on length, and the labels fell through to the ordinal run — the members
+read `"1"`, `"2"`, `"3"`, … `ivt_f2_dir_member_arrays()` now takes the declared
+slots and selects `v[slots]`, accepted only when the array's non-NA positions are
+**exactly** those slots, so a coincidentally long array cannot pass.
+
+Same commit, the other half of that table's read: the §F **text-blob recognizer**
+was too narrow. It required a `[01]` byte after the length and no `0x00`
+anywhere, which fits the geo-tail note blobs but not the survey lineage's
+**per-dimension documentation blob** — the UCR "Mandatory reading" HTML, repeated
+in every dimension's directory, whose text starts immediately after the length
+and IS NUL-terminated. The discriminator is now the two things a member array's
+framing guarantees: its leading u16 record count must fit the payload, and its
+records leave an interior NUL. All three UCR tables' single geography now reads
+`Selected Police Services` / `Services de police sélectionnées` instead of a
+fragment of that HTML (`action=loc; form.submit();}">Mandatory reading`).
+
+## [x] The nine deferred files, ledgered (2026-07-25)
+
+The corpus carried nine folders with **no ledger row**, so nothing
+regression-tested them; `test-corpus.R` now asserts every corpus folder holding
+an `.ivt` has one. Four of them decode with no further work beyond the two fixes
+above — the `16 00` slot table, the under-declared count reconcile and the time
+table opened them — and all four are validated on the file's own internal
+identities:
+
+| table | shape | cells | validation |
+|---|---|---|---|
+| `02560006` | 15 geo × Number/Percent × Women/Children × 3 reasons × 1998/2000 | 184 | Percent sums to 100 (2/2 complete groups); Canada == Σ provinces exact on 6/9 groups (residuals 2/5/4 from suppressed components). Decisive: 1998 carries "Northwest Territories including Nunavut" with NWT/Nunavut absent, 2000 carries NWT and Nunavut separately with the aggregate absent — Nunavut was created 1999-04-01, so the geography × date nesting is provably right |
+| `Table_6_c-2009` | 1 geo × 20 clearance × 225 offences × 2009 | 2,072 | Total == NotCleared + ByCharge + ClearedOtherwise **225/225 exact**; ClearedOtherwise == Σ its 16 reasons **225/225 exact**; the offence hierarchy (parent == Σ children by label indentation) **520/520 exact** — which is also what validates the slot-addressed label assignment, since the hierarchy is a function of the labels |
+| `Table-024` | 11 geo × 3 sex × 3 class × 33 occupation × 10 hours × 24 years (LFS 1987–2010) | 506,131 | Average usual hours == Total hours / Total employed within 0.05 on **68,312/68,589** cells; Canada 1987 = 12,333.0 and 2010 = 17,041.0 thousand employed, matching the published LFS. The additive identities (sex, class of worker, Canada == Σ provinces, occupation hierarchy, hours bands) hold to the **rounding bound**: residuals are one-sided — negative only to −0.1/−0.2/−0.3/−0.4 for 2/≤6/7/10 summands, i.e. never past ±0.05 per rounded component — with the positive tail (max 6.7) being the suppressed components the store does not carry |
+| `PRNAIC6dec2000` | 14 geo × 930 NAICS-6 × 11 employment sizes (Business Register) | 71,794 | **all four identities exact, zero residual**: Canada == Σ 13 provinces/territories 10,230/10,230; Total (A) == Indeterminate (B) + Subtotal 13,020/13,020; Subtotal == Σ the 8 size bands 13,020/13,020; NAICS Total == Σ the 929 industries 154/154 |
+
+The other five are ledgered `FALSE` as gate guards — see
+[`unsupported-formats.md`](unsupported-formats.md).
 
 ## Summary
 

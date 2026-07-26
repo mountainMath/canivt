@@ -125,7 +125,13 @@ The *rules*; the measurements and original bugs behind them are in
   slots ≠ `1..count` the dim carries `$slots` (and `$slot_used` where the codebook
   arrays are used-slot-length), extents drive the geometry,
   `ivt_f2_cell_grid(pos=)` maps bits to slots, and a value at a deleted slot warns
-  `canivt_slot_hole`.
+  `canivt_slot_hole`. **The declared slot map also addresses the CODEBOOK member
+  arrays**, not only the presence bitmap and the member-code array: a label array
+  may be written one record per allocated slot, empty at the rest, so an interior
+  hole defeats the trailing-NA trim. `ivt_f2_dir_member_arrays(slots=)` accepts
+  such a run as `v[slots]` — but only when `which(!is.na(v))` is *exactly* the
+  declared slots, so a coincidentally-long array can never be re-indexed
+  (`Table_6_c-2009`: alloc 256, 225 members, used slots 1..107, 109..226).
 - Presence bytes are **pair-swapped** (`bitwXor(i, 1)`) and read **MSB-first**; the
   value stream is **not** swapped.
 - **Value run start** = `4 + presence_len + trailer(b2) + 32·(b3 − 8)`

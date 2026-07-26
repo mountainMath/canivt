@@ -51,7 +51,7 @@ These three do not reconcile, so the gate refuses them:
 | `SP3_PAWNKX_PROVSIC4-2` | SIC-4, 1254 classes — does not reconcile |
 | `SP_VB0LLW_PROVSIC4dec1997` | `idx0` mis-detection — the page-directory anchor does not resolve, so there is no layout to reconcile against |
 
-Two further guards, unrelated to sub-A, whose diagnosis is in the deferred section
+Further guards, unrelated to sub-A, whose diagnosis is in the deferred section
 below — they are in the local corpus, so they carry a ledger row (2026-07-25)
 rather than sitting only in prose:
 
@@ -59,6 +59,11 @@ rather than sitting only in prose:
 |---|---|
 | `SP3_NAZQV2_Table-210` | stale `@558` anchor **and** irregular directory packing that does not fit the power-of-two stride model — `ivt_page_preflight()` rejects |
 | `SP_IE56KT_CDCSDNAIC3dec2006` | `SUB-SECTORS` misread as 26 628 (type `0x0b`) plus a sparse fragmented directory — pre-flight rejects |
+| `SP3_C2YSID_Table-080` | the `@558` anchor does not resolve; `ivt_idx0()` falls to the historical constant and no directory entry validates |
+| `SP_1ODZAS_PROVSIC2june1998` | Business-Register provincial SIC — sparse / over-walked directory, span-and-overshoot pre-flight failure |
+| `SP_FPBMMO_PRVNAIC1dec1998` | same |
+| `SP_ORYADY_PRSIC2june2001` | same |
+| `SP3_PAWNKX_PRVNAIC3_LOC-1` | same, with the `_LOC-1` combined NAICS × location dimension |
 
 Onboarded siblings, for contrast: `PROVINDjune1997` (dense DIVISIONS, 2,031
 cells), `PROVSIC3june1997` (chunked, total-far, 22,581), `PROVSIC3-1` (chunked,
@@ -72,14 +77,13 @@ Dataverse-API-checked 2026-07-24).
 
 Sampled by the range-harvest sweeps, diagnosed, left for a future pass. Grouped by
 the format issue, not the file. Entries here have **no ledger row** because the
-file is not in the local corpus; the two that are (`Table-210`,
-`CDCSDNAIC3dec2006`) were promoted to ledgered guards above on 2026-07-25 and keep
-their diagnosis here.
+file is not in the local corpus; the ones that are were promoted to ledgered
+guards above on 2026-07-25 and keep their diagnosis here.
 
 **Directory relocation / anchor failure**
 
-- `Table-080` — the `@558` anchor does not resolve; `ivt_idx0()` falls to
-  the historical constant and no directory entries validate.
+- `SP3_C2YSID_Table-080` — the `@558` anchor does not resolve; `ivt_idx0()` falls
+  to the historical constant and no directory entries validate. **Ledgered guard.**
 - `SP3_NAZQV2_Table-210` (LFHR: Geography 11 × Sex 3 × Age 9 × Characteristics 10
   × Education 10 × Timeseries 240 monthly, 1990-01…2009-12) — `@558 = 34997` is
   **stale**; the real directory is at **35197**, findable only by the marker scan
@@ -96,9 +100,12 @@ their diagnosis here.
 
 **Sparse-directory modelling (Business-Register provincial SIC/NAIC)**
 
-- `PRNAIC6dec2000`, `PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`,
-  `PRVNAIC3_LOC-1` — sparse / over-walked directory, span-and-overshoot
-  pre-flight failure.
+- `PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1` —
+  sparse / over-walked directory, span-and-overshoot pre-flight failure. All four
+  are now in the local corpus and **ledgered guards**. (`PRNAIC6dec2000`, listed
+  here before, was onboarded 2026-07-25: the `16 00` slot table declares its
+  930-member NAICS-6 dimension, and the decode reconciles exactly on all four of
+  the file's internal identities — see [`coverage.md`](coverage.md).)
 - `SP_IE56KT_CDCSDNAIC3dec2006` (Business Patterns Dec 2006, CD/CSD 5914 ×
   SUB-SECTORS × EMP 12) — the descriptor reads SUB-SECTORS = **26628**
   (type `0x0b`), a misread: for this CD/CSD-separated variant SUB-SECTORS is pure

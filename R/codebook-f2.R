@@ -1842,15 +1842,24 @@ ivt_f2_is_ordinal <- function(t) {
 # geography directory's TAIL, one per member that cites a note (98-10-0010 carries
 # 37, 98-10-0019 one), and the run-scanner fragments each into a few text pieces
 # that otherwise inflate the value-block count and defeat the regular-layout gate.
-# Distinguished structurally from a member array (whose records are each NUL-
-# terminated `[len][text][00]`): after the single-record marker at off+4 a text
-# blob carries NO 0x00 byte.  Returns FALSE for anything that is not this framing.
+# Distinguished structurally from a member array by the two things that framing
+# guarantees.  A member array opens its payload with a u16 RECORD COUNT and then
+# tiles the payload with `[u8 len]<text> 00` records, so the count must fit
+# (>= 2 bytes each) and every record but the last leaves an INTERIOR NUL.  A text
+# blob opens with the text itself: its first two bytes read as a u16 of at least
+# 0x2000 (latin1 text is >= 0x20), impossibly large for the payload, and it holds
+# no NUL before its own terminator.  The leading `[01]` single-record byte is
+# OPTIONAL -- the survey lineage stores a per-DIMENSION documentation blob
+# (`Table_6_c-2009`: the UCR "Mandatory reading" HTML, repeated in EVERY
+# dimension's directory) whose text starts immediately after the length, and
+# which is NUL-terminated, so neither that byte nor a blanket no-NUL scan can
+# decide.  Returns FALSE for anything that is not this framing.
 ivt_f2_dir_is_text_block <- function(raw, off, len) {
   if (len < 6L || off + len > length(raw)) return(FALSE)
   if (raw[off + 1L] != as.raw(0x01L) || raw[off + 2L] != as.raw(0x01L)) return(FALSE)
   if (isTRUE(rd_u16(raw, off + 2L) != len - 4L)) return(FALSE)   # plain-array payload len
-  if (raw[off + 5L] != as.raw(0x01L)) return(FALSE)              # single-record marker
-  !any(raw[(off + 6L):(off + len)] == as.raw(0x00L))             # text blob: no NUL terminators
+  if (2L * rd_u16(raw, off + 4L) + 2L <= len - 4L) return(FALSE) # a record count that fits
+  !any(raw[(off + 5L):(off + len - 1L)] == as.raw(0x00L))        # no INTERIOR NUL
 }
 
 # Directory-driven geography attribute table. Returns the same tibble as

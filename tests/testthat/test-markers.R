@@ -51,6 +51,32 @@ test_that("directory text-block vs member-array recognizer (already in decode-f2
   expect_true(ivt_f2_dir_is_text_block(mk_text_block(), 0L, length(mk_text_block())))
   ma <- mk_member_array()
   expect_false(ivt_f2_dir_is_text_block(ma, 0L, length(ma)))
+  # the second variant: no [01] marker byte, and NUL-TERMINATED (so neither that
+  # byte nor a blanket no-NUL scan separates it from a member array)
+  db <- mk_doc_block()
+  expect_true(ivt_f2_dir_is_text_block(db, 0L, length(db)))
+  # a one-record member array is the near miss: its record count fits and its
+  # single record leaves an interior NUL before the block's own end
+  one <- mk_member_array("Selected Police Services")
+  expect_false(ivt_f2_dir_is_text_block(one, 0L, length(one)))
+})
+
+test_that("a member array may be addressed by SLOT, with interior holes", {
+  # 3 members at slots 1, 3, 4 of an array written with one record per slot
+  raw <- mk_member_array(c("Alpha", "", "Beta", "Gamma"))
+  dir <- matrix(c(0L, length(raw)), 1L, 2L, dimnames = list(NULL, c("off", "len")))
+  keep <- function(t) t                               # accept everything
+  # without the declared slots the array is 4 records against 3 members -> rejected
+  # by the length test, and only the run-scanner fallback can offer anything
+  strict <- ivt_f2_dir_entry_members(raw, 0L, length(raw))
+  expect_equal(which(!is.na(strict$values)), c(1L, 3L, 4L))
+  got <- ivt_f2_dir_member_arrays(raw, dir, 3L, rows = 1L, accept = keep,
+                                  slots = c(1L, 3L, 4L))
+  expect_equal(got[[1]], c("Alpha", "Beta", "Gamma"))
+  # slots that do not match the array's own non-NA positions are refused
+  bad <- ivt_f2_dir_member_arrays(raw, dir, 3L, rows = 1L, accept = keep,
+                                  slots = c(1L, 2L, 4L))
+  expect_false(any(vapply(bad, identical, logical(1), c("Alpha", "Beta", "Gamma"))))
 })
 
 test_that("footnote member bitmap recognizer reads set bits, rejects non-bitmaps", {

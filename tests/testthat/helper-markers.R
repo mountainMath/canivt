@@ -44,6 +44,13 @@ mk_text_block <- function(txt = "Renvoi 1 - note") {
   c(as.raw(c(0x01L, 0x01L)), u16le(length(body)), body)
 }
 
+# the second §F blob variant: no [01] marker byte, and NUL-terminated -- the
+# survey lineage's per-dimension documentation blob (the UCR "Mandatory reading")
+mk_doc_block <- function(txt = "For more information ... <A HREF=\"x\">3302</A>") {
+  body <- c(charToRaw(txt), as.raw(0x00L))
+  c(as.raw(c(0x01L, 0x01L)), u16le(length(body)), body)
+}
+
 # a plain member array [01 01][u16 len-4][u16 n_slots]<[len]txt[00]...>
 mk_member_array <- function(slots = c("Foo", "Bar")) {
   recs <- unlist(lapply(slots, function(s)

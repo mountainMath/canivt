@@ -673,6 +673,83 @@ regenerated — four rows lose a now-unnecessary `canivt_deleted_slot` /
 `canivt_zero_count` fallback, accs changes hash, and the regen picks up 24 corpus
 tables the fixture predated).
 
+### Slot-addressed member arrays, and the nine deferred files (2026-07-25)
+
+The nine files the earlier sweeps had diagnosed and deferred were re-fetched into
+the corpus. Four of them turned out to need **no further layout work** — the
+`16 00` slot table, the under-declared-count reconcile and the `08 00` time table
+had already opened them — which is the recurring lesson of this ledger: a
+pre-flight rejection is usually a misread descriptor.
+
+`Table_6_c-2009` decoded but read its 225 offences as `"1"`, `"2"`, `"3"`, …
+Its `16 00` table declares alloc 256, 225 live members, and used slots
+**1..107, 109..226** — an interior hole at 108. The EN and FR label arrays are
+**256 records long**, with NAs at exactly slot 108 and 227..256, i.e. the array is
+addressed **by slot**, not by member. `ivt_f2_dir_member_arrays()` had two
+acceptance shapes — an array of exactly `cnt` records, or one whose *trailing*
+padding trims back to `cnt` — and an interior hole fits neither, so the run was
+rejected on length alone and the classifier fell through to the ordinal array.
+The declared slots resolve it exactly: select `v[slots]`, accepted only when the
+non-NA positions are precisely those slots, so a coincidentally long array cannot
+sneak in. This is the third thing the slot map turns out to describe, after the
+presence bitmap and the member-code array.
+
+Same table, second bug: its geography read `action=loc; form.submit();}">Mandatory
+reading`. Every dimension's block directory in this lineage carries a copy of the
+UCR **documentation blob** — the "Mandatory reading" HTML — and
+`ivt_f2_dir_is_text_block()` did not recognise it, because that recognizer had
+been written from the geo-tail note blobs (`[01 01][u16 len-4][01]<text, no NUL>`)
+and required both the `01` byte and a payload with no `0x00` at all. The
+documentation blob has neither property: its text starts immediately after the
+length, and it is NUL-terminated. The framing that *does* separate them is the
+member array's own: a member array opens with a u16 record count that must fit the
+payload (each record ≥ 2 bytes) and leaves an interior NUL after every record but
+the last; a text blob opens with latin1 text, whose first two bytes read as a u16
+of at least `0x2000`, and has no interior NUL. All three UCR tables — the new 2009
+file and the already-ledgered `table_6_c-ivt-2007` and `table_5_c-ivt-2008`, which
+had the same wrong label — now read `Selected Police Services` /
+`Services de police sélectionnées`.
+
+Validation of the four onboarded tables is tabulated in
+[`coverage.md`](coverage.md); the two sharpest results:
+
+- **`PRNAIC6dec2000`** (Business Register, 14 geo × 930 NAICS-6 × 11 employment
+  sizes, 71,794 cells) reconciles **exactly, zero residual, on all four** of the
+  file's identities: Canada == Σ 13 provinces/territories (10,230/10,230),
+  Total (A) == Indeterminate (B) + Subtotal (13,020/13,020), Subtotal == Σ the 8
+  size bands (13,020/13,020), NAICS Total == Σ the 929 industries (154/154).
+- **`Table-024`** (LFS 1987–2010, 506,131 cells) is estimate data rounded to 0.1
+  thousand, so its additive identities cannot be exact — but the residuals are
+  **one-sided in the informative way**. The negative tail never exceeds the
+  rounding bound of the number of summands (−0.1 for 2 summands, −0.2 for ≤6
+  occupation children, −0.3 for the 7 hours bands, −0.4 for the 10 provinces:
+  all within ±0.05 per component), while the positive tail runs to 6.7 — the
+  suppressed components the store does not carry. A mis-nested layout produces
+  two-sided residuals of arbitrary size, so this shape is itself the evidence.
+  The independent structural check is exact-by-construction and covers every
+  margin at once: `Average usual hours == Total usual hours / Total employed`
+  within 0.05 on **68,312 of 68,589** cells. Externally, Canada total employed
+  reads 12,333.0 thousand for 1987 and 17,041.0 for 2010, matching the published
+  LFS.
+
+`Table_6_c-2009`'s own check is the sharpest test of the label fix: the offence
+hierarchy is defined by the labels' indentation, so `parent == Σ children`
+**520/520 exact** could not hold if the 225 labels were assigned to the wrong
+slots. The clearance identities (`Total == NotCleared + ByCharge + ClearedOtherwise`
+and `ClearedOtherwise == Σ its 16 reasons`) are 225/225 exact each.
+
+Gates: corpus ledger FAIL 0 / PASS 374 (131 tables), marker corpus sweep FAIL 0 /
+PASS 609, geo snapshot FAIL 0 / PASS 312 (fixture regenerated — the three UCR
+rows' hashes change with the recovered name, plus the nine new ledger rows), unit
+suite FAIL 0 / PASS 1144 with the two long-standing loud fallbacks (98-10-0662's
+synthetic-aggregate `geo_name` fill and `ord-08035`'s inline name subtraction).
+
+The five that still fail the gate are ledgered `supported = FALSE` (`Table-080`,
+`PROVSIC2june1998`, `PRVNAIC1dec1998`, `PRSIC2june2001`, `PRVNAIC3_LOC-1`) — see
+[`unsupported-formats.md`](unsupported-formats.md). `test-corpus.R` now asserts
+that **every** corpus folder holding an `.ivt` has a ledger row, so a file cannot
+again sit un-regression-tested.
+
 ## Milestones — how the architecture arrived
 
 ### Unified cell decode & metadata

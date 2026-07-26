@@ -215,14 +215,32 @@ value block in one of three framings, all opening with `01 01` or `81 01`:
 |-------|---------|-----------|
 | `[01 01][u16 len-4][u16 n_slots] <records [len][text][00]>` | **plain** member array; NUL-terminated records, an absent member = empty record `00 00` → NA | `ivt_f2_dir_entry_members()` |
 | `[81 01][u16 nbits][bitstream u16-padded][single-bit byte] <records [len][text]>` | **bit-headed DENSE** array; absent members skipped, re-aligned against sibling NA pattern. The pre-records marker is always a **single-bit byte** (exactly one bit set; semantics unknown — the recognizer accepts the class, not an enumeration, after every new lineage surfaced another power of two): `0x80`/`0x01` on the modern chunked tables, `0x10` on the earlier `02 00 20 00` survey generation (PRSIC1dec1999's 11-member "Employment size ranges"), `0x20` on the `04`-gen long-time-series survey lineage (LFHR Table-023's 10-member "Hours worked"), `0x08` on the `04`-gen criminal-court survey lineage's member-label arrays (accs's **6-slot** "Sex" — `Total/Males/Females/Company/Unknown` plus a **DELETED slot** that retains its label; the record count 6 is the physical slot EXTENT, one more than the descriptor's logical count 5), `0x04` on Table-023's Sex (whose English "Both sexes"/Men/Women block the enumerated set silently dropped, labelling the dimension French) | `ivt_f2_dir_entry_members()` |
-| `[01 01][u16 len-4][01] <latin1 text, NO NUL>` | **footnote / note TEXT blob** — a lone un-terminated text (e.g. `Renvoi 1 / Ne comprend pas ...`), one per member that cites a note, in the geo directory TAIL; **not** a member array | `ivt_f2_dir_is_text_block()` |
+| `[01 01][u16 len-4][01]? <latin1 text>` | **footnote / note / documentation TEXT blob** — a lone free text (e.g. `Renvoi 1 / Ne comprend pas ...`, or the UCR "Mandatory reading" HTML), one per member that cites a note in the geo directory TAIL, or one per DIMENSION directory; **not** a member array | `ivt_f2_dir_is_text_block()` |
 
 The text-blob framing reuses the plain `01 01` header, so it is told apart
-**structurally**: its payload after the `01` marker carries **no `0x00` byte**,
-whereas a member array's records are each NUL-terminated. This is the fix that
-closed the FSA/FED/ADA (98100019/98100010/98100013) full-attribute read — those
-tail blocks used to be miscounted as attribute value blocks and defeat the
-regular-layout gate.
+**structurally**, by the two things a member array's framing guarantees:
+
+1. the payload opens with a u16 **record count**, so `2·n + 2 <= len − 4` must
+   hold (each record is at least `[u8 0][00]`). A blob opens with the text
+   itself, whose first two latin1 bytes read as a u16 of at least `0x2000` —
+   impossibly large for the payload.
+2. every member record but the last leaves an **interior `0x00`**; a blob has
+   none before its own terminator.
+
+Two variants occur and neither the `[01]` byte nor a blanket no-NUL scan
+separates them: the geo-tail note blob carries the `01` and is unterminated,
+while the survey lineage's **per-dimension documentation blob** starts its text
+immediately after the length and IS NUL-terminated (`Table_6_c-2009`,
+`table_6_c-ivt-2007`, `table_5_c-ivt-2008`: the same UCR "Mandatory reading" HTML
+repeated in every dimension's directory). The recognizer therefore tests (1) and
+(2) only.
+
+This is the fix that closed the FSA/FED/ADA (98100019/98100010/98100013)
+full-attribute read — those tail blocks used to be miscounted as attribute value
+blocks and defeat the regular-layout gate — and, with the widening above, the
+three UCR tables' single geography, which used to be labelled with a fragment of the
+HTML blob (`action=loc; form.submit();}">Mandatory reading`) instead of
+`Selected Police Services`.
 
 ## G. Footnote markers
 
@@ -255,6 +273,15 @@ layout.
 
 ## Change log
 
+- **2026-07-25** — **§F text-blob recognizer widened** — the `[01]` single-record
+  byte is optional and a blob may be NUL-terminated, so the discriminator is now
+  "the u16 record count does not fit the payload" + "no INTERIOR NUL". Closes the
+  UCR tables' geography label (`Table_6_c-2009`, `table_6_c-ivt-2007`). Same
+  commit: **slot-addressed member arrays** — a codebook array may carry one
+  record per allocated SLOT (`Table_6_c-2009`'s 225 offences at slots 1..107 and
+  109..226 of 256), which the trailing-NA trim cannot recover; the declared slot
+  positions now select `v[slots]`, accepted only when the array's non-NA
+  positions are exactly those slots.
 - **2026-07-25** — **The `08 00` time table is a count declaration too** (§E.1):
   `ivt_f2_dim_time_declared()` routes it into the same
   `ivt_f2_dim_slot_declared()` reconcile the `16 00` mid-section feeds, gated on

@@ -349,8 +349,21 @@ ivt_f2_dim_dir_label1 <- function(raw, dim, dir) {
 # records (98-10-0077's Ages) and fragments dense blocks, so it is only the
 # fallback. The scanner path keeps its established shape: the largest block of
 # cnt..cnt+8 records, sliced to the trailing `cnt`.
+#
+# `slots` is the dimension's DECLARED used-slot positions
+# (`ivt_f2_dim_slot_declared()`), when it has any. An array can be written one
+# record per allocated SLOT rather than one per member, leaving the unallocated
+# slots empty: `Table_6_c-2009`'s 225 offences occupy slots 1..107 and 109..226
+# of 256, and its EN and FR label arrays are 256 long with NAs at slot 108 and
+# at 227..256. The trailing-NA trim below cannot recover that -- the hole is
+# INTERIOR -- so the run was rejected and the labels fell through to the ordinal
+# array (members read "1", "2", "3", ...). Selecting `v[slots]` is exact and
+# metadata-driven: it is accepted only when the non-NA positions are precisely
+# the declared slots, so a coincidentally long array cannot pass.
 ivt_f2_dir_member_arrays <- function(raw, dir, cnt, rows, accept,
-                                     max_keep = .Machine$integer.max) {
+                                     max_keep = .Machine$integer.max,
+                                     slots = NULL) {
+  if (!is.null(slots) && (length(slots) != cnt || anyNA(slots))) slots <- NULL
   out <- list()
   for (r in rows) {
     len <- dir[r, "len"]
@@ -368,6 +381,9 @@ ivt_f2_dir_member_arrays <- function(raw, dir, cnt, rows, accept,
       if (!e$dense && length(v) > cnt && all(is.na(v[(cnt + 1L):length(v)])))
         v <- v[seq_len(cnt)]                       # pow-2 slot padding
       if (length(v) == cnt && !anyNA(v)) t <- v
+      # slot-addressed array: one record per allocated slot, empty at the rest
+      else if (!is.null(slots) && length(v) >= slots[cnt] &&
+               identical(which(!is.na(v)), slots)) t <- v[slots]
     }
     if (is.null(t)) {                              # run-scanner fallback
       win <- raw[(dir[r, "off"] + 1L):min(length(raw), dir[r, "off"] + len)]
