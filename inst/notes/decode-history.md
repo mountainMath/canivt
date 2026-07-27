@@ -1169,6 +1169,71 @@ words, and the same eight missing-bearing and eight second-block tables with
 identical per-table counts. The new tables are 2021 NDM and 2016 crosstab
 vintages — `0xa` lineages that report no missings of their own.
 
+### The mask says it, and the arithmetic agrees (2026-07-27, same day)
+
+The `beyond` diagnostic above was the one place the mask decoder still guessed.
+It counted missing cells past the last mask word a page *writes*, and read that
+as doubt: maybe the trailing cells really are all missing, maybe the writer
+stopped. 2,290,657 of 3,674,333 reported missings carried the caveat. Both legs
+of the answer turned out to be measurable.
+
+**Structural: the index's reach is the real boundary.** The last *written* word
+is not an epistemic limit, because the words are addressed by an index whose size
+the marker fixes ahead of time. If the index has a bit for word *k* and that bit
+is clear, the file is *stating* that word *k* is all-zero — which is exactly
+"none of these absent cells is a genuine zero", i.e. all of them are missing.
+Only a word the index cannot address at all is unclassifiable. Measured over
+every mask page of the corpus:
+
+    index words = 8·(trailer + head)   >=   ceil((max grid bit + 1) / (8·width))
+    1,810,626 / 1,810,626 mask pages, 0 short
+
+So `covered_bits` became `min(index words, mask words) · width · 8` and the
+corpus `beyond` count went **2,290,657 → 0**, with every missing-cell count
+unchanged. The sparse index was never hiding anything; the diagnostic was
+measuring sparsity and calling it truncation.
+
+**Semantic: the tables' own arithmetic separates the two halves.** A dimension
+with a `Total` member over its detail is a test the file cannot fake, because the
+total is published even where the detail is suppressed:
+
+    every absent detail cell masked  =>  Total − Σ detail ≈ 0   (random rounding only)
+    detail cells reported missing    =>  Total − Σ detail  > 0   (real, unpublished values)
+
+`dev/mvalidate.R` runs it, self-calibrating: the fully-masked coordinates are the
+CONTROL and establish both that the dimension is additive and how much noise the
+vintage's rounding adds; the missing-bearing coordinates are the treatment.
+
+| table | dim | control n | control median | within tol | treatment (median residual by #missing) |
+|---|---|---:|---:|---:|---|
+| `97F0015X` | Age (7) | 34,616 | 0 | 100 % (±21) | 5 · 10 · 15 · 25 · 30 · **35** (`frac > 0` → 1.000) |
+| `97F0015X` | Sex (3) | 271,008 | 0 | 84.5 % | 15 · 30 |
+| `97F0007XCB2001042` | Sex (3) | 3,053,547 | 0 (mean −0.2) | 89.5 % | 25 · 30 |
+| `97-563-XCB2006072` | Age (5) | 457,336 | 0 | **100 %** | — (its missings are elsewhere) |
+| `97-563-XCB2006072` | Sex (3) | 679,186 | 0 | 95.1 % | — |
+
+The dose-response is the point: if "unmasked absent" meant zero, both groups
+would sit at 0. Instead the shortfall grows monotonically with the number of
+cells the decoder calls missing, and where all six age groups are missing the
+total exceeds the (empty) detail sum on **69,506 of 69,506** coordinates.
+
+`97F0015X` was the case that looked like a length bug — 93 % of its missings sat
+past the last written word, and its per-page unmasked count is a pure function of
+mask length (`unm = 18·(42 − mask_words)`, multiples of 108 = 12 × 9). That
+relation is a *tautology* of "the writer stops at the last flagged cell". The
+arithmetic settles what the shape could not: 38,999 age-Total cells of ≥ 30 have
+all six age groups absent, and every one of them is reported missing, **none**
+masked — while the cells the mask does call zeros under an all-absent detail run
+sit at totals of 10–20, precisely the window base-5 random rounding can produce
+from six sub-5 parts. The mask's boundary lands exactly where the arithmetic
+says it must.
+
+This also closes the `97F0007XCB2001042` discrepancy (viewer `N` running 8–10
+per geography over the *popcount*): the popcount era could not see dropped
+all-zero words. www12 was unreachable while this was written, so the viewer was
+not re-scraped — the evidence here is internal, and stronger for it, being
+3M coordinates rather than 12 sampled geographies.
+
 ### Unified cell decode & metadata
 
 One `ivt_layout()` + `ivt_decode()` (`decode.R`) decodes every table, reproducing the

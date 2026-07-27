@@ -303,20 +303,19 @@ income) against the Beyond 20/20 web viewer, on a table whose layout is
 
 Decoded incidence over the whole 170-table corpus (`fixtures/status-ledger.csv`,
 one row per table: 105 carry mask pages, 47 carry `0xa` status pages, 36 write
-no tail at all). Eight tables report
-missing cells, and the `beyond` column is the honest caveat — those cells sit
-past the last mask word their page writes (below), so they are unmasked for want
-of a word rather than by the file's own statement:
+no tail at all). Eight tables report missing cells; the *beyond* column — cells
+the page's word index has no bit for, the only real gap (below) — is **0
+everywhere**:
 
 | table | cells | missing | of which *beyond* |
 |---|---:|---:|---:|
-| `97F0015X` | 864,205 | 2,080,404 | 1,929,312 |
-| `SP3_AVQOPM_97F0007XCB2001042` | 9,021,645 | 1,586,079 | 360,765 |
-| `SP3_H7WG5V_EDDTAB16` | 60,468 | 5,276 | 126 |
-| `97-563-XCB2006072` | 6,526,221 | 1,485 | 405 |
+| `97F0015X` | 864,205 | 2,080,404 | 0 |
+| `SP3_AVQOPM_97F0007XCB2001042` | 9,021,645 | 1,586,079 | 0 |
+| `SP3_H7WG5V_EDDTAB16` | 60,468 | 5,276 | 0 |
+| `97-563-XCB2006072` | 6,526,221 | 1,485 | 0 |
 | `SP3_GPVU3L_00060210` | 2,569 | 517 | 0 |
 | `97F0020XCB2001070` | 108,609 | 344 | 0 |
-| `SP3_NIQKF5_95f0487xcb01003` | 134,238 | 220 | 49 |
+| `SP3_NIQKF5_95f0487xcb01003` | 134,238 | 220 | 0 |
 | `SP3_GPVU3L_00060208` | 301 | 8 | 0 |
 
 Every other table — CMHC T1/T2/T3, 98-312-XCB2011033, 98100023/45/66/179/662,
@@ -328,18 +327,29 @@ the earlier popcount measurement exactly: 4 per page on each of the 86 pages of
 geographies 1–13 that carry a tail, 0 on all 8 Nunavut pages, and the 18 no-tail
 pages of geographies 1/6/7/10/11 contribute nothing.
 
-Three limits, each reported by the decoder rather than hidden:
+**A mask that stops short of the grid is making a statement.** The sparse index
+drops all-zero words, so the written mask routinely covers fewer words than the
+page's cells span. That is not truncation: the index is sized by the marker, and
+on **1,810,626 / 1,810,626** corpus mask pages `trailer + head` holds at least as
+many bits as the grid spans words. The writer therefore had a bit for every mask
+word and left the unwritten ones clear — an explicit "no genuine zeros here", so
+every absent cell those words cover is missing.
 
-- **A mask can stop short of the grid.** The sparse index drops all-zero words,
-  so the written mask may cover fewer words than the page's cells span, and
-  every cell past that point reads as unmasked. That is correct where those
-  cells really are all missing (nothing to flag as a zero) and wrong where the
-  writer simply stopped, and **the bytes cannot tell the two apart**. Counted as
-  `beyond` and warned (`canivt_status_beyond_mask`). `97F0015X` is the extreme
-  case: 93% of its missings are beyond, and its per-page unmasked count is a pure
-  function of how many mask words were written (`unm = 18·(42 − mask_words)`,
-  always whole multiples of 108 = its two innermost dimensions 12 × 9), which is
-  the signature of a length artefact, not of data.
+    index words = 8·(trailer + head)      >=  ceil((max grid bit + 1) / (8·width))
+    unwritten word INSIDE that span  =>  the word is all-zero  =>  those absent cells are MISSING
+    word with no index bit at all    =>  unclassifiable        =>  reported `beyond`, warned
+
+`covered_bits` is the second boundary, `min(index words, mask words)`, and the
+corpus has nothing past it. `97F0015X` was the case that looked like an artefact:
+93 % of its missings sat past the last *written* word, and its per-page unmasked
+count is a pure function of how many words were written (`unm = 18·(42 −
+mask_words)`, whole multiples of 108 = its two innermost dimensions 12 × 9). That
+relation is a tautology of "the writer stops at the last flagged cell", not
+evidence of a length bug — see "The mask says it, and the arithmetic agrees"
+in [`decode-history.md`](decode-history.md) for the arithmetic that settles it.
+
+Two limits remain, each reported by the decoder rather than hidden:
+
 - **The x87 signalling-NaN artefact.** On float64 (`width = 8`) pages a mask word
   of mostly-ones is NaN-shaped, and the writer's x87 load/store quiets it by
   forcing the top mantissa bit (LSB bit 51) to 1 — destroying one status bit per
@@ -352,12 +362,18 @@ Three limits, each reported by the decoder rather than hidden:
   f3 ff f7 ff` — identical but for byte 6. Counted as `nan_words`
   (`canivt_status_nan_quieted`; a source-side loss, so strict mode leaves it a
   warning).
-- **`SP3_AVQOPM_97F0007XCB2001042`** agrees qualitatively (missing > 0, viewer
-  `N` > 0) but is off by ~8–10 per geography against the viewer on 11 of 12
-  sampled geographies. Stored zeros are ruled out (0 zeros in 9,021,645 stored
-  cells); cause unresolved. It is also the corpus's worst NaN case (163,479
-  NaN-shaped words) and carries the second block, so several candidate
-  explanations remain open.
+- **A masked word may be one bit short of the truth, and only there.** Outside
+  the NaN-shaped words the mask never contradicts the presence record.
+
+The **`SP3_AVQOPM_97F0007XCB2001042`** discrepancy recorded here earlier — the
+popcount running 8–10 per geography under the viewer's `N` count on 11 of 12
+sampled geographies — was the *popcount* era's measurement, taken before the
+index was understood and therefore blind to the dropped all-zero words. The
+decoded mask now answers with 1,586,079 missings and the table's own arithmetic
+backs it: over 3,053,547 sex-Total coordinates whose absent cells are all masked,
+`Total − (Male + Female)` has median 0 and mean −0.2, while the 44,799
+coordinates with cells reported missing fall short by a median of 25 (30 where
+both sexes are missing, `frac > 0` = 1.000).
 
 Across the corpus the mask never contradicts the presence record outside those
 NaN-shaped words: **0 contradictory pages** in 1,810,626.

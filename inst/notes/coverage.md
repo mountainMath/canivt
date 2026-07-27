@@ -156,16 +156,24 @@ pre-value region is the tail's index bitmap and the tail is the absent mask
   quantity. Counted as `extra_words` and reported loudly
   (`canivt_status_extra_block`). Write-up: [`ivt-format.md`](ivt-format.md),
   "The second tail block (OPEN)".
-- [ ] **Three known limits on the decoded `0x8` mask**, all reported rather than
+- [x] **A dropped mask word is a STATEMENT, not a gap** (closed 2026-07-27, the
+  same day it opened). All-zero words are not written, so a mask can stop short
+  of the grid — but the **index** that addresses them is sized by the marker, and
+  on **1,810,626 / 1,810,626** corpus mask pages it can address every word the
+  grid spans. So an unwritten word inside that span is the file declaring the
+  word all-zero: every absent cell it covers is missing. `covered_bits` now
+  reports the index's reach (`min(index words, mask words)`) instead of the last
+  word written, and the corpus `beyond` count went **2,290,657 → 0**. Confirmed
+  semantically by `dev/mvalidate.R` (arithmetic, no external ground truth): where
+  every absent cell of a coordinate is masked, the dimension's Total reproduces
+  the sum of its detail to within random rounding (97F0015X age 34,616 coords
+  100 % within ±21, median 0; 97-563 age 457,336 100 %; 97F0007 sex 3,053,547 at
+  89.5 %, mean −0.2); where cells are reported missing, the shortfall grows
+  monotonically with how many (97F0015X age medians 5/10/15/25/30/35 for 1..6
+  missing, `frac > 0` reaching 1.000). That also settles the `97F0007`
+  viewer discrepancy left open above.
+- [ ] **Two known limits on the decoded `0x8` mask**, both reported rather than
   hidden (`read_ivt(missing = TRUE)` raises a classed warning per page class):
-  - **Missings past the written mask** (`canivt_status_beyond_mask`): all-zero
-    words are dropped by the sparse index, so a mask can stop short of the grid,
-    and every cell past that point is unmasked for want of a word rather than by
-    the file's statement. Legitimate where the trailing cells really are all
-    missing, but indistinguishable from a truncated mask. 2,290,657 of the
-    corpus's 3,674,333 reported missings — concentrated in `97F0015X`
-    (1,929,312 of 2,080,404) and `97F0007` (360,765 of 1,586,079); `97F0020`'s
-    viewer-validated 344 are **0 beyond**.
   - **No tail at all** (`canivt_status_unreadable`): the Business Patterns and
     type-00 sub-A lineages write no page tail, so nothing can be said about their
     absent cells. 64 of the 170 ledger tables have no mask pages, 36 of them no

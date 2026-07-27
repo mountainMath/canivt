@@ -46,6 +46,20 @@
 #' presence record itself (`lay$grid$bit`) -- decisively, over the alternative of
 #' packing by real-cell ordinal.
 #'
+#' **A dropped word is a statement, not a gap.** All-zero words are not written,
+#' so the mask can stop well short of the grid -- but the index that addresses
+#' those words is sized by the marker, and on every one of the corpus's
+#' 1,810,626 mask pages it can address every word the grid spans. An unwritten
+#' word inside that span is therefore the file declaring the word all-zero, i.e.
+#' every absent cell it covers is MISSING. Only a word the index has no bit for
+#' is genuinely unclassifiable, and `covered_bits` reports exactly that boundary
+#' (`min(index words, mask words)`), so the caller's `beyond` count is a real
+#' gap rather than a restatement of sparsity. Confirmed semantically by
+#' `dev/mvalidate.R`: on the tables that report missings, coordinates whose
+#' absent cells are all masked reproduce their own dimension's total to within
+#' random rounding, while coordinates with unmasked absent cells fall short by
+#' an amount that grows with how many of them there are.
+#'
 #' Two known limits, both reported by the caller rather than hidden:
 #'
 #' - **The x87 signalling-NaN artefact.** On float64 (`width = 8`) pages a mask
@@ -135,16 +149,16 @@ ivt_page_status <- function(raw, off, lay, size = NA_integer_) {
     src <- rep((which(inmask) - 1L) * w, each = w) + seq_len(w)
     buf[dst] <- tail[src]
   }
-  # The last mask word the page actually WRITES. All-zero words are dropped by
-  # the sparse index, so the mask can stop well short of the grid -- and every
-  # cell past that point is "unmasked" for want of a word rather than because the
-  # file called it missing. Legitimate where the trailing cells really are all
-  # missing (nothing to flag as a zero), but it is also the shape a truncated
-  # mask would take, and the two are indistinguishable from the bytes. The
-  # caller counts how many reported missings fall past this bit and says so.
-  last_bit <- if (any(inmask)) (max(wi[inmask]) + 1L) * w * 8L else 0L
+  # How far the mask SPEAKS -- which is the index's reach, not the last word the
+  # page happens to write. A dropped word inside the index's span is the file
+  # saying "no genuine zeros here" (so every absent cell there is missing); only
+  # a word the index has no bit for is a cell the file could not classify. The
+  # two are opposite in meaning and only the second is a gap, so `covered_bits`
+  # measures the second. Corpus-wide the index always reaches the whole grid
+  # (1,810,626 / 1,810,626 mask pages), so nothing is ever past it.
+  cov_bits <- min(tr * 8L, nw) * w * 8L
   list(kind = "mask", mask_bytes = buf, nan_words = as.integer(nanw),
-       extra_words = sum(!inmask), covered_bits = last_bit)
+       extra_words = sum(!inmask), covered_bits = cov_bits)
 }
 
 # Read bit positions `bit` (0-based) of a reconstructed mask: MSB-first, and --

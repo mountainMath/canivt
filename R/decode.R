@@ -804,12 +804,10 @@ ivt_missing_cells <- function(miss_acc, mi, lay, tally) {
   }
   if (tally[["beyond"]] > 0L) {
     ivt_fallback(paste(
-      "{tally[['beyond']]} of the {nrow(out)} missing cell{?s} sit{?s/} PAST the",
-      "last mask word its page writes: the sparse index drops all-zero words, so",
-      "{?it is/they are} unmasked for want of a word rather than because the file",
-      "flagged {?it/them}. Legitimate where those cells really are all missing,",
-      "but indistinguishable from a mask that simply stops short -- treat",
-      "{?this cell/these cells} as unconfirmed."),
+      "{tally[['beyond']]} of the {nrow(out)} missing cell{?s} sit{?s/} past the",
+      "reach of {?its/their} page's word INDEX: the file has no bit with which to",
+      "classify {?it/them}, so {?it is/they are} reported missing without the file",
+      "saying so -- treat {?this cell/these cells} as unconfirmed."),
       class = "canivt_status_beyond_mask")
   }
   # A faithful read of a source-side loss, not a heuristic: the writer's x87

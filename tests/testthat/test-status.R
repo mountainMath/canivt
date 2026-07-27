@@ -42,6 +42,35 @@ test_that("missing = FALSE (the default) leaves cells and the object untouched",
   expect_equal(a$cells, b$cells)
 })
 
+test_that("covered_bits is the index's REACH, not the last word written", {
+  # A dropped all-zero word inside the index's span is the file stating "no
+  # genuine zeros here", so the cells it covers are missing and must NOT be
+  # counted as beyond the mask. Only a word the index has no bit for is a gap.
+  #
+  # One 8-bit grid, width 2, rec_bytes 4 (2 mask words), b2 = 0x10 -> a 2-byte
+  # trailer = 16 index bits, so the index reaches both mask words. The page
+  # writes only word 0 (index bit 0 set, pair-swapped: byte 1 bit 7).
+  lay <- list(rec_bytes = 4L, grid = list(bit = 0:7))
+  raw <- as.raw(c(0x82, 0x01, 0x10, 0x08,      # marker: width 2, trailer 2
+                  0x00, 0x00, 0x00, 0x00,      # presence record (4 bytes, empty)
+                  0x00, 0x80,                  # index: word 0 only
+                  0xff, 0x00))                 # the one written mask word
+  st <- ivt_page_status(raw, 0L, lay, size = 12L)
+  expect_identical(st$kind, "mask")
+  expect_identical(st$covered_bits, 32L)       # both words, not just the written one
+  expect_identical(st$extra_words, 0L)
+  expect_true(all(ivt_mask_bits(st$mask_bytes, 0:7)))
+
+  # Halve the index (b2 = 0x00 -> a 1-byte... trailer of 0 is rejected; use a
+  # width that makes the mask span more words than the index can address).
+  lay8 <- list(rec_bytes = 64L, grid = list(bit = 0:7))
+  raw8 <- as.raw(c(0x82, 0x01, 0x10, 0x08, rep(0x00, 64), 0x00, 0x80, 0xff, 0x00))
+  st8 <- ivt_page_status(raw8, 0L, lay8, size = 4L + 64L + 2L + 2L)
+  expect_identical(st8$kind, "mask")
+  # 16 index bits address 16 of the mask's 32 words -> the mask stops at bit 256
+  expect_identical(st8$covered_bits, 256L)
+})
+
 test_that("a page with no readable tail contributes nothing, loudly", {
   # A no-tail page must NOT read as "every absent cell is missing": the
   # lineages that write no tail at all (Business Patterns, the type-00 sub-A
@@ -66,9 +95,10 @@ test_that("a page with no readable tail contributes nothing, loudly", {
 #   * `contradictory` == 0 everywhere -- outside the NaN-shaped words no mask bit
 #     ever lands on a cell that carries a value.
 #
-# `n_beyond` is the honest caveat column: those missing cells sit past the last
-# mask word their page writes, so they are unmasked for want of a word rather
-# than by the file's own statement.
+# `n_beyond` counts missing cells past the reach of their page's word INDEX --
+# cells the file has no bit with which to classify. It is 0 for every corpus
+# table: the index always spans the whole grid, so an unwritten mask word is the
+# file declaring that word all-zero, not a mask that stopped short.
 
 corpus_dir <- Sys.getenv("CANIVT_IVT_CACHE")
 corpus_on <- nzchar(Sys.getenv("CANIVT_CORPUS_TESTS")) &&

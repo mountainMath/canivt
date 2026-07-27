@@ -6,6 +6,7 @@
 |---|---|
 | `range-harvest.R` (+ `rh_inflate.py`) | catalogue-wide metadata inventory that fetches only the front metadata region of each remote `.ivt` instead of the whole file |
 | `msweep.R` | corpus-wide cell-status (missing-data) sweep — the measurement behind the figures in `coverage.md` / `decode-history.md`, and the source of `tests/testthat/fixtures/status-ledger.csv` |
+| `mvalidate.R` | semantic validation of the `0x8` absent mask from a table's **own arithmetic** — no external ground truth |
 
 ## msweep.R — the cell-status sweep
 
@@ -24,7 +25,44 @@ that carries a value).
 
 Last full sweep — 170 tables, 2026-07-27: 0 cell mismatches, 0 errors;
 `mask 1,810,626 · none 604,337 · status 1,273,173 · unreadable 0 · extra 23,885 ·
-nan_words 435,947 · contradictory 0 · beyond 2,290,657 · miss 3,674,333`.
+nan_words 435,947 · contradictory 0 · beyond 0 · miss 3,674,333`.
+
+`beyond` counts missing cells the page's word **index** has no bit for. It is now
+0 corpus-wide: on all 1,810,626 mask pages the index spans the whole grid, so an
+unwritten mask word is the file declaring that word all-zero, not a mask that
+stopped short (it read 2,290,657 before `covered_bits` was changed from the last
+word *written* to the index's *reach* — the missing-cell counts did not move).
+
+## mvalidate.R — does the mask mean what we say it means?
+
+```sh
+Rscript dev/mvalidate.R <corpus-key> [dimension-slug]
+```
+
+The mask splits absent cells into genuine zeros (masked) and missings
+(unmasked). Both halves are testable *inside the file* wherever a dimension
+carries a `Total` over its own detail members, because the total is published
+even where the detail is suppressed:
+
+    every absent detail cell masked  =>  Total − Σ detail ≈ 0   (random rounding only)
+    detail cells reported missing    =>  Total − Σ detail  > 0   (real, unpublished values)
+
+The design is **self-calibrating**: the fully-masked coordinates are the CONTROL
+and establish both that the dimension really is additive and how much noise the
+vintage's random rounding adds; the missing-bearing coordinates are the
+treatment, grouped by how many cells the decoder calls missing. A control that
+does not sit at ~0 means the chosen dimension is not additive (multiple-response
+survey questions, rate/median members) and the run is reported inapplicable
+rather than scored. Nothing here keys off labels except the dev-only drop of
+median/average/rate members — the parser must never do that.
+
+Results, 2026-07-27 (the run that closed the `beyond` caveat):
+
+| table | dim | control n | control median | within tol | median residual by #missing |
+|---|---|---:|---:|---:|---|
+| `97F0015X` | Age (7) | 34,616 | 0 | 100 % | 5 · 10 · 15 · 25 · 30 · 35 |
+| `97F0007XCB2001042` | Sex (3) | 3,053,547 | 0 | 89.5 % | 25 · 30 |
+| `97-563-XCB2006072` | Age (5) | 457,336 | 0 | 100 % | — |
 
 ## range-harvest.R — what it does
 
