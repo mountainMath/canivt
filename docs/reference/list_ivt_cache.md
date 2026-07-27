@@ -44,7 +44,7 @@ no product).
 ``` r
 # Lists whatever is in the configured cache directories (empty when unset):
 list_ivt_cache()
-#> # A tibble: 142 × 10
+#> # A tibble: 180 × 10
 #>    kind    key             language catalogue     title census_year topic  bytes
 #>    <chr>   <chr>           <chr>    <chr>         <chr>       <int> <chr>  <dbl>
 #>  1 ivt     1003011         NA       1003011       E910…        1991 Age,… 2.67e7
@@ -57,6 +57,6 @@ list_ivt_cache()
 #>  8 ivt     95F0223XDB96001 NA       95F0223XDB96… Tota…        1996 Immi… 3.26e6
 #>  9 ivt     95F0250XDB96001 NA       95F0250XDB96… Priv…        1996 Sour… 7.82e5
 #> 10 ivt     95f0437xcb01001 NA       SP3/P0GGAN/9… Cens…          NA NA    7.10e6
-#> # ℹ 132 more rows
+#> # ℹ 170 more rows
 #> # ℹ 2 more variables: modified <dttm>, path <chr>
 ```

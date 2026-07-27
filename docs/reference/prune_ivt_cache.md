@@ -78,5 +78,5 @@ When a Parquet is removed and no remaining Parquet references its shared
 ``` r
 # Preview what a prune would remove without deleting anything:
 prune_ivt_cache(dry_run = TRUE)
-#> Would remove 150 files (2.5 Gb).
+#> Would remove 188 files (3.8 Gb).
 ```
