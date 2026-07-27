@@ -269,7 +269,7 @@ x$missing        # one row per cell the file says is MISSING, same coordinate
 
 The mask is stored as a sparse array of value-width words, addressed by the index
 bitmap in the trailer + head region; the gate is the length identity
-`popcount(index) · width == tail length`, which holds on all 1,342,037 mask pages
+`popcount(index) · width == tail length`, which holds on all 1,810,627 mask pages
 of the development corpus. It is off by default because completeness is
 vintage-dependent: some lineages write no tail at all, `0xa` pages are not
 decoded, and a mask that stops short of the grid leaves the cells past it

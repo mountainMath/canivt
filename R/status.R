@@ -36,9 +36,10 @@
 #' words back to their indexed positions rebuilds the block.
 #'
 #' The length invariant `popcount(index) * width == tail length` is the gate: it
-#' holds on **20,322 of 20,322 tail-bearing pages across all 106 tail-bearing
-#' corpus tables**. A page that fails it is reported `"unreadable"` and
-#' contributes nothing rather than a guess.
+#' holds on **1,810,627 of 1,810,627 mask pages of the 171-table corpus, 0
+#' unreadable** (first measured standalone at 20,322 / 20,322 tail-bearing
+#' pages). A page that fails it is reported `"unreadable"` and contributes
+#' nothing rather than a guess.
 #'
 #' Unlike the presence record the mask bytes are **not** pair-swapped; they are
 #' read MSB-first and addressed at the same padded presence-grid bit as the
@@ -52,11 +53,11 @@
 #'   by forcing the top mantissa bit (LSB bit 51) to 1 -- destroying one status
 #'   bit per affected word IN THE SOURCE FILE. It is not recoverable: the
 #'   affected cell reads as masked (genuine zero) when it may have been missing.
-#'   Measured: 0 signalling NaNs survive in 63,582 mask words over the 19
-#'   float64-valued corpus tables, against 374 of 94,893 (5.9% of the NaN-shaped
-#'   ones) on the 42 int32 tables where no such quieting applies. Counted as
-#'   `nan_words`.
-#' - **A second, undecoded block.** On 6 corpus tables some `b3 == 0x0c` pages
+#'   Measured over the float64/int32 tables of the corpus: 0 signalling NaNs
+#'   survive in 63,582 `width = 8` mask words, against 374 of 94,893 (5.9% of
+#'   the NaN-shaped ones) on `width = 4`, where no such quieting applies.
+#'   Counted as `nan_words`.
+#' - **A second, undecoded block.** On 8 corpus tables some `b3 == 0x0c` pages
 #'   address words PAST the mask's `rec_bytes`, i.e. the same index also
 #'   addresses a further array. Its content is packed flag words (`0x3333`,
 #'   `0x1111`, `0x33FF`, all-ones -- nibbles confined to {0,1,3,7,b,f}, written
@@ -105,8 +106,8 @@ ivt_page_status <- function(raw, off, lay, size = NA_integer_) {
   # THE INDEX IS THE WHOLE PRE-VALUE REGION, not a prefix of it: bits past the
   # last written word are simply zero. (Sizing it `rec_bytes / (8 * width)` --
   # exactly the words a full mask needs -- truncates the index on every page
-  # that also carries the second block, and the length invariant then fails on
-  # 6 of 106 tables.)
+  # that also carries the second block, and the length invariant then failed on
+  # 6 of the 106 tables of the ledger it was first measured on.)
   reg <- as.integer(raw[off + 4L + rb + seq_len(tr)])
   sel <- ivt_bits_pairswap_msb(reg, seq.int(0L, tr * 8L - 1L))
   if (sum(sel) * w != tl)

@@ -1,10 +1,32 @@
-# dev/ — range-harvest prototype
+# dev/ — developer tooling
 
-**Not part of the built package** (`^dev$` in `.Rbuildignore`). Experimental
-tooling for a catalogue-wide metadata inventory that fetches only the front
-metadata region of each remote `.ivt` instead of the whole file.
+**Not part of the built package** (`^dev$` in `.Rbuildignore`).
 
-## What it does
+| script | role |
+|---|---|
+| `range-harvest.R` (+ `rh_inflate.py`) | catalogue-wide metadata inventory that fetches only the front metadata region of each remote `.ivt` instead of the whole file |
+| `msweep.R` | corpus-wide cell-status (missing-data) sweep — the measurement behind the figures in `coverage.md` / `decode-history.md`, and the source of `tests/testthat/fixtures/status-ledger.csv` |
+
+## msweep.R — the cell-status sweep
+
+```sh
+Rscript dev/msweep.R out.csv   # from the package root; CANIVT_IVT_CACHE,
+                               # CANIVT_TEST_CORES, CANIVT_PKG
+```
+
+Reads every supported ledger table with `missing = TRUE` and reports the
+per-page-class tally (`attr(x$missing, "pages")`, see `R/status.R`) plus the
+missing-cell count, re-asserting `nrow(x$cells)` against the corpus ledger as it
+goes. Re-run it after any change to `status.R` or `decode.R`. The two columns
+that must never move are `unreadable == 0` (the index accounts for every mask
+page's tail byte-exactly) and `contradictory == 0` (no mask bit lands on a cell
+that carries a value).
+
+Last full sweep — 171 tables, 2026-07-27: 0 cell mismatches, 0 errors;
+`mask 1,810,627 · none 604,337 · status 1,273,173 · unreadable 0 · extra 23,885 ·
+nan_words 435,947 · contradictory 0 · beyond 2,290,657 · miss 3,674,333`.
+
+## range-harvest.R — what it does
 
 `range-harvest.R` defines a **lazy, range-backed byte source** that presents
 `length()` and `[` to the *unchanged* canivt parser (`ivt_family()` +

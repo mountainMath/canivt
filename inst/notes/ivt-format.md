@@ -258,9 +258,9 @@ of which the first `rec_bytes` are the mask.
     INVARIANT:  popcount(index) * width == tail length
 
 That invariant is the gate, and it holds on **20,322 of 20,322 tail-bearing
-pages across all 106 tail-bearing corpus tables** — and, re-measured through the
-decoder over every directory entry, on **1,342,037 of 1,342,037 mask pages of
-the 133-table corpus, with 0 unreadable**. Sizing the index as the
+pages** as first measured standalone — and, re-measured through the decoder over
+every directory entry, on **1,810,627 of 1,810,627 mask pages of the 171-table
+corpus, with 0 unreadable**. Sizing the index as the
 `rec_bytes / (8·width)` words a full mask needs — the obvious reading — truncates
 it on every page that also carries the second block (below) and drops 6 tables.
 
@@ -301,8 +301,9 @@ income) against the Beyond 20/20 web viewer, on a table whose layout is
   all — and their only absent cells in the slice are exactly the 2 `N` cells,
   with zero published zeros. **No tail ⇒ nothing is a zero.**
 
-Decoded incidence over the whole 133-table corpus (`fixtures/status-ledger.csv`;
-86 tables carry mask pages, 24 carry `0xa` status pages). Eight tables report
+Decoded incidence over the whole 171-table corpus (`fixtures/status-ledger.csv`,
+one row per table: 106 carry mask pages, 47 carry `0xa` status pages, 36 write
+no tail at all). Eight tables report
 missing cells, and the `beyond` column is the honest caveat — those cells sit
 past the last mask word their page writes (below), so they are unmasked for want
 of a word rather than by the file's own statement:
@@ -344,9 +345,9 @@ Three limits, each reported by the decoder rather than hidden:
   forcing the top mantissa bit (LSB bit 51) to 1 — destroying one status bit per
   affected word **in the source file**. Not recoverable: that cell reads as
   masked (a genuine zero) when it may have been missing. The evidence is an
-  absence: **0** signalling NaNs survive in 63,582 mask words over the 19
-  float64-valued tables, against 374 of 94,893 (5.9% of the NaN-shaped ones) on
-  the 42 int32 tables, where no such quieting applies. Raw proof, 97-555 entry 66
+  absence: **0** signalling NaNs survive in 63,582 `width = 8` mask words,
+  against 374 of 94,893 (5.9% of the NaN-shaped ones) on `width = 4`, where no
+  such quieting applies. Raw proof, 97-555 entry 66
   word 16: mask `ff ff 3f fb f3 ff ff ff` against `NOT(presence)` = `ff ff 3f fb
   f3 ff f7 ff` — identical but for byte 6. Counted as `nan_words`
   (`canivt_status_nan_quieted`; a source-side loss, so strict mode leaves it a
@@ -359,7 +360,7 @@ Three limits, each reported by the decoder rather than hidden:
   explanations remain open.
 
 Across the corpus the mask never contradicts the presence record outside those
-NaN-shaped words: **0 contradictory pages** in 1,342,037.
+NaN-shaped words: **0 contradictory pages** in 1,810,627.
 
 This form is **universal across every vintage** in the corpus (1981 and 1991
 profiles, 1996/2001/2006 census, 2011/2016, Borealis surveys, 2021).
@@ -459,7 +460,8 @@ geography with no stored cells at all.
 
 The **addressing** of the array is not uniform, so no general parser exists yet
 — the decoder counts these pages and reads nothing from them
-(`canivt_status_block_undecoded`; 294,436 pages over 24 corpus tables):
+(`canivt_status_block_undecoded`; 1,273,173 pages over 47 of the 171 ledger
+tables):
 
 - 98-10-0655 / 98-10-0658 lay codes at the padded presence-grid cell index
   (validated exactly).
@@ -474,7 +476,8 @@ The **addressing** of the array is not uniform, so no general parser exists yet
 and `W = 1` in the `SP3_RHUXA9_*` survey lineage, all in the count-prefixed form.
 None of their code vocabularies has been validated against ground truth.
 
-Corpus incidence (171 sampled tables): 33 carry `W = 2` status arrays — the 2021
+Form incidence, from the earlier 171-**file** marker scan (not the ledger, which
+now happens to hold 171 tables too): 33 carry `W = 2` status arrays — the 2021
 NDM `9810xxxx` census tables, 2016 `98-400-X` crosstabs, and a couple of 2021
 custom extracts. **No 1981/1991/1996/2001/2006 file has one.** Business Patterns
 (`CBP*`) and the type-00 sub-A cluster carry no tail at all.
