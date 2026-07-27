@@ -294,12 +294,12 @@ declared `UID/IDU` uids (the heuristic had mis-picked the `Geo Code` column);
 validated by `ivt_f2_check_geo_count()`) — still heuristic, see Open gaps.
 
 The whole read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` —
-light for all 131 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
+light for all 133 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
 geography identity feeds only the slug/metadata, never the positional cell decode.
 
 ## [x] Lineage coverage
 
-Every `.ivt` in the corpus decodes except the ledgered guard files. What unlocked
+Every `.ivt` in the corpus decodes — the refusal ledger is empty. What unlocked
 each lineage (narrative + validation records in
 [`decode-history.md`](decode-history.md)):
 

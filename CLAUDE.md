@@ -23,7 +23,7 @@ test suite has not seen, and warn loudly on every fallback.
 
 ## What works today
 
-**Almost every `.ivt` in the corpus decodes.** One descriptor-driven,
+**Every `.ivt` in the corpus decodes.** One descriptor-driven,
 name/type-agnostic decoder (`decode.R`: `ivt_layout()` + `ivt_decode()`) plus one
 shared metadata path (`ivt_f2_metadata()`) handle every vintage. The historical
 "family 1 / family 2" split is **not two formats** — it is one power-of-two-nested
@@ -37,9 +37,11 @@ crosstabs, custom cro/ord extracts, Canadian Business Patterns, and the
 `02 00 20 00` survey generation (byte 0 == `0x02`; these have **no geography
 dimension** — `ivt_f2_geo_dim_index()` returns 0, no `geo` column).
 
-The only ledgered exceptions are deliberately-UNSUPPORTED guard files (see
-`unsupported-formats.md`), kept in the corpus ledger as `supported = FALSE` so the
-gate can never silently emit unvalidated values.
+**The refusal ledger is empty** (2026-07-26): all 133 corpus rows are
+`supported = TRUE`, with no gate relaxed to get there. `unsupported-formats.md`
+now records how rejection works and what each former refusal turned out to be —
+keep it current, and if a file is ever ledgered `supported = FALSE` again it goes
+there, so the gate can never silently emit unvalidated values.
 
 Key semantics:
 
@@ -337,8 +339,8 @@ Integration tests need real `.ivt` files and auto-skip without them:
 under `CANIVT_IVT_CACHE`) through `read_ivt()` and asserts, per table: the
 `ivt_is_supported()` verdict, strict-mode cleanliness (`strict_clean = FALSE` rows
 are the KNOWN fallbacks — they must *warn*, not error, so both a vanished warning
-and a new failure trip the test) and the exact non-zero cell count. ~150M cells,
-so it is **opt-in**:
+and a new failure trip the test) and the exact non-zero cell count. 133 tables,
+~268M cells, so it is **opt-in**:
 
 ```sh
 CANIVT_CORPUS_TESTS=1 Rscript -e 'devtools::test(filter = "corpus")'
