@@ -589,9 +589,17 @@ ivt_skip_is_lost_page <- function(raw, off, size, lay, n = length(raw)) {
 #' structural slugs; the geography dimension's column is `geo`, which need not
 #' be first -- the 1981 profile stores geography last), and `value`. Only
 #' non-zero cells are stored.
+#'
+#' `missing = TRUE` additionally reads each page's cell-status tail (`status.R`)
+#' and returns, as the `"missing"` attribute, the coordinates of the cells the
+#' file marks as NOT AVAILABLE -- the absent cells its 1-bit mask does *not*
+#' flag as genuine zeros. Off by default: it costs a second presence read per
+#' page, and its completeness depends on the vintage (pages with no tail, with a
+#' `0xa` reason-code array, or with an unaccountable tail contribute nothing, and
+#' say so loudly).
 #' @keywords internal
 #' @noRd
-ivt_decode <- function(raw, lay = NULL) {
+ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
   if (is.null(lay)) lay <- ivt_layout(raw)
   n <- length(raw); idx0 <- ivt_idx0(raw)
   m <- lay$n_dim; straddle <- lay$straddle; ipc1 <- lay$ipc[1L]
@@ -617,9 +625,44 @@ ivt_decode <- function(raw, lay = NULL) {
   paged_dim    <- if (ne > 1L) lay$ent_idx[-1L] else integer(0)
   inpage_dim   <- lay$inpage_idx
 
+  # Map a page's in-page `tuples` to full member-id coordinates for directory
+  # entry `r`. Straddle / paged coordinates are SLOT ids at this point (the
+  # in-page grid already maps slots to member ids through its bit positions), so
+  # this also returns the `keep` mask -- slot-aware dimensions' deleted holes and
+  # padding fall out as NA -- and, per slot-aware dimension, which rows were bad,
+  # so the caller can tally the values lost at deleted slots.
+  coords_of <- function(tuples, r) {
+    np <- nrow(tuples)
+    md <- matrix(0L, np, m)
+    for (t in seq_along(inpage_dim)) {
+      di <- inpage_dim[t]
+      md[, di] <- if (di == straddle) win_col[r] * ipc1 + tuples[, t] else tuples[, t]
+    }
+    if (length(paged_dim)) for (t in seq_along(paged_dim))
+      md[, paged_dim[t]] <- paged_member[r, t] + 1L
+    keep <- rep(TRUE, np); bads <- list()
+    for (j in unique(c(straddle, paged_dim))) {
+      sp <- lay$slot_pos[[j]]
+      if (!is.null(sp)) {
+        mid <- match(md[, j], sp)
+        bad <- is.na(mid)
+        if (any(bad)) bads[[length(bads) + 1L]] <- bad
+        keep <- keep & !bad
+        md[, j] <- ifelse(bad, 1L, mid)             # placeholder; rows filtered by keep
+      } else if (j == straddle) {
+        # drop the straddle's window-padding tail beyond its member count
+        keep <- keep & md[, j] <= lay$counts[j]
+      }
+    }
+    list(md = md, keep = keep, bads = bads)
+  }
+
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
   skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
   extra_vals <- 0L; extra_nz <- 0L
+  miss_acc <- list(); mi <- 0L
+  st_tally <- c(mask = 0L, none = 0L, status = 0L, unreadable = 0L,
+                extra = 0L, nan_words = 0L, contradictory = 0L, beyond = 0L)
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
@@ -639,36 +682,46 @@ ivt_decode <- function(raw, lay = NULL) {
       }
       next
     }
+    # The cell-status tail, read BEFORE the value decode: a wholly-suppressed
+    # page carries no values at all (`ivt_decode_page()` returns NULL) yet its
+    # mask still says which of its absent cells are missing rather than zero.
+    if (missing) {
+      st <- ivt_page_status(raw, off, lay, s1)
+      st_tally[[st$kind]] <- st_tally[[st$kind]] + 1L
+      st_tally[["extra"]] <- st_tally[["extra"]] + st$extra_words
+      st_tally[["nan_words"]] <- st_tally[["nan_words"]] + st$nan_words
+      if (st$kind == "mask") {
+        mb <- ivt_mask_bits(st$mask_bytes, lay$grid$bit)
+        pr <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        # A masked cell that CARRIES a value contradicts the model (masked means
+        # "absent and a genuine zero"). On float64 pages it is the x87 quieting
+        # artefact -- the destroyed bit sits in a NaN-shaped word -- and the page
+        # is still usable, one status bit poorer. Anywhere else the mask is not
+        # what we think it is, so the page contributes nothing.
+        if (any(mb & pr) && st$nan_words == 0L) {
+          st_tally[["contradictory"]] <- st_tally[["contradictory"]] + 1L
+        } else {
+          rows <- which(!pr & !mb)
+          if (length(rows)) {
+            cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
+            if (any(cc$keep)) {
+              mi <- mi + 1L
+              miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
+              st_tally[["beyond"]] <- st_tally[["beyond"]] +
+                sum(lay$grid$bit[rows][cc$keep] >= st$covered_bits)
+            }
+          }
+        }
+      }
+    }
     pg <- ivt_decode_page(raw, off, lay, size = s1)
     if (is.null(pg)) next
     extra_vals <- extra_vals + pg$extra; extra_nz <- extra_nz + pg$extra_nz
-    np <- length(pg$vals)
-    md <- matrix(0L, np, m)
-    for (t in seq_along(inpage_dim)) {
-      di <- inpage_dim[t]
-      md[, di] <- if (di == straddle) win_col[r] * ipc1 + pg$tuples[, t] else pg$tuples[, t]
-    }
-    if (length(paged_dim)) for (t in seq_along(paged_dim))
-      md[, paged_dim[t]] <- paged_member[r, t] + 1L
-    # Straddle / paged coordinates are SLOT ids at this point (the in-page grid
-    # already maps slots to member ids through its bit positions). Map slot ->
-    # member id for slot-aware straddle/paged dimensions (deleted holes and
-    # padding fall out as NA), and drop the straddle's window-padding tail
-    # beyond its member count. A value at a deleted slot would be a format
-    # misunderstanding -- counted and reported loudly below.
-    keep <- rep(TRUE, np)
-    for (j in unique(c(straddle, paged_dim))) {
-      sp <- lay$slot_pos[[j]]
-      if (!is.null(sp)) {
-        mid <- match(md[, j], sp)
-        bad <- is.na(mid)
-        if (any(bad)) { hole_vals <- hole_vals + sum(pg$vals[bad] != 0) }
-        keep <- keep & !bad
-        md[, j] <- ifelse(bad, 1L, mid)               # placeholder; rows filtered by keep
-      } else if (j == straddle) {
-        keep <- keep & md[, j] <= lay$counts[j]
-      }
-    }
+    # A value at a deleted slot would be a format misunderstanding -- counted
+    # and reported loudly below.
+    cc <- coords_of(pg$tuples, r)
+    md <- cc$md; keep <- cc$keep
+    for (bad in cc$bads) hole_vals <- hole_vals + sum(pg$vals[bad] != 0)
     if (!all(keep)) { md <- md[keep, , drop = FALSE]; pg$vals <- pg$vals[keep] }
     if (!nrow(md)) next
     ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- pg$vals
@@ -701,11 +754,75 @@ ivt_decode <- function(raw, lay = NULL) {
     out <- tibble::tibble(.rows = 0L)
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
     out$value <- numeric(0)
-    return(out)
+  } else {
+    cols <- do.call(rbind, md_acc[seq_len(ci)])
+    out <- tibble::tibble(.rows = nrow(cols))
+    for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
+    out$value <- unlist(v_acc[seq_len(ci)], use.names = FALSE)
   }
-  cols <- do.call(rbind, md_acc[seq_len(ci)])
-  out <- tibble::tibble(.rows = nrow(cols))
-  for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
-  out$value <- unlist(v_acc[seq_len(ci)], use.names = FALSE)
+  if (missing) attr(out, "missing") <- ivt_missing_cells(miss_acc, mi, lay, st_tally)
+  out
+}
+
+# Assemble the missing-cell coordinates and report, loudly, everything the read
+# could NOT account for. The status tail is the file's own statement of which
+# absent cells are zeros, so a page that does not yield one leaves its absent
+# cells UNCLASSIFIED -- silently returning "no missings there" would be exactly
+# the false "absent implies zero" model this decode exists to correct.
+ivt_missing_cells <- function(miss_acc, mi, lay, tally) {
+  m <- lay$n_dim
+  if (mi == 0L) {
+    out <- tibble::tibble(.rows = 0L)
+    for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
+  } else {
+    cols <- do.call(rbind, miss_acc[seq_len(mi)])
+    out <- tibble::tibble(.rows = nrow(cols))
+    for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
+  }
+  n_un <- tally[["none"]] + tally[["unreadable"]] + tally[["contradictory"]]
+  if (n_un > 0L) {
+    ivt_fallback(paste(
+      "{n_un} page{?s} carr{?ies/y} no readable cell-status tail",
+      "({tally[['none']]} with no tail, {tally[['unreadable']]} whose index does",
+      "not account for the tail, {tally[['contradictory']]} contradicting the mask",
+      "model); their absent cells are NOT classified, so the missing-cell list is",
+      "incomplete for {?that page/those pages}."),
+      class = "canivt_status_unreadable")
+  }
+  if (tally[["status"]] > 0L) {
+    ivt_fallback(paste(
+      "{tally[['status']]} page{?s} carr{?ies/y} the self-describing (0xa)",
+      "cell-status array, whose per-cell ADDRESSING is not yet general; its reason",
+      "codes ({.val x}, {.val ...}) are NOT decoded and those pages contribute no",
+      "missing cells."), class = "canivt_status_block_undecoded")
+  }
+  if (tally[["extra"]] > 0L) {
+    ivt_fallback(paste(
+      "{tally[['extra']]} tail word{?s} sit past the absent mask (a second,",
+      "UNDECODED block that shares the page's word index); {?it was/they were}",
+      "ignored."), class = "canivt_status_extra_block")
+  }
+  if (tally[["beyond"]] > 0L) {
+    ivt_fallback(paste(
+      "{tally[['beyond']]} of the {nrow(out)} missing cell{?s} sit{?s/} PAST the",
+      "last mask word its page writes: the sparse index drops all-zero words, so",
+      "{?it is/they are} unmasked for want of a word rather than because the file",
+      "flagged {?it/them}. Legitimate where those cells really are all missing,",
+      "but indistinguishable from a mask that simply stops short -- treat",
+      "{?this cell/these cells} as unconfirmed."),
+      class = "canivt_status_beyond_mask")
+  }
+  # A faithful read of a source-side loss, not a heuristic: the writer's x87
+  # quieting destroyed one mask bit per NaN-shaped word IN THE FILE, so up to
+  # that many missing cells read as genuine zeros and cannot be recovered.
+  if (tally[["nan_words"]] > 0L) {
+    ivt_source_truncation(paste(
+      "{tally[['nan_words']]} absent-mask word{?s} {?is/are} NaN-shaped in the",
+      "page's value type: the writer quiets signalling NaNs, which overwrites one",
+      "status bit per such word in the SOURCE FILE. Up to {tally[['nan_words']]}",
+      "cell{?s} may be missing rather than zero and cannot be told apart."),
+      class = "canivt_status_nan_quieted")
+  }
+  attr(out, "pages") <- tally
   out
 }

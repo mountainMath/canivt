@@ -58,12 +58,18 @@ The 4-byte header opening every data page. **Byte 1 is always `0x01`.**
 
 - **`b0` — value width + page variant** (`ivt_f2_marker_b0`, `IVT_MARKER_WIDTHS`):
   low nibble = value width (`2`→int16, `4`→int32, `8`→float64); high nibble =
-  variant (`0x8` plain, `0xa` 0xFF-run / suppression-mask-tail, `0x0` **dense**).
+  variant (`0x8` plain, `0xa` 0xFF-run, `0x0` **dense**).
   - plain/mask set: **`{0x82, 0x84, 0x88, 0xa2, 0xa4, 0xa8}`**
   - dense set (high nibble 0): **`{0x02, 0x04, 0x08}`**
+  - The high nibble **also selects the page's trailing cell-status block**
+    (§C.1): `0x8` → bare 1-bit absent mask (a *subset* of the absent cells —
+    masked ⇒ genuine zero, unmasked ⇒ missing), `0xa` → self-describing status
+    array. Correlation is exact over the sampled corpus.
 - **`b3` — auxiliary head block** (`ivt_f2_marker_b3`): head length = `32·(b3−8)`,
-  `b3 ∈ {0x08 … 0x0e}`. (`b3 ≥ 0x0a` pages append per-(geo,outer-dim)
-  suppression-mask records after the value run.) The head is a *contiguous run of
+  `b3 ∈ {0x08 … 0x0e}`. On `0x8` pages the head is not auxiliary at all — it is
+  part of the tail's **index bitmap** (§C.2), so `b3` is in effect an index-size
+  code: a page needs a bigger index exactly when it has more tail words to
+  address. The head is a *contiguous run of
   32-byte blocks*, so the set is the observed span, not a sparse enumeration:
   `0x0b`/`0x0d`/`0x0e` were added for the SP3/RHUXA9 income lineage, where the
   head grows with the geography dimension's slot allocation. Those pages carry
@@ -81,8 +87,57 @@ nibble or `b3` **aborts** (`canivt_unknown_marker`).
 Literal container markers observed as the recurring page/sub-record heads:
 `82 01 80 08`, `84 01 40 08` (sub-record), `88 01 20 08`.
 
+### C.1 Cell-status block descriptor (page tail) — `[form] 02 [W] …`
+
+Opens the trailing block that follows the value run on `b0` high-nibble `0xa`
+pages. **Not yet decoded by the parser** — counted as `status` pages by
+`ivt_page_status()` and read no further; see `ivt-format.md`, "The cell-status
+block". `W` = **bits per cell code** ∈ `{01, 02, 04, 08}`.
+
+- **`01 02 W 01 W`** — plain array form. Observed: `01 02 02 01 02` (33 tables),
+  `01 02 04 01 04` (6 tables), `01 02 08 01 08` (1 page).
+- **`02 02 W <u16 count>`** — count-prefixed form. `98100002`, `98100013`,
+  `98100010` (`W = 1, 2`); `SP3_A2FD0W_02560006`, `SP3_RHUXA9_*` (`W = 1, 4, 8`).
+
+`W = 2` code vocabulary (validated cell-exact against StatCan's published
+tables): `0` value/genuine zero, `1` filler (byte `0x55`), `2` = `x` suppressed,
+`3` = `...` not available. Filler byte for `W = 4` is `0x11`.
+
+The block's start is **implied**, never stored: `value_run_start + popcount·width`.
+Its end is the directory entry's u16 size.
+
 Recognizers: `ivt_f2_is_marker()`, `ivt_value_trailer()`; sets `ivt_f2_marker_b0`,
 `ivt_f2_marker_b0_dense`, `ivt_f2_marker_b3`, `IVT_MARKER_WIDTHS` (container-f2.R).
+
+### C.2 The `0x8` absent mask — an index bitmap, not a marker
+
+There is **no byte marker** on the `0x8` form: the tail is a *sparse array of
+value-width words* whose index is **structural**, and the recognizer is a length
+identity rather than a signature. Catalogued here because it is the one place a
+region long read as opaque head/pad bytes turns out to be addressing.
+
+```
+page = [4B marker][rec_bytes presence][ INDEX = the whole pre-value region ][value run][tail words]
+                                        (trailer + head = ivt_value_trailer())
+```
+
+- The index is read in the container's usual convention — **byte-pair-swapped,
+  MSB-first** — one bit per `width`-byte word of the reconstructed block. All-zero
+  words are not written; trailing index bytes are zero when fewer words are needed.
+- **Gate:** `popcount(index) · width == tail length`, tail length taken from the
+  directory entry's u16 size. Measured 20,322 / 20,322 tail-bearing pages, and
+  re-measured through the decoder at 1,342,037 / 1,342,037 mask pages with **0
+  unreadable**. A page failing it contributes nothing (`kind = "unreadable"`).
+- Scattering the written words back to their indexed positions rebuilds the block;
+  its first `rec_bytes` are the **1-bit absent mask**. Unlike every other bitmap in
+  the container the mask bytes are **not pair-swapped** — MSB-first only — and are
+  addressed at the same padded presence-grid bit as the presence record
+  (`lay$grid$bit`).
+- Index bits **past** `rec_bytes / width` address a further, undecoded array — see
+  `ivt-format.md`, "The second tail block (OPEN)". Counted as `extra_words`.
+
+Recognizer: `ivt_page_status()` (status.R), reader `ivt_mask_bits()`; reached only
+via `read_ivt(missing = TRUE)`.
 
 ## D. Dimension-descriptor signature (9 bytes)
 
@@ -301,6 +356,18 @@ layout.
 ---
 
 ## Change log
+
+- **2026-07-27** — **The `0x8` page tail is decoded** (§C.2). The bytes between the
+  presence record and the value run — the `b2` trailer plus the `32·(b3−8)` head,
+  long catalogued as pad and "auxiliary" — are an **index bitmap** selecting which
+  `width`-byte words of the trailing block were written. Gate: `popcount(index) ·
+  width == tail length`, holding on 1,342,037 / 1,342,037 mask pages of the corpus.
+  The rebuilt block's first `rec_bytes` are the 1-bit absent mask: masked absent ⇒
+  genuine zero, **unmasked absent ⇒ missing**. Reached only via
+  `read_ivt(missing = TRUE)`; recognizer `ivt_page_status()`, reader
+  `ivt_mask_bits()` (MSB-first, **not** pair-swapped). Still open and counted
+  rather than guessed: the `0xa` status array's addressing (§C.1) and the second
+  tail block that index bits past the mask address.
 
 - **2026-07-26** — **A page whose presence record is all zero is an ABSENCE.** Not
   a new marker: the page is a perfectly ordinary `[b0][01][00][08]` page with a

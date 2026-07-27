@@ -1,3 +1,34 @@
+# canivt 0.5.0
+
+* **`read_ivt(missing = TRUE)` decodes which absent cells are genuine zeros and
+  which are MISSING**, returning them as `x$missing` — a coordinate tibble
+  shaped like `x$cells` minus `value`, with a per-page-class tally in
+  `attr(x$missing, "pages")`. The store keeps only non-zero cells, so an absent
+  cell is *either* a published zero or a missing value; the page's trailing
+  cell-status block is the only thing that separates them, and **"absent means
+  zero" is false in every vintage** — it merely looks true on tables that
+  publish no missings. Reproduces the Beyond 20/20 viewer exactly on the 2001
+  profile `97F0020XCB2001070` (344 missings over the 86 tail-bearing pages of
+  geographies 1–13, none for Nunavut).
+* The bytes between a page's presence record and its value run — the `b2`
+  trailer plus the `32·(b3 − 8)` head, previously documented as padding — are
+  the **index bitmap** for that trailing block, one bit per value-width word, so
+  `b3` is in effect an index-size code. The gate is the length identity
+  `popcount(index) · width == tail length`, which holds on all 1,342,037 mask
+  pages of the development corpus with no unreadable and no contradictory page.
+  Value decoding is unchanged and stays presence-authoritative: the tail is read
+  separately, only under `missing = TRUE`, and can never move a value.
+* The feature is off by default because completeness is vintage-dependent, and
+  every gap raises its own classed warning rather than being folded silently
+  into the count: `canivt_status_block_undecoded` (the `0xa` reason-code array,
+  whose addressing is not yet general), `canivt_status_extra_block` (a second,
+  undecoded tail array on eight corpus tables), `canivt_status_beyond_mask`
+  (cells past the last mask word a page writes — unmasked for want of a word
+  rather than by the file's statement), `canivt_status_unreadable`, and
+  `canivt_status_nan_quieted` (a NaN-shaped mask word quieted by the writer's
+  x87 load/store, which destroys one status bit in the source file; a warning
+  even under `canivt.strict`, since it is source damage rather than a fallback).
+
 # canivt 0.4.3
 
 * **Breaking:** `collect_ivt()` no longer takes a `geography` argument, and

@@ -222,7 +222,264 @@ fully decoded):
   attribute-major codebook); the per-table value-**type** byte beyond the marker low
   nibble is inferred, not located as a standalone field.
 
-## The b3 head block and suppression tails (2006 vintage; b3 ≥ 0x0a)
+## The cell-status block (page tail)
+
+**A page may carry a trailing block AFTER the value run that states, per cell,
+why the cell is absent.** This is where StatCan's `x` (suppressed for
+confidentiality) and `...` (not available) live.
+
+The block's *start* is not stored anywhere: it is implied, at
+`4 + presence_len + trailer(b2) + 32·(b3 − 8) + popcount·width`, and it runs to
+the directory entry's u16 size. Its *kind* is declared by the page marker's `b0`
+**high nibble**, and — in the wide form — by a 5-byte self-describing descriptor
+at the block's own start. Nothing about it appears in the file header.
+
+The **`0x8` 1-bit mask form is decoded** (`R/status.R`, `read_ivt(missing =
+TRUE)`); the **`0xa` reason-code form is not** — its vocabulary is validated but
+its per-cell addressing is not general, so canivt reports those pages and
+decodes nothing from them.
+
+### `b0` high nibble `0x8` — the bare absent mask (1 bit per cell)
+
+No descriptor.
+
+**Storage: a SPARSE array of `width`-byte words, addressed by an index bitmap
+that occupies the WHOLE pre-value region.** That region is the `b2` trailer plus
+the `32·(b3 − 8)` head — so `b3` is in effect an index-size code, since a page
+needs a bigger index exactly when it has more words to address. The index is
+read in the container's usual convention (byte-pair-swapped, MSB-first), one bit
+per word of the reconstructed block, ascending; all-zero words are simply not
+written, and the index's trailing bytes are zero when fewer words are needed.
+Writing the selected words back to their indexed positions rebuilds the block —
+of which the first `rec_bytes` are the mask.
+
+    index = page bytes [4 + rec_bytes, 4 + rec_bytes + trailer + head)
+    word k of the block is written  <=>  index bit k is set
+    INVARIANT:  popcount(index) * width == tail length
+
+That invariant is the gate, and it holds on **20,322 of 20,322 tail-bearing
+pages across all 106 tail-bearing corpus tables** — and, re-measured through the
+decoder over every directory entry, on **1,342,037 of 1,342,037 mask pages of
+the 133-table corpus, with 0 unreadable**. Sizing the index as the
+`rec_bytes / (8·width)` words a full mask needs — the obvious reading — truncates
+it on every page that also carries the second block (below) and drops 6 tables.
+
+The mask bytes are **not** pair-swapped (the one bitmap in the container that
+is not), are read MSB-first, and are addressed at the **padded presence-grid
+bit** — the same `lay$grid$bit` the presence record uses, decisively over the
+alternative of packing by real-cell ordinal. The `b3 ≥ 0x0a` 2006-vintage
+"run-length" tail described further below is not a separate encoding: it is this
+same sparse word array, which is why only its popcount was comparable before the
+index was understood.
+
+**It is a strict SUBSET of the absent cells, and the subset is the point.**
+
+    masked absent    ⇒ genuine zero          (published `0`)
+    UNMASKED absent  ⇒ missing / not available (published `N`)
+
+Where a table has no missing values the two sets coincide and the mask reads as
+the complement of the presence bitmap — which is why it long looked redundant.
+Measured on all 87,630 pages of the three CMHC 2016 custom crosstabs: mask ==
+complement, **0 unflagged absent cells**, and `4 + rec_bytes + trailer +
+popcount·width + tail == size` byte-exact on every page. The B20/20-browser CSVs
+of those same tables publish numeric zeros and no missing values — the
+"masked ⇒ zero" half, confirmed against an authoritative rendering.
+
+The other half is proven on **97F0020XCB2001070** (2001, economic families by
+income) against the Beyond 20/20 web viewer, on a table whose layout is
+`counts 14,2,8,282,2`, `ipc 2,282,2`, `straddle 3`, `wc 4`, 1128 cells/page:
+
+- the viewer's absent cells split into 474 published `0` and **26 published `N`**;
+  all 7,396 present cells are value-exact;
+- in the file, `absent − popcount(tail)` is **exactly 4 on all 104 pages of
+  geographies 1–13 and exactly 0 on all 8 pages of geography 14**, never negative;
+- 4 = 2 `N` per earning member × the 2 earning members a page carries — confirmed
+  by scraping each member separately (2 non-numeric each, at member rows 36 and 46);
+- geography 14 (Nunavut) publishes `0` at those *same* coordinates and its pages
+  have gap 0. The signal is **data-dependent**, so it can only come from the file;
+- geographies 1, 6, 7, 10, 11 carry marker `84 01 00 08` — no head, no tail at
+  all — and their only absent cells in the slice are exactly the 2 `N` cells,
+  with zero published zeros. **No tail ⇒ nothing is a zero.**
+
+Decoded incidence over the whole 133-table corpus (`fixtures/status-ledger.csv`;
+86 tables carry mask pages, 24 carry `0xa` status pages). Eight tables report
+missing cells, and the `beyond` column is the honest caveat — those cells sit
+past the last mask word their page writes (below), so they are unmasked for want
+of a word rather than by the file's own statement:
+
+| table | cells | missing | of which *beyond* |
+|---|---:|---:|---:|
+| `97F0015X` | 864,205 | 2,080,404 | 1,929,312 |
+| `SP3_AVQOPM_97F0007XCB2001042` | 9,021,645 | 1,586,079 | 360,765 |
+| `SP3_H7WG5V_EDDTAB16` | 60,468 | 5,276 | 126 |
+| `97-563-XCB2006072` | 6,526,221 | 1,485 | 405 |
+| `SP3_GPVU3L_00060210` | 2,569 | 517 | 0 |
+| `97F0020XCB2001070` | 108,609 | 344 | 0 |
+| `SP3_NIQKF5_95f0487xcb01003` | 134,238 | 220 | 49 |
+| `SP3_GPVU3L_00060208` | 301 | 8 | 0 |
+
+Every other table — CMHC T1/T2/T3, 98-312-XCB2011033, 98100023/45/66/179/662,
+and the rest — reports exactly **0** missing cells: mask == presence complement,
+which is the "no missings published" case.
+
+97F0020's 344 with **0 beyond** is the viewer-validated table, and it reproduces
+the earlier popcount measurement exactly: 4 per page on each of the 86 pages of
+geographies 1–13 that carry a tail, 0 on all 8 Nunavut pages, and the 18 no-tail
+pages of geographies 1/6/7/10/11 contribute nothing.
+
+Three limits, each reported by the decoder rather than hidden:
+
+- **A mask can stop short of the grid.** The sparse index drops all-zero words,
+  so the written mask may cover fewer words than the page's cells span, and
+  every cell past that point reads as unmasked. That is correct where those
+  cells really are all missing (nothing to flag as a zero) and wrong where the
+  writer simply stopped, and **the bytes cannot tell the two apart**. Counted as
+  `beyond` and warned (`canivt_status_beyond_mask`). `97F0015X` is the extreme
+  case: 93% of its missings are beyond, and its per-page unmasked count is a pure
+  function of how many mask words were written (`unm = 18·(42 − mask_words)`,
+  always whole multiples of 108 = its two innermost dimensions 12 × 9), which is
+  the signature of a length artefact, not of data.
+- **The x87 signalling-NaN artefact.** On float64 (`width = 8`) pages a mask word
+  of mostly-ones is NaN-shaped, and the writer's x87 load/store quiets it by
+  forcing the top mantissa bit (LSB bit 51) to 1 — destroying one status bit per
+  affected word **in the source file**. Not recoverable: that cell reads as
+  masked (a genuine zero) when it may have been missing. The evidence is an
+  absence: **0** signalling NaNs survive in 63,582 mask words over the 19
+  float64-valued tables, against 374 of 94,893 (5.9% of the NaN-shaped ones) on
+  the 42 int32 tables, where no such quieting applies. Raw proof, 97-555 entry 66
+  word 16: mask `ff ff 3f fb f3 ff ff ff` against `NOT(presence)` = `ff ff 3f fb
+  f3 ff f7 ff` — identical but for byte 6. Counted as `nan_words`
+  (`canivt_status_nan_quieted`; a source-side loss, so strict mode leaves it a
+  warning).
+- **`SP3_AVQOPM_97F0007XCB2001042`** agrees qualitatively (missing > 0, viewer
+  `N` > 0) but is off by ~8–10 per geography against the viewer on 11 of 12
+  sampled geographies. Stored zeros are ruled out (0 zeros in 9,021,645 stored
+  cells); cause unresolved. It is also the corpus's worst NaN case (163,479
+  NaN-shaped words) and carries the second block, so several candidate
+  explanations remain open.
+
+Across the corpus the mask never contradicts the presence record outside those
+NaN-shaped words: **0 contradictory pages** in 1,342,037.
+
+This form is **universal across every vintage** in the corpus (1981 and 1991
+profiles, 1996/2001/2006 census, 2011/2016, Borealis surveys, 2021).
+
+### The second tail block (OPEN)
+
+On **8 corpus tables** the page's word index addresses words *past* the mask's
+`rec_bytes`, i.e. the same index also addresses a further array:
+`97-555-XCB2006058` (11,463 words), `SP3_AVQOPM_97F0007XCB2001042` (6,877),
+`97F0015X` (3,113), `97-563-XCB2006072` (1,567), `SP3_APKNWC_100801` (47),
+`SP3_BJFWAP_95F0377XCB01005` (10), `pid59227` (805), `95f0491xcb01004` (3).
+Only on `b3 = 0x0c` pages (the 128-byte index) — coherent, since a page needs
+the biggest index exactly when it has extra words to address. The array starts
+at the padded `rec_bytes` boundary (97-555 entry 123 sets index bits 0–39 then
+64–76, an explicit gap).
+
+What is known:
+
+- Its entries are **packed flag words, not data**. The value vocabulary is
+  identical across tables and across value widths: `0x3333`, `0x1111`, `0x33FF`,
+  `0x33F3`, `0x3033`, all-ones. Every nibble is drawn from {0,1,3,7,b,f}. On the
+  float64 table they are written as genuine doubles holding those integers
+  (1,051/1,051 finite and integral), so the writer stores them as numbers in the
+  page's own value type.
+- It is **not** the `0xa` array: no `[form][02][W]` descriptor at its start.
+- It is **not a per-cell code array** under any tested encoding. All 16
+  combinations of `W ∈ {2,4}` bits per code × MSB/LSB-first × plain/pair-swapped
+  bytes × padded-grid-bit/real-cell addressing were swept against the structural
+  requirement that a code be `0` wherever a value is present. Best result 3/400
+  pages; `97F0007` scores 0/107 on every variant.
+- Its **size correlates with nothing** per-cell: against `nvf`, cell count,
+  present, absent, masked, unmasked and the real straddle width, r ≈ 0.05–0.21
+  and no exact match.
+
+The decoder counts these words (`extra_words`) and warns
+(`canivt_status_extra_block`); it never reads them. Cracking it likely needs
+external ground truth on one of the eight tables — the structural tests are
+exhausted.
+
+### `b0` high nibble `0xa` — the self-describing status array
+
+The block opens with a 5-byte descriptor:
+
+    [form:u8] [0x02] [W:u8] ...        W = BITS PER CELL, one of 01 / 02 / 04 / 08
+
+    form 0x01 (plain array):     01 02 W 01 W          then the code array
+    form 0x02 (count-prefixed):  02 02 W <u16 count>   then the coded run
+
+`W = 2` is by far the most common. Its code values are **validated against
+StatCan's own published tables**:
+
+| code | meaning | filler byte |
+|------|---------|-------------|
+| `0` | cell carries a value, or is a genuine zero | `0x00` |
+| `1` | filler — grid position outside the real cartesian | `0x55` |
+| `2` | **`x` — suppressed for confidentiality** | |
+| `3` | **`...` — not available** | |
+
+Counting `W = 2` codes over the whole block and comparing with the `Symbol`
+columns of `getFullTableDownloadCSV`:
+
+| table | IVT code 2 / code 3 | published `x` / `...` |
+|---|---|---|
+| 98-10-0040 | 10 / 49 | 10 / 49 |
+| 98-10-0655 | 0 / 2,600 | 0 / 2,600 |
+| 98-10-0658 | 0 / 1,348 | 0 / 1,348 |
+| 98-10-0128 | 389,888 / 1,466,488 | 389,888 / 1,466,488 |
+
+Exact on both codes on all four, including 1.86M flagged cells. **Positionally**,
+indexing the array at the presence-bitmap cell index on 98-10-0655 reproduces the
+published symbols over all 11,154 cells with zero errors; 98-10-0040 joins 59/59
+with nothing unmatched in either direction.
+
+### This overturns "an absent cell is a zero"
+
+It is not. On 98-10-0655, cross-tabulating the presence bit against the status
+code against what StatCan publishes:
+
+| presence bit | status code | published |
+|---|---|---|
+| present | 0 | a real non-zero value (4,904) |
+| **absent** | **0** | **`0.0` — a genuine zero (3,650)** |
+| **absent** | **3** | **`...` — not available (2,600)** |
+
+Absence is the union of two different things, and **the status block is the only
+thing that tells them apart**. This is true in *both* forms and in every vintage:
+a `0x8` page's mask says the same thing more crudely (masked ⇒ zero, unmasked ⇒
+missing) and a `0xa` page's array adds the reason code. There is no vintage for
+which "absent ⇒ zero" is safe a priori — only tables that happen to publish no
+missings, where the mask coincides with the presence complement.
+
+Whole-geography suppression (`metadata$geographies$has_data`) remains correct; it
+is a coarsening of the per-cell signal, and stays the right answer for a
+geography with no stored cells at all.
+
+### What is not yet decoded (the `0xa` array)
+
+The **addressing** of the array is not uniform, so no general parser exists yet
+— the decoder counts these pages and reads nothing from them
+(`canivt_status_block_undecoded`; 294,436 pages over 24 corpus tables):
+
+- 98-10-0655 / 98-10-0658 lay codes at the padded presence-grid cell index
+  (validated exactly).
+- 98-10-0040 packs tighter than its presence grid (its geography stride is 24
+  bytes = 96 codes against a padded 128).
+- 98-10-0128 lays one block per outermost in-page member, each shaped
+  `[8 codes][48 codes of filler][variable-length data][48 codes of filler]`,
+  with the data length varying page to page (208 / 200 / 152 codes observed).
+  Counts still come out exact; only the index mapping is wrong.
+
+`W = 4` (`01 02 04 01 04`, filler byte `0x11`) occurs in 6 corpus tables, `W = 8`
+and `W = 1` in the `SP3_RHUXA9_*` survey lineage, all in the count-prefixed form.
+None of their code vocabularies has been validated against ground truth.
+
+Corpus incidence (171 sampled tables): 33 carry `W = 2` status arrays — the 2021
+NDM `9810xxxx` census tables, 2016 `98-400-X` crosstabs, and a couple of 2021
+custom extracts. **No 1981/1991/1996/2001/2006 file has one.** Business Patterns
+(`CBP*`) and the type-00 sub-A cluster carry no tail at all.
+
+## The b3 head block and run-length absent tails (2006 vintage; b3 ≥ 0x0a)
 
 The marker's fourth byte `b3` encodes an **auxiliary head block** of
 `32·(b3 − 8)` bytes between the (b2-encoded) trailer and the dense value run:
@@ -241,33 +498,38 @@ per-geography records (wholly-suppressed geographies carry `EE EE / E0 00`
 sentinel words; published ones a small value + `E0 00`), semantics unproven —
 the decoder skips it.
 
-Pages with `b3 ≥ 0x0a` also append a **suppression tail** AFTER the value run:
-one mask field per (geography, outer-data-dimension member) that has ≥ 1
-missing cell, in ascending (geo, member) order. A field is the missing-cell
-mask over the inner dimensions in **presence-nesting order, one nibble per
-second-innermost member** (97-563: 9 `Presence of income` nibbles, each the
-sex mask with Total/Male/Female at bits 3/2/1 — a wholly-missing slice is nine
-`0xE` nibbles, `ee ee ee ee e0`), split into **value-width units with all-zero
-units dropped** (leading and trailing), each field padded to a width multiple.
-On 14,111 of 14,381 pages this reconstruction is byte-exact from the presence
-bitmap alone — **every cell absent from the presence bitmap is flagged**, so
-the tail is an absent-cell inventory, redundant with the presence bitmap. The
-published-value semantics are the SAME as every other vintage: the store keeps
-only non-zero cells and an absent cell renders `0` in the b2020 viewer
+Pages with `b3 ≥ 0x0a` also append a **suppression tail** AFTER the value run.
+This was originally read as a bespoke run-length coding — one mask field per
+(geography, outer-data-dimension member) with ≥ 1 missing cell, in ascending
+(geo, member) order, each field the missing-cell mask over the inner dimensions
+in presence-nesting order (97-563: 9 `Presence of income` nibbles, each the sex
+mask with Total/Male/Female at bits 3/2/1, so a wholly-missing slice is nine
+`0xE` nibbles, `ee ee ee ee e0`), split into value-width units with all-zero
+units dropped. **That reading is superseded**: it is the same sparse
+index-addressed word array as every other `0x8` tail (§"the bare absent mask"),
+and what looked like "fields with dropped units" is simply the index skipping
+all-zero words. The `b3` head IS the index. The two descriptions agree on the
+bytes; the general one also says *where* each word goes, which the run-length
+reading could not. On 14,111 of 14,381 pages the reconstruction is byte-exact
+from the presence bitmap alone — on **this** table nearly every cell absent from
+the presence bitmap is flagged (the decoder now reports 1,485 unflagged, 405 of
+them beyond the written mask), so here the tail is close to a complete
+absent-cell inventory, and the published-value semantics hold for it: the store
+keeps only non-zero cells and an absent cell renders `0` in the b2020 viewer
 (validated on 97-563: 3,487/3,487 stored cells viewer-exact and all 833
 absent sampled cells render 0, over 32 geographies — Canada through deep-tail
 member 57,523, 20 of them random, including wholly-empty ones — the 2006
 tabulations zero-fill area-suppressed small areas, so a suppression zero and
 a true zero are indistinguishable in the published table; the per-geography
-`has_data` signal remains the recoverable suppression marker). The remaining
-pages carry benign writer artifacts: stale bytes from an earlier, fatter
-encoding pass beyond the true tail (≤ 120 B, recognisably the same masks at
-16-bit-per-unit spread), tails truncated at the allocation boundary when the
-records did not fit, and occasional dropped all-`0xE` record groups — all
-after a valid prefix, and all recoverable from the presence bitmap, which is
-authoritative. The decoder therefore keys **only** on the presence bitmap and
-the head size: values = the `popcount` ints/floats at the head-adjusted
-start; `b2 == 0` exact-fit is asserted only for `b3 ≤ 0x09`.
+`has_data` signal remains the recoverable suppression marker). What used to look
+like "benign writer artifacts" on the remaining pages — stale bytes beyond the
+true tail, truncated tails, dropped all-`0xE` record groups — is accounted for
+by the index: the length invariant `popcount(index)·width == tail length` holds
+on **all 14,381** of the table's pages. The *value* decode still keys **only** on
+the presence bitmap and the head size (values = the `popcount` ints/floats at the
+head-adjusted start; `b2 == 0` exact-fit is asserted only for `b3 ≤ 0x09`); the
+tail is read separately and only on `read_ivt(missing = TRUE)`, so it can never
+affect a value.
 
 98-400-X2016203's `a2 01 03 0a` pages are this same layout; its formerly
 "non-exact `b2 == 0` pages" were an artifact of the u8-misread Selected

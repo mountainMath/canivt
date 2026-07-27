@@ -26,13 +26,31 @@ cross-checked against family-1 (98-10-0241) and the legacy 1991 table (1003011).
 
 No unexplained "mystery blocks": 100 % of the file is accounted for by region.
 Within the value pages, **96.7 %** is marker + presence + values (all decoded
-exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
+exactly) and **3.3 %** is the pre-value region + page tail. That 3.3 % is **not**
+information-free, as this table's own numbers long suggested: on `0x8` pages the
+pre-value region is the tail's index bitmap and the tail is the absent mask
+(both decoded, see below); on `0xa` pages the tail is the reason-code array
+(still open).
 
 ## [x] Fully decoded and exposed
 
 - [x] **All cell values.** Validated cell-for-cell vs the StatCan CSV / B20/20
   viewer (family 1: 7,489,464 cells; family 2: 14.5 M; 1991: every scraped
   ground-truth geography). One decoder for every family (`decode.R`).
+- [x] **The `0x8` page absent mask — which absent cells are ZEROS and which are
+  MISSING** (gap opened *and closed* 2026-07-27; `status.R`, opt-in via
+  `read_ivt(missing = TRUE)` → `x$missing`). The bytes between the presence record
+  and the value run are an **index bitmap** over the trailing block's
+  `width`-byte words, gated on `popcount(index) · width == tail length` —
+  **1,342,037 / 1,342,037 mask pages of the corpus, 0 unreadable, 0
+  contradictory**. The rebuilt block's first `rec_bytes` are the mask (MSB-first,
+  *not* pair-swapped, addressed at `lay$grid$bit`): masked absent ⇒ genuine zero,
+  UNMASKED absent ⇒ missing. Reproduces the viewer-validated
+  `97F0020XCB2001070` measurement exactly (344 missings over the 86 tail-bearing
+  pages of geographies 1–13; **0** for Nunavut). Eight corpus tables report
+  missing cells; the remainder report none, which is the confirming half — those
+  tables publish no missings. Off by default: the ledger asserts exact cell
+  counts and warning sets, and completeness is vintage-dependent (below).
 - [x] **Geography — all 11 attributes**: name, DGUID/GEOUID, level, type +
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate (StatCan geo attribute keys 3,4,5,9,10,12–17), **on the
@@ -99,6 +117,61 @@ exactly) and **3.3 %** is `0xFF` trailers + zero-padding (no information).
 
 ## [ ] Open gaps
 
+- [ ] **The `0xa` cell-status ARRAY is not decoded** (gap OPENED 2026-07-27;
+  narrowed 2026-07-27 — the `0x8` mask half is now closed, see below). Pages with
+  `b0` high nibble `0xa` carry, after the value run, a self-describing
+  `[form][02][W]` array holding **per-cell missing-data reason codes** — `W = 2`
+  vocabulary `0` value/genuine zero, `1` filler, `2` = `x` suppressed,
+  `3` = `...` not available. canivt reads exactly `popcount` values and discards
+  the block, so these codes are lost and the documented "an absent cell
+  is a zero" rule is **wrong for these tables**: absence is the union of genuine
+  zeros and true missings. `read_ivt(missing = TRUE)` counts these pages
+  (294,436 over 24 corpus tables) and warns `canivt_status_block_undecoded`
+  rather than guessing at them.
+  - Vocabulary validated cell-exact against StatCan's published tables
+    (`getFullTableDownloadCSV`): 98-10-0040 `10 x / 49 ...`, 98-10-0655
+    `0 / 2,600`, 98-10-0658 `0 / 1,348`, 98-10-0128 `389,888 / 1,466,488` — all
+    exact on both codes. 98-10-0655 also position-exact over all 11,154 cells;
+    98-10-0040 joins 59/59.
+  - Blocked on a general **addressing** rule: 98-10-0655/0658 index at the padded
+    presence-grid cell index, 98-10-0040 packs tighter (24-byte geography stride
+    vs a padded 128 codes), 98-10-0128 uses per-member sub-blocks
+    `[8][48 filler][variable data][48 filler]` with page-varying data length.
+    `W = 4` (6 tables), `W = 8` / `W = 1` (survey lineage) are unvalidated.
+  - Incidence: 33 of 171 sampled corpus tables — 2021 NDM `9810xxxx`, 2016
+    `98-400-X`, two 2021 custom extracts. **No pre-2016 vintage has one.**
+- [ ] **The SECOND tail block is not decoded** (gap OPENED 2026-07-27). On 8 corpus
+  tables some pages' index bits address words **past** the mask's `rec_bytes`, so
+  the same index also addresses a further array: `SP3_1H8SBB_97-555` (11,463
+  words), `SP3_AVQOPM_97F0007XCB2001042` (6,877), `97F0015X` (3,113), `97-563`
+  (1,567), `pid59227` (805), `SP3_APKNWC_100801` (47),
+  `SP3_BJFWAP_95F0377XCB01005` (10), `95f0491xcb01004` (3). Its content is packed
+  flag words (`0x3333`, `0x1111`, `0x33FF`, all-ones — nibbles confined to
+  `{0,1,3,7,b,f}`, written as numbers in the page's own value type), but it is
+  **not a per-cell code array under any of 16 tested encodings** (best 3/400
+  pages; `97F0007` 0/107 everywhere) and its size correlates with no per-cell
+  quantity. Counted as `extra_words` and reported loudly
+  (`canivt_status_extra_block`). Write-up: [`ivt-format.md`](ivt-format.md),
+  "The second tail block (OPEN)".
+- [ ] **Three known limits on the decoded `0x8` mask**, all reported rather than
+  hidden (`read_ivt(missing = TRUE)` raises a classed warning per page class):
+  - **Missings past the written mask** (`canivt_status_beyond_mask`): all-zero
+    words are dropped by the sparse index, so a mask can stop short of the grid,
+    and every cell past that point is unmasked for want of a word rather than by
+    the file's statement. Legitimate where the trailing cells really are all
+    missing, but indistinguishable from a truncated mask. 2,290,657 of the
+    corpus's 3,674,333 reported missings — concentrated in `97F0015X`
+    (1,929,312 of 2,080,404) and `97F0007` (360,765 of 1,586,079); `97F0020`'s
+    viewer-validated 344 are **0 beyond**.
+  - **No tail at all** (`canivt_status_unreadable`): the Business Patterns and
+    type-00 sub-A lineages write no page tail, so nothing can be said about their
+    absent cells. 47 corpus tables have no mask pages.
+  - **The x87 signalling-NaN artefact** (`canivt_status_nan_quieted`, kept a
+    warning under strict — it is source damage, not a canivt fallback): a
+    mostly-ones mask word is NaN-shaped, and the writer's x87 load/store quiets
+    it, destroying one status bit **in the file**. 0 signalling NaNs survive in
+    63,582 `width = 8` mask words vs 374 / 94,893 (5.9 %) on `width = 4`, where
+    no quieting applies.
 - [ ] **EO2654_2011_Van geography column identity** stays a content heuristic: its
   field dictionary declares 5 columns but only 4 are stored, so the run → column
   map is not 1-to-1. Resolving which field is unstored would make it
@@ -173,13 +246,18 @@ table (kept as regression warnings):
   unreliable (95F0200XDB96003 reads 1026 with 4 clean dimensions) — every gate uses
   `length(d$dims)`.
 
-**The `0xa` marker variant is a storage variant, not suppression**: `0xa2`/`0xa4`/
-`0xa8` pages carry real inline data that decodes cell-exact; the high nibble only
-lengthens the pad/`0xFF` trailer. **All-zero geographies** (empty presence record)
-occur on both `0x8` and `0xa` pages, sometimes beside a data-rich geography.
+**The `0xa` marker variant selects the page's cell-status form** (superseding this
+file's earlier "storage variant, not suppression" — that was measured on the
+*value* decode, which it does not affect). `0xa2`/`0xa4`/`0xa8` pages carry real
+inline data that decodes cell-exact, and the high nibble changes the pad/`0xFF`
+trailer length, but it **also** picks which status block the page appends: `0x8`
+→ the 1-bit absent mask, `0xa` → the reason-code array. **All-zero geographies**
+(empty presence record) occur on both, sometimes beside a data-rich geography.
 
-**Suppression is WHOLE-GEOGRAPHY cell absence, not a per-cell sentinel** — and it
-is recoverable: on 98-400-X2016120 (income) the 888 geographies with no stored
+**Whole-geography suppression is real but COARSE — there IS a per-cell signal**
+(superseding "not a per-cell sentinel", 2026-07-27: the page tail carries one, in
+every vintage). The whole-geography signal is recoverable and remains correct for
+a geography with no stored cells at all: on 98-400-X2016120 (income) the 888 geographies with no stored
 cells are exactly the 888 whose inline dqf flag ends in `9` (888/888, zero
 crossovers over 4,868 geographies), and the viewer renders exactly those blank.
 `read_ivt()` exposes both signals: `metadata$geographies$has_data`

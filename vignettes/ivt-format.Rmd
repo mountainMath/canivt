@@ -224,15 +224,63 @@ that packs **4 geographies**:
 * the **marker**'s low nibble is the value width: `0x8` → float64, `0x4` →
   int32, `0x2` → int16 (so age counts are int16 but the average/median-age
   statistics are float64); its third byte encodes the trailer length and its
-  fourth an auxiliary head block of `32·(b3 − 8)` bytes (0 on most pages; the
-  2006 census vintage uses 64/128-byte heads and appends absent-cell mask
-  records after the value run);
+  fourth a head block of `32·(b3 − 8)` bytes (0 on most pages). Trailer and head
+  together are not padding: they are the **index bitmap** for the page's trailing
+  cell-status block (below), which is why the head grows exactly on the vintages
+  that write a big one;
 * each geography's **presence** is a 64-byte record stored **byte-pair-swapped**
   — swap adjacent bytes, then read a positional nibble per member, with the three
   genders Total/Men/Women at bits 3/2/1 (the all-present marker is `0xE`);
 * **values** are dense little-endian over the present `(member, gender)` cells,
   member-major / gender-inner. Only non-zero cells are stored — the StatCan CSV
-  publishes the zeros, so a missing cell means 0.
+  publishes the zeros, so an absent cell is *either* a zero or a missing value.
+
+Which of the two it is is written down. Every page carries a *cell-status block*
+after the value run, and it is what distinguishes an absent-but-zero cell from an
+absent-and-missing one — so the familiar "absent means 0" rule is a
+simplification, in every vintage, not just the modern ones.
+
+On pages whose marker byte has high nibble `0xa` the block is a self-describing
+array of `W`-bit codes, one per cell, whose two-bit vocabulary is `0` (a value,
+or a genuine zero), `1` (filler), `2` (`x`, suppressed for confidentiality) and
+`3` (`...`, not available) — validated cell-exact against StatCan's published
+tables on 98-10-0040, 98-10-0128, 98-10-0655 and 98-10-0658.
+
+Its **addressing** is not yet general (three sampled tables index it three
+different ways), so `canivt` counts these pages and reads no further rather than
+guessing.
+
+On high-nibble `0x8` pages — which is every pre-2016 vintage — the block is a
+bare one-bit-per-cell mask, and it says the same thing more crudely: it flags a
+**subset** of the absent cells, and that subset is the genuine zeros. The
+unflagged remainder is the missing data (the Beyond 20/20 viewer prints `N`).
+Where a table has no missing values the mask coincides with the complement of the
+presence bitmap, which is the usual case and the reason it long looked
+redundant. Verified against the viewer on the 2001 census profile
+`97F0020XCB2001070`.
+
+**This mask is decoded**, opt-in:
+
+```r
+x <- read_ivt(path, missing = TRUE)
+x$missing        # one row per cell the file says is MISSING, same coordinate
+                 # columns as x$cells, minus the value
+```
+
+The mask is stored as a sparse array of value-width words, addressed by the index
+bitmap in the trailer + head region; the gate is the length identity
+`popcount(index) · width == tail length`, which holds on all 1,342,037 mask pages
+of the development corpus. It is off by default because completeness is
+vintage-dependent: some lineages write no tail at all, `0xa` pages are not
+decoded, and a mask that stops short of the grid leaves the cells past it
+unmasked for want of a word rather than by the file's statement. Each of those
+raises its own classed warning (`canivt_status_unreadable`,
+`canivt_status_block_undecoded`, `canivt_status_beyond_mask`, …), so a missing
+count always comes with the caveats attached rather than hidden.
+
+Whole-geography suppression is surfaced regardless, via
+`metadata$geographies$has_data`. See `inst/notes/ivt-format.md` for the byte
+layout, the second (undecoded) tail block, and the open `0xa` addressing problem.
 
 The full per-geography codebook — name, DGUID, geographic level and type
 (+ abbreviation), two geocodes, the data-quality flag and note, and the

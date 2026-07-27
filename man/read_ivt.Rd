@@ -4,7 +4,7 @@
 \alias{read_ivt}
 \title{Read a Beyond 20/20 IVT file}
 \usage{
-read_ivt(path, geo_attributes = FALSE)
+read_ivt(path, geo_attributes = FALSE, missing = FALSE)
 }
 \arguments{
 \item{path}{Path to an \code{.ivt} file.}
@@ -17,6 +17,16 @@ seconds); the default \code{FALSE} keeps those tables keyed by DGUID. Small
 schema'd tables and the pre-DGUID (inline-codebook) tables already carry
 their full attribute set on the default metadata path. Ignored for
 family-1 tables.}
+
+\item{missing}{If \code{TRUE} (default \code{FALSE}) also decode each page's \strong{cell
+status tail} and return, in a \code{missing} tibble, the coordinates of the
+cells the file marks as \emph{not available} rather than zero (same member-id
+columns as \code{cells}, no \code{value}). Off by default because it costs a second
+presence read per page and its completeness is vintage-dependent: pages
+carrying the self-describing (\code{0xa}) reason-code array, pages with no tail
+at all, and pages whose tail the word index does not account for all
+contribute nothing -- each reported with a classed warning rather than
+assumed to hold no missings. See the "Missing values" section.}
 }
 \value{
 An object of class \code{ivt}: a list with \code{cells} (a tibble of one value
@@ -84,6 +94,26 @@ that cannot be decoded -- a classed warning (\code{canivt_fallback} /
 this package has not been validated against, the fallback paths are the ones
 most likely to misread silently.
 }
+\section{Missing values}{
+
+Only non-zero cells are stored, so absence covers \strong{both} genuine zeros
+and true missings (\code{x} suppressed, \code{...}/\code{N} not available). The two are
+separated by a block each page appends after its dense value run, in one of
+two forms selected by the page marker: a 1-bit \strong{absent mask} -- a strict
+subset of the absent cells, where masked means a genuine zero and
+\emph{unmasked} means missing -- which \code{missing = TRUE} decodes, or a
+self-describing reason-code array carrying the \code{x} / \code{...} distinction
+itself, whose per-cell addressing is not yet general and which is therefore
+reported but not decoded.
+
+Two limits are reported rather than hidden. On float64 pages a mask word of
+mostly-ones is NaN-shaped and the writer's x87 quieting overwrites one
+status bit per such word \strong{in the source file}; those cells read as zeros
+and cannot be recovered (\code{canivt_status_nan_quieted}). And on a few
+2001/2006 vintages the page's word index also addresses a second, undecoded
+block past the mask (\code{canivt_status_extra_block}).
+}
+
 \examples{
 # A small real table (StatCan 98-10-0044) is bundled for examples/tests.
 path <- system.file("extdata", "98100044.ivt", package = "canivt")

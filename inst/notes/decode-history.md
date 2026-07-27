@@ -915,6 +915,243 @@ sparse-slot rules — see the two entries at the foot of this file.)
 
 ## Milestones — how the architecture arrived
 
+### The cell-status block: the IVT does encode missing data (2026-07-27)
+
+The question that opened it: *if a derived CSV has missing values, they must have
+come from somewhere in the IVT.* The entry point was the local CMHC 2016 movers
+crosstabs (T1/T2/T3) and the CSVs derived from them.
+
+**The CMHC premise did not hold, and that was informative.** Those CSVs have no
+missing values at all — every one of T1's 3,024,000 cells is a number, 1,956,209
+of them zeros, which complement the presence bitmap exactly (ledger row
+`CMHC2016_movers_T1` = 1,067,791 stored cells). Their pages *do* carry an
+undecoded trailing block, but it is a bare **1-bit-per-cell absent mask** —
+verified across all 87,630 pages as the exact complement of the presence bitmap,
+**0 mismatched cells**. Adding it to the page equation closed the byte
+accounting completely (`4 + rec_bytes + trailer + popcount·width + tail == size`,
+byte-exact on every page), which is what proved there was no room left for a
+hidden third state *in those files*.
+
+**The find was on a different marker variant.** Sweeping the corpus for pages
+whose slack was not a 1-bit mask turned up `b0` high-nibble `0xa` pages carrying
+a block that opens with a 5-byte self-describing descriptor, `[form][02][W]`,
+where `W` is **bits per cell**. The `0x55` filler byte was the tell: `0x55` =
+four 2-bit `01`s, and the `W = 4` tables fill with `0x11` = two 4-bit `1`s.
+
+Validation used StatCan's own published tables (`getFullTableDownloadCSV`), the
+IVT never consulted for anything but its own bytes:
+
+| table | IVT code 2 / code 3 | published `x` / `...` |
+|---|---|---|
+| 98-10-0040 | 10 / 49 | 10 / 49 |
+| 98-10-0655 | 0 / 2,600 | 0 / 2,600 |
+| 98-10-0658 | 0 / 1,348 | 0 / 1,348 |
+| 98-10-0128 | 389,888 / 1,466,488 | 389,888 / 1,466,488 |
+
+Four tables, both codes, exact — 98-10-0128 alone flags 1.86M cells. Position,
+not just count: on 98-10-0655, indexing the array at the presence-bitmap cell
+index reproduces the published symbols over all 11,154 cells with **zero errors**;
+98-10-0040 joins 59/59 with nothing unmatched either way.
+
+**The consequence for the documented model.** Cross-tabulating presence bit ×
+status code × published value on 98-10-0655:
+
+| presence bit | status code | published |
+|---|---|---|
+| present | 0 | real non-zero value (4,904) |
+| absent | 0 | `0.0` — a genuine zero (3,650) |
+| absent | 3 | `...` — not available (2,600) |
+
+So "an absent cell is a zero" is **false** wherever a status array exists:
+absence is the union of genuine zeros and true missings, and the block is the
+only thing separating them. The old note that `0xa` "is **not** a suppression
+flag" was wrong; the high nibble selects the tail's kind, and the correlation is
+exact over the sampled corpus. (I also wrote here that "an absent cell is a
+zero" stays true for every `0x8`-page file. That is wrong too — see the next
+section.)
+
+Two traps worth recording. First, a false negative: my first cross-tab reported
+3,650 absent cells with *non-zero* published values, which would have broken the
+whole model — the published values are written `"0.0"`, and the string test was
+`== "0"`. Second, a false positive: on 98-10-0128 the `x` codes aligned perfectly
+(389,888/389,888) under an addressing model that is demonstrably wrong for that
+table, because its suppression is blockwise, so any within-page permutation
+preserves it. Exact agreement on a clustered signal is not evidence of correct
+addressing; the scattered `...` signal is what actually tests it.
+
+**What remains open** is addressing, not semantics. 98-10-0655/0658 index at the
+padded presence-grid cell index; 98-10-0040 packs tighter (24-byte geography
+stride against a padded 128 codes); 98-10-0128 lays per-member sub-blocks shaped
+`[8][48 filler][variable data][48 filler]` whose data length varies page to page
+(208/200/152 observed) while the counts still come out exact. Until one rule
+covers all three there is no parser. Tracked in `coverage.md`.
+
+### The 1-bit mask is a SUBSET, not a complement (2026-07-27, same day)
+
+The prompt for this was a correction and a hypothesis: the CMHC CSVs came out of
+the Beyond 20/20 browser, so they are authoritative and not circular; and the
+1-bit mask probably encodes a collapsed form of what the 2-bit array says
+cleanly. Both turned out right.
+
+The mask is a **strict subset** of the absent cells:
+
+    masked absent    ⇒ genuine zero            (viewer prints `0`)
+    UNMASKED absent  ⇒ missing / not available (viewer prints `N`)
+
+Where a table has no missing values the two sets coincide — which is exactly the
+CMHC case, and why the block read as redundant. The CMHC measurement is not
+refuted by this; it is the *confirming* half. 87,630 pages, 0 unflagged absent
+cells, and B20/20-derived CSVs in which every cell is a number.
+
+**The proof needed a table with missings.** `97F0020XCB2001070` (2001, economic
+families by income; `counts 14,2,8,282,2`, `ipc 2,282,2`, `straddle 3`, `wc 4`,
+1128 cells/page, entry `k = (geo−1)·8 + (number−1)·4 + (earning_window−1)`)
+delivered it against the Beyond 20/20 viewer:
+
+| | |
+|---|---|
+| present cells | 7,396 / 7,396 value-exact |
+| absent cells | 474 published `0` + **26 published `N`** |
+| `absent − popcount(tail)` | **exactly 4** on all 104 pages of geographies 1–13 |
+| | **exactly 0** on all 8 pages of geography 14, never negative |
+
+4 = 2 `N` per earning member × 2 earning members per page; scraping `d2 = 0`,
+`1`, `2` separately gives 2 non-numeric each, always at member rows 36 and 46.
+The clincher is geography 14 (Nunavut), which publishes `0` at those *same*
+coordinates and whose pages have gap 0 — the signal is data-dependent, so it can
+only be coming out of the file. Independently, geographies 1, 6, 7, 10 and 11
+carry marker `84 01 00 08` — no head and **no tail at all** — and their only
+absent cells in the slice are precisely the 2 `N` cells, with zero published
+zeros. No tail ⇒ nothing is a zero.
+
+Corpus incidence, over the 106 tail-bearing tables with straddle-window padding
+excluded (the padding of the last window otherwise fakes a gap: 98-312's only
+gap page was its last, 945 = 9 padding geography slots × 105 cells) and pages
+where flagged > absent required to be absent: **six** tables show a real subset
+gap — `97F0020XCB2001070` 1.95 %, `SP3_AVQOPM_97F0007XCB2001042` 6.02 %,
+`SP3_GPVU3L_00060208` 6.96 %, `SP3_GPVU3L_00060210` 10.27 %,
+`SP3_H7WG5V_EDDTAB16` 58.74 %, `SP3_NIQKF5_95f0487xcb01003` 3.24 %. Everything
+else is exactly 0.
+
+A two-way census on the marker/symbol correlation, which the new result does not
+disturb: 98100045 / 98100466 / 98100179 have zero `0xa` pages and publish no
+symbols (98100179 over 5.2M rows); 98100478 / 98100129 / 98100023 have 68 /
+1,652 / 1,226 of them and publish 6,853 / 1,485,120 / 913,992 `x`. On 98100023,
+**all 2,458 symbol-bearing geographies sit on `0xa` pages and none of the 58,500
+`0x8` geographies publishes a symbol**, over a complete 63,404-geography census
+— and 98100023's `0x8` gap is exactly 0, so the two findings are consistent.
+
+Three things this does **not** establish, recorded so nobody builds on them:
+
+- the test is a **popcount**, which is invariant to the run-length coding's
+  dropped all-zero units. Positional addressing of the mask on run-length pages
+  is untested.
+- `popcount` can **exceed** the absent count — 97-563-XCB2006072 shows
+  `UNFLAGGED −50` with 7 negative pages, `SP3_AAV9RM_97-563-XCB2006058` shows
+  −4,101 with 25. That is the writer slack already documented for that lineage,
+  but it means a raw count difference is not a safe universal detector.
+- `SP3_AVQOPM_97F0007XCB2001042` agrees qualitatively but not cell-exactly:
+  `view_N − gap` runs 8–10 on 11 of 12 sampled geographies (only Rainy River
+  District matched: gap 40 == `N` 40, flagged 822 == `0` 822), and on some
+  geographies `absent ≠ view_N + view_0` by ~2. Stored zeros are ruled out — 0
+  zeros in all 9,021,645 stored cells, 0 for the specific geography checked.
+  Candidates: per-page writer slack inflating `popcount`, or a viewer
+  geography-order/pivot offset. Unresolved.
+
+Two measurement traps cost real time here. `lay$ipc` is indexed by **in-page**
+position, not global dimension index, so `lay$ipc[lay$straddle]` silently
+NA-subscripts on wide tables — it dropped 32 tables from the corpus sweep,
+including all three CMHC ones, and manufactured false gaps on 98100659/98100662.
+The offset is `lay$ipc[straddle − (length(counts) − length(ipc))]`. And the
+first sweep counted pages with *no tail at all* (the survey and Business-Patterns
+lineages) as all-unflagged; `sl > 0` is required.
+
+### The mask is index-addressed — and it is wired in (2026-07-27, same day)
+
+The subset finding above was a **popcount** result: it said how many absent cells
+the file calls zeros, not *which*. Turning it into a parser needed the mask's
+position, and the position turned out to be stored — in bytes that had been
+catalogued as pad since the beginning.
+
+**The tail is a sparse array of value-width words, and the index is the whole
+pre-value region.** Not a prefix of it: the `b2` trailer *plus* the `32·(b3−8)`
+head, exactly what `ivt_value_trailer()` already computes, read in the
+container's usual byte-pair-swapped MSB-first convention, one bit per
+`width`-byte word. All-zero words are simply not written; index bits past the
+last written word are zero. That reframes `b3` as an **index-size code** — a page
+needs a bigger index precisely when it has more words to address, which is why
+`b3` grows with the geography allocation on the SP3 income lineage.
+
+The gate is a length identity, and it is what makes the reading safe:
+
+    popcount(index) · width == tail length        (tail length from the directory entry's u16 size)
+
+**20,322 / 20,322 tail-bearing pages** across all 106 tail-bearing corpus tables,
+then **1,342,037 / 1,342,037 mask pages, 0 unreadable**, re-measured through the
+finished decoder. Sizing the index at `rec_bytes / (8·width)` instead — exactly
+the words a full mask needs, the obvious guess — truncates it on every page that
+also carries the second block, and the identity then fails on 6 of 106 tables.
+That failure is how the whole-region reading was found.
+
+Scattering the written words back to their indexed positions rebuilds the block;
+its first `rec_bytes` are the mask. Two conventions, both settled by measurement
+against the alternative: the mask bytes are **not** pair-swapped (the one bitmap
+in the container that isn't), and they are addressed at the **padded
+presence-grid bit** (`lay$grid$bit`), not by real-cell ordinal.
+
+**The x87 signalling-NaN artefact.** On float64 pages a mostly-ones mask word is
+NaN-shaped, and the writer's x87 load/store quiets it by forcing the top mantissa
+bit — destroying one status bit *in the source file*, unrecoverably. The evidence
+is a clean split: **0** signalling NaNs survive in 63,582 `width = 8` mask words,
+against **374 of 94,893** (5.9 % of the NaN-shaped ones) on `width = 4`, where no
+such quieting applies. Counted as `nan_words`; a page with any is not allowed to
+report a contradiction.
+
+**The second block, chased and not cracked.** Index bits past `rec_bytes/width`
+address a further array on 8 corpus tables (`97-555` 11,463 words down to
+`95f0491xcb01004` 3). Its content is packed flag words — `0x3333`, `0x1111`,
+`0x33FF`, all-ones, nibbles confined to `{0,1,3,7,b,f}` — written as numbers in
+the page's own value type. A 16-variant sweep over per-cell code-array encodings
+(widths, orders, offsets, swap conventions) reached a best of **3 / 400 pages**,
+and `97F0007` 0 / 107 under every one; its size correlates with no per-cell
+quantity. Two false leads are recorded so they are not re-run: it does **not**
+resemble the `0xa` `W = 4` form, and it is **not** the cause of `97F0015X`'s
+implausible missing count. Left counted (`extra_words`) and reported.
+
+**Wiring it in.** `R/status.R` + `read_ivt(missing = TRUE)` → `x$missing`, a
+coordinate tibble shaped like `cells` minus the value, with a per-page-class
+tally attached. Off by default for two reasons: the corpus ledger asserts exact
+`nrow(cells)` and exact warning sets, which a default-on read would churn; and
+completeness is vintage-dependent, so default-on would inject unvalidated claims
+into every read. Same precedent as `geo_attributes = FALSE`. The `coords_of()`
+extraction in `ivt_decode()` is a pure refactor of the existing coordinate build
+— verified by a full-corpus sweep, 0 cell-count mismatches over 133 tables — and
+the status read happens **before** `ivt_decode_page()` so a wholly-suppressed
+page still contributes its missings.
+
+Every gap is a classed warning, never a silent guess: `canivt_status_unreadable`,
+`canivt_status_block_undecoded` (the `0xa` array), `canivt_status_extra_block`,
+`canivt_status_beyond_mask`, and `canivt_status_nan_quieted` (raised through
+`ivt_source_truncation()`, so strict keeps it a warning — it is damage in the
+source, not a canivt fallback).
+
+**The `beyond` diagnostic, and what it resolved.** A dropped all-zero word means
+the mask can stop short of the grid, and every cell past that point reads as
+unmasked for want of a word rather than by the file's statement. `covered_bits`
+records where the mask actually stops and the decoder counts how many reported
+missings fall past it: **2,290,657 of the corpus's 3,674,333**, concentrated in
+`97F0015X` (1,929,312 of 2,080,404) and `97F0007` (360,765 of 1,586,079). That
+is also the answer to the `97F0007XCB2001042` discrepancy left unresolved in the
+section above — its mask stops early (`unm = 18 × (42 − mask_words)`, the
+multiples of 108 = 12 × 9), which is neither a viewer offset nor writer slack.
+
+The validated case comes out exactly right: `97F0020XCB2001070` reports 94 mask
+pages + 18 no-tail pages, 344 missings over the 86 tail-bearing pages of
+geographies 1–13, **0 beyond**, and **0** for Nunavut — reproducing the viewer
+measurement cell-for-cell. Ledgered in `fixtures/status-ledger.csv`
+(`tests/testthat/test-status.R`), whose two structural columns must never move:
+`unreadable == 0` and `contradictory == 0` everywhere.
+
 ### Unified cell decode & metadata
 
 One `ivt_layout()` + `ivt_decode()` (`decode.R`) decodes every table, reproducing the

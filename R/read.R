@@ -61,6 +61,32 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   schema'd tables and the pre-DGUID (inline-codebook) tables already carry
 #'   their full attribute set on the default metadata path. Ignored for
 #'   family-1 tables.
+#' @param missing If `TRUE` (default `FALSE`) also decode each page's **cell
+#'   status tail** and return, in a `missing` tibble, the coordinates of the
+#'   cells the file marks as *not available* rather than zero (same member-id
+#'   columns as `cells`, no `value`). Off by default because it costs a second
+#'   presence read per page and its completeness is vintage-dependent: pages
+#'   carrying the self-describing (`0xa`) reason-code array, pages with no tail
+#'   at all, and pages whose tail the word index does not account for all
+#'   contribute nothing -- each reported with a classed warning rather than
+#'   assumed to hold no missings. See the "Missing values" section.
+#' @section Missing values:
+#'   Only non-zero cells are stored, so absence covers **both** genuine zeros
+#'   and true missings (`x` suppressed, `...`/`N` not available). The two are
+#'   separated by a block each page appends after its dense value run, in one of
+#'   two forms selected by the page marker: a 1-bit **absent mask** -- a strict
+#'   subset of the absent cells, where masked means a genuine zero and
+#'   *unmasked* means missing -- which `missing = TRUE` decodes, or a
+#'   self-describing reason-code array carrying the `x` / `...` distinction
+#'   itself, whose per-cell addressing is not yet general and which is therefore
+#'   reported but not decoded.
+#'
+#'   Two limits are reported rather than hidden. On float64 pages a mask word of
+#'   mostly-ones is NaN-shaped and the writer's x87 quieting overwrites one
+#'   status bit per such word **in the source file**; those cells read as zeros
+#'   and cannot be recovered (`canivt_status_nan_quieted`). And on a few
+#'   2001/2006 vintages the page's word index also addresses a second, undecoded
+#'   block past the mask (`canivt_status_extra_block`).
 #' @return An object of class `ivt`: a list with `cells` (a tibble of one value
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
 #'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`,
@@ -117,7 +143,7 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' ivt
 #' head(ivt$cells)
 #' @export
-read_ivt <- function(path, geo_attributes = FALSE) {
+read_ivt <- function(path, geo_attributes = FALSE, missing = FALSE) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
   # the per-file parse memo (memo.R) is warm for the duration of this read and
   # dropped on exit, so the file's bytes are not retained afterwards.
@@ -133,7 +159,9 @@ read_ivt <- function(path, geo_attributes = FALSE) {
   # tags provenance / the geography attribute option). The full geography attribute
   # table is only available for the large family-2 tables whose names are not in the
   # cheap single-block codebook; the family-1 tables already carry names by default.
-  cells <- ivt_decode(raw)
+  cells <- ivt_decode(raw, missing = missing)
+  miss <- attr(cells, "missing", exact = TRUE)
+  attr(cells, "missing") <- NULL
   meta <- ivt_f2_metadata(raw)
   if (isTRUE(geo_attributes) && family == 2L)
     meta$geographies <- ivt_f2_geographies(raw)
@@ -149,8 +177,9 @@ read_ivt <- function(path, geo_attributes = FALSE) {
   n_geo <- length(meta$geographies$member_id)
   if (n_geo > 0L && nrow(cells) > 0L)
     meta$geographies$has_data <- tabulate(cells$geo, nbins = n_geo) > 0L
-  structure(list(cells = cells, metadata = meta, path = path, family = family),
-            class = "ivt")
+  out <- list(cells = cells, metadata = meta, path = path, family = family)
+  if (isTRUE(missing)) out$missing <- miss
+  structure(out, class = "ivt")
 }
 
 #' Read only the metadata of an IVT file (no value decoding)
