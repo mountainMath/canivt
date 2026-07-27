@@ -1152,18 +1152,22 @@ measurement cell-for-cell. Ledgered in `fixtures/status-ledger.csv`
 (`tests/testthat/test-status.R`), whose two structural columns must never move:
 `unreadable == 0` and `contradictory == 0` everywhere.
 
-**Re-measured on the grown ledger (171 tables, same day).** The figures above
+**Re-measured on the grown ledger (170 tables, same day).** The figures above
 were taken over the 133-table ledger; ledgering the remaining corpus folders
-added 38 tables, and `dev/msweep.R` re-swept all 171. Every one of the 100
-existing `status-ledger.csv` rows reproduced **exactly** — a re-measurement, not
-a rebaseline — and the ledger now carries one row per corpus table. What moved
-is only incidence: **1,810,627 / 1,810,627 mask pages** (0 unreadable, 0
-contradictory), 1,273,173 `0xa` status pages over 47 tables, 435,947
-`nan_words`. What did **not** move is every semantic figure: 3,674,333 missings,
-2,290,657 of them beyond, 23,885 extra words, and the same eight missing-bearing
-and eight second-block tables with identical per-table counts. The 38 new tables
-are 2021 NDM and 2016 crosstab vintages — `0xa` lineages that report no missings
-of their own.
+added 37 tables (a 38th, `98100044`, was a byte-identical duplicate of the
+already-ledgered `98-10-0044` and was removed from the corpus), and
+`dev/msweep.R` re-swept the lot. Every one of the 100 existing
+`status-ledger.csv` rows reproduced **exactly** — a re-measurement, not a
+rebaseline — and both that fixture and `geo-snapshot.csv` now carry one row per
+corpus table (the geo regen likewise reproduced all 133 pre-existing rows
+byte-exactly, and the 37 new tables raise **no** geography fallback warning at
+all). What moved is only incidence: **1,810,626 / 1,810,626 mask pages** (0
+unreadable, 0 contradictory) over 105 mask-bearing tables, 1,273,173 `0xa`
+status pages over 47 tables, 435,947 `nan_words`. What did **not** move is every
+semantic figure: 3,674,333 missings, 2,290,657 of them beyond, 23,885 extra
+words, and the same eight missing-bearing and eight second-block tables with
+identical per-table counts. The new tables are 2021 NDM and 2016 crosstab
+vintages — `0xa` lineages that report no missings of their own.
 
 ### Unified cell decode & metadata
 

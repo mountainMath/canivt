@@ -62,7 +62,7 @@ test_that("a page with no readable tail contributes nothing, loudly", {
 # two structural columns are the ones that must never move:
 #
 #   * `unreadable` == 0 everywhere -- the index accounts for the tail byte-exactly
-#     on all 1,810,627 mask pages of the corpus;
+#     on all 1,810,626 mask pages of the corpus;
 #   * `contradictory` == 0 everywhere -- outside the NaN-shaped words no mask bit
 #     ever lands on a cell that carries a value.
 #

@@ -22,8 +22,8 @@ that must never move are `unreadable == 0` (the index accounts for every mask
 page's tail byte-exactly) and `contradictory == 0` (no mask bit lands on a cell
 that carries a value).
 
-Last full sweep — 171 tables, 2026-07-27: 0 cell mismatches, 0 errors;
-`mask 1,810,627 · none 604,337 · status 1,273,173 · unreadable 0 · extra 23,885 ·
+Last full sweep — 170 tables, 2026-07-27: 0 cell mismatches, 0 errors;
+`mask 1,810,626 · none 604,337 · status 1,273,173 · unreadable 0 · extra 23,885 ·
 nan_words 435,947 · contradictory 0 · beyond 2,290,657 · miss 3,674,333`.
 
 ## range-harvest.R — what it does

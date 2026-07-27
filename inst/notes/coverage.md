@@ -42,7 +42,7 @@ pre-value region is the tail's index bitmap and the tail is the absent mask
   `read_ivt(missing = TRUE)` → `x$missing`). The bytes between the presence record
   and the value run are an **index bitmap** over the trailing block's
   `width`-byte words, gated on `popcount(index) · width == tail length` —
-  **1,810,627 / 1,810,627 mask pages of the corpus, 0 unreadable, 0
+  **1,810,626 / 1,810,626 mask pages of the corpus, 0 unreadable, 0
   contradictory**. The rebuilt block's first `rec_bytes` are the mask (MSB-first,
   *not* pair-swapped, addressed at `lay$grid$bit`): masked absent ⇒ genuine zero,
   UNMASKED absent ⇒ missing. Reproduces the viewer-validated
@@ -126,7 +126,7 @@ pre-value region is the tail's index bitmap and the tail is the absent mask
   the block, so these codes are lost and the documented "an absent cell
   is a zero" rule is **wrong for these tables**: absence is the union of genuine
   zeros and true missings. `read_ivt(missing = TRUE)` counts these pages
-  (1,273,173 over 47 of the 171 ledger tables) and warns
+  (1,273,173 over 47 of the 170 ledger tables) and warns
   `canivt_status_block_undecoded`
   rather than guessing at them.
   - Vocabulary validated cell-exact against StatCan's published tables
@@ -139,7 +139,7 @@ pre-value region is the tail's index bitmap and the tail is the absent mask
     vs a padded 128 codes), 98-10-0128 uses per-member sub-blocks
     `[8][48 filler][variable data][48 filler]` with page-varying data length.
     `W = 4` (6 tables), `W = 8` / `W = 1` (survey lineage) are unvalidated.
-  - Incidence: 47 of the 171 ledger tables carry `0xa` pages — 2021 NDM
+  - Incidence: 47 of the 170 ledger tables carry `0xa` pages — 2021 NDM
     `9810xxxx`, 2016 `98-400-X`, two 2021 custom extracts (an earlier 171-**file**
     marker scan put 33 of them in the `W = 2` form). **No pre-2016 vintage has
     one.**
@@ -168,7 +168,7 @@ pre-value region is the tail's index bitmap and the tail is the absent mask
     viewer-validated 344 are **0 beyond**.
   - **No tail at all** (`canivt_status_unreadable`): the Business Patterns and
     type-00 sub-A lineages write no page tail, so nothing can be said about their
-    absent cells. 65 of the 171 ledger tables have no mask pages, 36 of them no
+    absent cells. 64 of the 170 ledger tables have no mask pages, 36 of them no
     tail of any kind.
   - **The x87 signalling-NaN artefact** (`canivt_status_nan_quieted`, kept a
     warning under strict — it is source damage, not a canivt fallback): a
@@ -376,8 +376,7 @@ declared `UID/IDU` uids (the heuristic had mis-picked the `Geo Code` column);
 validated by `ivt_f2_check_geo_count()`) — still heuristic, see Open gaps.
 
 The whole read is snapshot-guarded (`tests/testthat/fixtures/geo-snapshot.csv` —
-light for 133 corpus tables, full for 25; opt-in `test-geo-snapshot.R` — the 38
-tables ledgered on 2026-07-27 are not snapshotted yet), and
+light for all 170 corpus tables, full for 25; opt-in `test-geo-snapshot.R`), and
 geography identity feeds only the slug/metadata, never the positional cell decode.
 
 ## [x] Lineage coverage

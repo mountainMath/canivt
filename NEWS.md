@@ -14,7 +14,7 @@
   trailer plus the `32·(b3 − 8)` head, previously documented as padding — are
   the **index bitmap** for that trailing block, one bit per value-width word, so
   `b3` is in effect an index-size code. The gate is the length identity
-  `popcount(index) · width == tail length`, which holds on all 1,810,627 mask
+  `popcount(index) · width == tail length`, which holds on all 1,810,626 mask
   pages of the development corpus with no unreadable and no contradictory page.
   Value decoding is unchanged and stays presence-authoritative: the tail is read
   separately, only under `missing = TRUE`, and can never move a value.

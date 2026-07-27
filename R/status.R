@@ -36,7 +36,7 @@
 #' words back to their indexed positions rebuilds the block.
 #'
 #' The length invariant `popcount(index) * width == tail length` is the gate: it
-#' holds on **1,810,627 of 1,810,627 mask pages of the 171-table corpus, 0
+#' holds on **1,810,626 of 1,810,626 mask pages of the 170-table corpus, 0
 #' unreadable** (first measured standalone at 20,322 / 20,322 tail-bearing
 #' pages). A page that fails it is reported `"unreadable"` and contributes
 #' nothing rather than a guess.

@@ -126,7 +126,7 @@ page = [4B marker][rec_bytes presence][ INDEX = the whole pre-value region ][val
   words are not written; trailing index bytes are zero when fewer words are needed.
 - **Gate:** `popcount(index) · width == tail length`, tail length taken from the
   directory entry's u16 size. Measured 20,322 / 20,322 tail-bearing pages, and
-  re-measured through the decoder at 1,810,627 / 1,810,627 mask pages with **0
+  re-measured through the decoder at 1,810,626 / 1,810,626 mask pages with **0
   unreadable**. A page failing it contributes nothing (`kind = "unreadable"`).
 - Scattering the written words back to their indexed positions rebuilds the block;
   its first `rec_bytes` are the **1-bit absent mask**. Unlike every other bitmap in
@@ -361,7 +361,7 @@ layout.
   presence record and the value run — the `b2` trailer plus the `32·(b3−8)` head,
   long catalogued as pad and "auxiliary" — are an **index bitmap** selecting which
   `width`-byte words of the trailing block were written. Gate: `popcount(index) ·
-  width == tail length`, holding on 1,810,627 / 1,810,627 mask pages of the corpus.
+  width == tail length`, holding on 1,810,626 / 1,810,626 mask pages of the corpus.
   The rebuilt block's first `rec_bytes` are the 1-bit absent mask: masked absent ⇒
   genuine zero, **unmasked absent ⇒ missing**. Reached only via
   `read_ivt(missing = TRUE)`; recognizer `ivt_page_status()`, reader
