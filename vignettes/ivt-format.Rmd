@@ -242,13 +242,17 @@ simplification, in every vintage, not just the modern ones.
 
 On pages whose marker byte has high nibble `0xa` the block is a self-describing
 array of `W`-bit codes, one per cell. `W` is a storage choice, not a dialect —
-one file may mix widths — and the vocabulary is `0` (a value, or a genuine
-zero), `1` (*nothing here*: filler at a padded grid position, `..` *not
-available for a specific reference period* at a real cell), `2` (`x`, suppressed
-for confidentiality) and `3` (`...`, not applicable). Validated cell-exact
-against StatCan's published tables on ten of them, in both directions —
-every published symbol matched by a code count and no code without a symbol —
-including 98-10-0128's 1.86 M flagged cells.
+one file may mix widths — and code `0` always means a value or a genuine zero.
+What the *other* codes mean is declared by the table itself: a header slot holds
+its own status legend, one record per code, giving the symbol and its bilingual
+wording. That matters because the numbering is not universal — the modern NDM
+tables start at `1 = ..`, `2 = x`, `3 = ...`, while the 2016 `98-400-X`
+crosstabs and the older profiles start one symbol earlier, and the survey
+lineages have vocabularies of their own. Code `1` is each file's own *nothing
+here*: filler at a padded grid position, the published symbol at a real cell.
+Validated cell-exact against StatCan's published tables on ten of them, in both
+directions — every published symbol matched by a code count and no code without
+a symbol — including 98-10-0128's 1.86 M flagged cells.
 
 On high-nibble `0x8` pages — which is every pre-2016 vintage — the block is a
 bare one-bit-per-cell mask, and it says the same thing more crudely: it flags a
@@ -264,9 +268,10 @@ redundant. Verified against the viewer on the 2001 census profile
 ```r
 x <- read_ivt(path, missing = TRUE)
 x$missing        # one row per cell the file says is MISSING, same coordinate
-                 # columns as x$cells, minus the value, plus `status` — the
-                 # reason ("suppressed", "not applicable", "not available")
-                 # where the file gives one
+                 # columns as x$cells, minus the value, plus `symbol` and
+                 # `status` — the published symbol and its wording, taken from
+                 # the file's own legend, where the file gives one
+attr(x$missing, "legend")   # that legend: code, symbol, English and French text
 ```
 
 Both are stored the same way: a sparse array of value-width words, addressed by
@@ -278,8 +283,8 @@ the `0xa` array's addressing general — it looked lineage-specific for years
 because each table's dropped words shifted its codes by a different amount.
 
 It is off by default because completeness is vintage-dependent: some lineages
-write no tail at all, a handful of tables use reason codes past the validated
-vocabulary, and a page whose index cannot reach the whole grid leaves the cells
+write no tail at all, a file may use a code its own legend does not name, and a
+page whose index cannot reach the whole grid leaves the cells
 past it unclassifiable. (A mask that merely *stops short* is not one of those cases:
 all-zero words go unwritten, and since the index can address every word the grid
 spans on every corpus page, an unwritten one is the file stating that the cells
@@ -290,7 +295,7 @@ count always comes with the caveats attached rather than hidden.
 
 Whole-geography suppression is surfaced regardless, via
 `metadata$geographies$has_data`. See `inst/notes/ivt-format.md` for the byte
-layout, the second (undecoded) tail block, and the open reason codes `>= 4`.
+layout, the legend's own encoding, and the second (undecoded) tail block.
 
 The full per-geography codebook — name, DGUID, geographic level and type
 (+ abbreviation), two geocodes, the data-quality flag and note, and the

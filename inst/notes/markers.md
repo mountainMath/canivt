@@ -45,6 +45,7 @@ signatures — the decoder reads a structure at each rather than scanning for it
 | `@552` | u32 | geography field/attribute count (11 / 12) | `IVT_HDR_GEO_FIELDS` |
 | `@558` | u16 | **page directory** start — **LOW 16 BITS only** (`ivt_idx0()` unwraps `+ k·65536`) | `IVT_HDR_DIR_PTR` |
 | `@572` | u32 | codebook region start | `IVT_HDR_CODEBOOK_PTR` |
+| `@698` | u32 | **cell-status legend** entry array (the `0xa` reason codes; 0 where the vintage declares none) | `IVT_HDR_STATUS_LEGEND` |
 | `@712` | u32 | **DQF legend** directory | `IVT_HDR_DQF_SLOT` |
 | `@824 + 14·(k−1)` | 14 B | per-dimension **block-directory slot** record `[u32 dir_ptr][u32 alloc][u32 n_entries][u16 flag]`, dimension `k` (1 = geography). `alloc` = `nextpow2(n_entries)` (allocated capacity, 243/243). `n_entries` = number of codebook **BLOCKS**, NOT members (members are packed inside the label-array blocks); a dimension's blocks are individually addressed and may interleave across dimensions. `flag` = 1 only on the 3 double-indirection chunked-DGUID geo dirs (else 0); `ivt_f2_dim_dir()` uses it to direct the indirection-depth order (metadata-driven, other depth kept as fallback); semantic inferred/unproven — see ivt-format.md "The 14-byte slot record, field by field" | `IVT_HDR_DIM_SLOT0` / `IVT_HDR_DIM_STRIDE` |
 
@@ -107,12 +108,14 @@ Codes are `W` bits, MSB-first and **not** pair-swapped (the mask convention),
 addressed at the same padded presence-grid bit as the presence record.
 
 Code vocabulary — **decoded at every `W`** (`ivt_status_array()`); the width is
-a storage choice, not a dialect. `0` value/genuine zero; `1` nothing here —
-**filler** at a padded grid position (byte `0x55` at `W = 2`, `0x11` at `W = 4`)
-and **`..` not available** at a real cell; `2` = `x` suppressed; `3` = `...` not
-applicable. Validated cell-exact against StatCan's published tables on 10 of
-them, in both directions. Codes `≥ 4` occur (2,106,327 absent cells over 13
-tables) and are counted, never translated.
+a storage choice, not a dialect. `0` is always a value or a genuine zero, and
+`1` is "nothing here" — **filler** at a padded grid position (byte `0x55` at
+`W = 2`, `0x11` at `W = 4`) and the file's own first symbol at a real cell.
+**Every other code is named by the file's own legend at `@698` (§H.1)**, not by
+this catalog: the numbering is per file, seven distinct vocabularies over the
+115 corpus tables that declare one. Validated cell-exact against StatCan's
+published tables on 10 of them, in both directions; a code the legend does not
+name is counted, never translated (0 corpus-wide).
 
 The block's start is **implied**, never stored: `value_run_start + popcount·width`.
 Its end is the directory entry's u16 size.
@@ -349,6 +352,36 @@ HTML blob (`action=loc; form.submit();}">Mandatory reading`) instead of
 `[82 01][u16][flag bytes][02][code char][00][u16 text_len][text]` — one per
 data-quality-flag code A–E / R / P, EN then FR. Recognizer `ivt_f2_dqf_legend()`.
 
+## H.1. Cell-status legend (`@698` entry array)
+
+The file's own statement of what its `0xa` reason codes mean — **the codes are
+numbered per file, not per format**, so this is the only thing that names them.
+
+`@698` → an 8-byte entry array (§I shape). **Entry 0 is the code index array**:
+
+```
+04 02 [u16 n_codes] [u16 per_code]  then n_codes · per_code × [u32 entry_index]
+```
+
+`per_code` is 1 (EN only) or 2 (EN then FR); code `k` is the record named by
+index `per_code·(k−1) + 1`. Entry 1 is blank, and records the index array does
+not name (a stray French *Valeur manquante par défaut*) are not codes.
+
+Each record shares §H's shape, with a **variable** flag run (1, 5 or 7 bytes):
+
+```
+[82 01 | 02 01] [u16] [flag bytes] [u8 sym_len incl NUL] [symbol] 00 [u16 text_len] [text]
+```
+
+Symbols are latin-1 and often multi-byte: `2e 2e` = `..`, `2e 2e 2e` = `...`,
+`78` = `x`, `58` = `X`, `2d` = `-`, `2d 2d` = `--`, `30 20 73` = `0 s`,
+`46` = `F`, `7a` = `z`, `20` / `20 20` = one or two spaces, `c2 ae` = `®`,
+`e2 80 a2` = `•` (the UCR / `SP3_RHUXA9` deposits write the dot symbols as UTF-8
+bullets where the rest of the lineage writes ASCII periods — same codes, same
+wording, different bytes). A record may append a second string (the survey
+lineage's default-missing-value wording), so the text is bounded by the record
+rather than filling it. Recognizer `ivt_f2_status_legend()`.
+
 ## I. Directory entry shape (8 bytes)
 
 `[u32 off][u16 size][u16 size]` — the shared entry of the **page directory**, the
@@ -368,6 +401,14 @@ layout.
 
 ## Change log
 
+- **2026-07-27** — **The cell-status legend is decoded** (§H.1, header slot
+  `@698`). The `0xa` array's reason codes are numbered **by the file**, so the
+  codes `≥ 4` that had no published ground truth to crack them against are named
+  by the files themselves. Same legend reproduces every previously validated
+  published count, and 47/47 corpus tables that write a `0xa` array declare one
+  (115 tables declare a legend in all, in seven distinct vocabularies). `@698`
+  and `@712` (the DQF legend, §H) are the only two header slots corpus-wide that
+  address a `04 02` index array.
 - **2026-07-27** — **The `0x8` page tail is decoded** (§C.2). The bytes between the
   presence record and the value run — the `b2` trailer plus the `32·(b3−8)` head,
   long catalogued as pad and "auxiliary" — are an **index bitmap** selecting which

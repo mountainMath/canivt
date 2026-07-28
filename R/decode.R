@@ -660,11 +660,19 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
   skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
   extra_vals <- 0L; extra_nz <- 0L
-  miss_acc <- list(); miss_st <- list(); mi <- 0L
+  miss_acc <- list(); miss_st <- list(); miss_sy <- list(); mi <- 0L
   st_tally <- c(mask = 0L, none = 0L, status = 0L, unreadable = 0L,
                 extra = 0L, nan_words = 0L, contradictory = 0L, beyond = 0L,
                 status_unread = 0L, status_unknown = 0L)
   unk_tal <- integer(IVT_STATUS_NCODE)         # cells per UNINTERPRETED code
+  # What the file itself says its reason codes mean. The numbering is per-file,
+  # so this -- not a constant -- is what names a code; the NDM vocabulary is
+  # kept only as a loud fallback for a file that declares no legend.
+  leg <- if (missing) ivt_f2_status_legend(raw) else NULL
+  leg_declared <- !is.null(leg)
+  if (!leg_declared) leg <- list(text_en = IVT_STATUS_VOCAB,
+                                 symbol = IVT_STATUS_SYMBOLS)
+  leg_txt <- leg$text_en; leg_sym <- leg$symbol
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
@@ -711,6 +719,7 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
               miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
               # The mask says a cell is missing, never WHY.
               miss_st[[mi]] <- rep(NA_character_, sum(cc$keep))
+              miss_sy[[mi]] <- rep(NA_character_, sum(cc$keep))
               st_tally[["beyond"]] <- st_tally[["beyond"]] +
                 sum(lay$grid$bit[rows][cc$keep] >= st$covered_bits)
             }
@@ -734,9 +743,9 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
             if (any(cc$keep)) {
               cd <- st$codes[rows][cc$keep]
               md <- cc$md[cc$keep, , drop = FALSE]
-              # Codes past the validated vocabulary are counted, never guessed
-              # at: they contribute no missing cell and are reported loudly.
-              unk <- cd > length(IVT_STATUS_VOCAB)
+              # Codes the legend does not name are counted, never guessed at:
+              # they contribute no missing cell and are reported loudly.
+              unk <- cd > length(leg_txt) | is.na(leg_txt[cd])
               if (any(unk)) {
                 st_tally[["status_unknown"]] <-
                   st_tally[["status_unknown"]] + sum(unk)
@@ -746,7 +755,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
               if (length(cd)) {
                 mi <- mi + 1L
                 miss_acc[[mi]] <- md
-                miss_st[[mi]] <- IVT_STATUS_VOCAB[cd]
+                miss_st[[mi]] <- leg_txt[cd]
+                miss_sy[[mi]] <- leg_sym[cd]
               }
             }
           }
@@ -803,7 +813,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
   }
   if (missing)
     attr(out, "missing") <-
-      ivt_missing_cells(miss_acc, miss_st, mi, lay, st_tally, unk_tal)
+      ivt_missing_cells(miss_acc, miss_st, miss_sy, mi, lay, st_tally, unk_tal,
+                        leg_declared, if (leg_declared) leg else NULL)
   out
 }
 
@@ -812,20 +823,34 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
 # absent cells are zeros, so a page that does not yield one leaves its absent
 # cells UNCLASSIFIED -- silently returning "no missings there" would be exactly
 # the false "absent implies zero" model this decode exists to correct.
-ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally,
-                              unk_tal = integer(IVT_STATUS_NCODE)) {
+ivt_missing_cells <- function(miss_acc, miss_st, miss_sy, mi, lay, tally,
+                              unk_tal = integer(IVT_STATUS_NCODE),
+                              leg_declared = TRUE, legend = NULL) {
   m <- lay$n_dim
   if (mi == 0L) {
     out <- tibble::tibble(.rows = 0L)
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
-    out$status <- character(0)
+    out$symbol <- character(0); out$status <- character(0)
   } else {
     cols <- do.call(rbind, miss_acc[seq_len(mi)])
     out <- tibble::tibble(.rows = nrow(cols))
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
     # The REASON, where the file states one: only the `0xa` status array carries
     # reason codes, so a mask-derived missing is NA -- missing, cause unstated.
+    out$symbol <- unlist(miss_sy[seq_len(mi)], use.names = FALSE)
     out$status <- unlist(miss_st[seq_len(mi)], use.names = FALSE)
+  }
+  # A `0xa` array whose meaning the file does not state. The NDM vocabulary is
+  # right for the census lineage and demonstrably wrong for others (the 2016
+  # `98-400-X` legend shifts every symbol by one), so naming a code from it is
+  # a guess and says so.
+  if (!leg_declared && tally[["status"]] > 0L) {
+    ivt_fallback(paste(
+      "the file declares no cell-status legend (header slot 698), so the",
+      "{tally[['status']]} self-describing (0xa) status array{?s} {?was/were}",
+      "named from the validated NDM census vocabulary; another lineage numbers",
+      "the same symbols differently, so treat `status` as unconfirmed."),
+      class = "canivt_status_legend")
   }
   n_un <- tally[["none"]] + tally[["unreadable"]] + tally[["contradictory"]]
   if (n_un > 0L) {
@@ -855,9 +880,9 @@ ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally,
                   collapse = ", ")
     ivt_fallback(paste(
       "{tally[['status_unknown']]} absent cell{?s} carr{?ies/y} a (0xa) reason",
-      "code past the validated vocabulary, so {?it is/they are} NOT interpreted",
-      "and {?is/are} absent from the missing-cell list; codes seen",
-      "(code: cells): {inv}."), class = "canivt_status_code_unknown")
+      "code the file's own status legend does not name, so {?it is/they are}",
+      "NOT interpreted and {?is/are} absent from the missing-cell list; codes",
+      "seen (code: cells): {inv}."), class = "canivt_status_code_unknown")
   }
   if (tally[["extra"]] > 0L) {
     ivt_fallback(paste(
@@ -885,5 +910,6 @@ ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally,
       class = "canivt_status_nan_quieted")
   }
   attr(out, "pages") <- tally
+  attr(out, "legend") <- legend
   out
 }

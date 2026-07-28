@@ -58,7 +58,7 @@ decoded (see below).
     `...` not applicable. All 1,273,173 of the corpus's `0xa` pages. Its
     addressing was "lineage-specific" only because it was read without the
     sparse rebuild.
-  45 corpus tables report missing cells, **622,393,786** in all; the remaining
+  54 corpus tables report missing cells, **624,500,113** in all; the remaining
   125 report none, which is the confirming half — those tables publish no
   missings. `x$missing` carries a `status` column naming the reason where the
   file states one. Off by default: the ledger asserts exact cell counts and
@@ -121,19 +121,35 @@ decoded (see below).
   `32/14`, `4096`) — `@20` is the family-1 `0x1000` stride; the rest unexplained.
 - [?] Descriptor sub-header bytes (`f0 20 00 80`, `8f c8 0f f8`, per-dimension
   display masks `f3 ff f0 ff` / `c0 ff c0 ff`).
-- [?] What the `b2` trailer / `b3` head bytes *contain* (the 2006 heads carry
-  per-geo sentinel/value words). The arithmetic is corpus-verified, so this is not
-  a decode gap.
+- [x] What the `b2` trailer / `b3` head bytes *contain* — **answered**
+  (2026-07-27): the whole pre-value region is the **index bitmap** of the page's
+  trailing cell-status block, one bit per value-width word. It was catalogued
+  here as unexplained padding for as long as the tail was.
 - [?] Dimension type markers are **storage/classification tags, not identities** —
   never branch on them (see the width-tag invariant in CLAUDE.md).
 
 ## [ ] Open gaps
 
-- [ ] **The `0xa` status array's reason codes `≥ 4`** (gap narrowed to this on
-  2026-07-27; the width gap it replaces is CLOSED — see above). 2,106,327 absent
-  cells over 13 of the 170 ledger tables carry a code the vocabulary does not
-  cover; they are counted and named (`canivt_status_code_unknown`) rather than
-  interpreted, and contribute no row to `x$missing`.
+- [x] **The `0xa` status array's reason codes `≥ 4`** — CLOSED 2026-07-27, the
+  same day the gap was narrowed to it, and **not** by the published ground truth
+  it was thought to be blocked on. **The codes are numbered by the FILE**: header
+  slot `@698` holds the table's own status legend — symbol plus bilingual wording,
+  one record per code, in code order (`ivt_f2_status_legend()`, markers.md §H.1).
+  There is no universal vocabulary — **seven distinct legends** over the 115
+  corpus tables that declare one: the census lineage numbers `..`/`X`/`...` as
+  1/2/3, the profile / `98-400-X` / 2021-custom lineage puts `-` (default missing
+  value) first and shifts all three up by one, and the Borealis justice tables
+  decline to distinguish at all, naming codes 2–8 `#2`…`#8` "Missing value".
+  So 98-400-X2016203's 1,275,435 code-4 cells are
+  `...` **not applicable**, and the `SP*` survey deposits — which publish nothing
+  to check against — name all eight or nine of their own codes (`0 s`, `®`, `z`,
+  `F`, "data not available for this reference period"). 47/47 corpus tables that
+  write a `0xa` array declare a legend; `n_unknown` is now **0** across the ledger
+  and `x$missing` gains a `symbol` column, with the legend on
+  `attr(x$missing, "legend")`. `IVT_STATUS_VOCAB` survives only as a loud
+  fallback (`canivt_status_legend`) for an unseen file that declares none.
+  - The legend is what validates, not what is validated: read per-file, it
+    reproduces **every** previously confirmed published count below unchanged.
   - Codes 1/2/3 validated cell-exact against StatCan's published tables
     (`getFullTableDownloadCSV`), in **both** directions on ten tables:
     `..` 98-10-0002 `612`, 98-10-0013 `330`, 98-10-0010 `0`; `x` 98-10-0023
@@ -146,15 +162,15 @@ decoded (see below).
     12 / 600 across its `W = 1` and `W = 2` pages, and two files mix `W = 2`
     with `W = 4`. Structurally, present ⇒ code 0 and padding ⇒ code 1 hold at
     every width over all 1,273,173 pages (166,965,381 padded cells).
-  - Incidence of the open codes: `4` 1,282,224 (98-400-X2016203 1,275,435,
-    `SP3_WLOGGX_00040207`, `ord-08035_ct1_2021`, `SP_U649IE_optab13`); `5` 25
-    (`SP_BXW0XU_optab12`); `7` 174,310 (`SP3_RHUXA9_404`/`_103`,
-    `SP3_WLOGGX_000402xx`, `SP3_A2FD0W_02560006`); `8` 649,768 (`SP3_RHUXA9_*`).
-  - Cracking them needs published ground truth, and none of those tables has
-    any: 98-400-X2016203's Beyond 20/20 viewer is **retired** (every
-    `Rp-eng.cfm` request 302s to `srvmsg404.html`) and the `SP*` deposits ship
-    the `.ivt` alone. Remaining value-suppressing legend symbols: `F`, `<LOD`,
-    `0s`, `p`, `t`.
+  - What the formerly open codes turned out to say: `4` 1,282,224 cells —
+    `...` not applicable on 98-400-X2016203 / `ord-08035_ct1_2021`, `x`
+    suppressed on `SP_U649IE_optab13`, `x` on `SP3_WLOGGX_00040207`; `5` 25 —
+    `...` "not appropriate or not applicable" (`SP_BXW0XU_optab12`); `7` 174,310
+    — "data not available for this reference period" (`SP3_RHUXA9_*`,
+    `SP3_WLOGGX_*`, `SP3_A2FD0W_02560006`); `8` 649,768 — `F` too unreliable to
+    be published (`SP3_RHUXA9_*`). The hunt for published ground truth was the
+    wrong search: 98-400-X2016203's Beyond 20/20 viewer is retired and the `SP*`
+    deposits ship the `.ivt` alone, but neither is needed — the file says it.
 - [ ] **The SECOND tail block is not decoded** (gap OPENED 2026-07-27). On 8 corpus
   tables some pages' index bits address words **past** the mask's `rec_bytes`, so
   the same index also addresses a further array: `SP3_1H8SBB_97-555` (11,463

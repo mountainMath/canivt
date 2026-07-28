@@ -25,22 +25,28 @@
   gate passes on all 1,273,173 status-array pages, a cell that carries a value
   has code 0 on every one of them, and every one of the 166,965,381 grid
   positions the decoder independently computes as padding carries code 1.
-* **The array's code width `W` is a storage choice, not a dialect**, so the one
-  vocabulary is decoded at every width: `0` a value or a genuine zero, `1`
-  *nothing here* — filler at a padded grid position and `..` *not available for
-  a specific reference period* at a real cell — `2` `x` suppressed, `3` `...`
-  not applicable. Validated cell-exact against StatCan's published tables in
-  **both** directions on ten of them (98-10-0002, 0010, 0013, 0023, 0040, 0128,
-  0129, 0478, 0655, 0658): every published symbol is matched by a code count and
-  no code is left without a symbol. `x$missing` gains a `status` column naming
-  the reason where the file states one. 45 corpus tables report missing cells —
-  sparse NDM crosstabs whose grid is mostly `...`, every one of those cells
-  having previously read as a published zero.
+* **The array's code width `W` is a storage choice, not a dialect**, so the codes
+  are read at every width; `0` is always a value or a genuine zero, and `1` is
+  *nothing here* — filler at a padded grid position, and the published symbol at
+  a real cell, the grid deciding which.
+* **What the codes MEAN is declared by the file, not by the format.** Header slot
+  `@698` holds each table's own status legend — symbol plus bilingual wording,
+  one record per code, in code order — and the corpus holds four vocabularies
+  that are offset from each other, so no fixed table can serve them all. `x$cells`
+  is untouched; `x$missing` gains `symbol` and `status` columns taken from the
+  file's legend, and the legend itself rides on `attr(x$missing, "legend")`.
+  Validated cell-exact against StatCan's published tables in **both** directions
+  on ten of them (98-10-0002, 0010, 0013, 0023, 0040, 0128, 0129, 0478, 0655,
+  0658): every published symbol is matched by a code count and no code is left
+  without a symbol. All 47 corpus tables that write a reason-code array declare a
+  legend, and none of them uses a code the legend does not name. 54 corpus tables
+  report missing cells — sparse NDM crosstabs whose grid is mostly `...`, every
+  one of those cells having previously read as a published zero.
 * The feature is off by default because completeness is vintage-dependent, and
   every gap raises its own classed warning rather than being folded silently
-  into the count: `canivt_status_code_unknown` (a reason code past the validated
-  vocabulary — codes 4/5/7/8, 2,106,327 absent cells over 13 corpus tables, none
-  of which publishes symbol counts to crack them against),
+  into the count: `canivt_status_legend` (the file declares no legend, so the
+  built-in vocabulary stands in), `canivt_status_code_unknown` (a code the
+  file's own legend does not name),
   `canivt_status_unread` (a status array whose header this reader does not
   recognise), `canivt_status_extra_block` (a second,
   undecoded tail array on eight corpus tables), `canivt_status_beyond_mask`

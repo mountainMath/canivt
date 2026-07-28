@@ -58,6 +58,9 @@ res <- parallel::mclapply(seq_len(nrow(led)), function(i) {
   o$cells <- nrow(v$cells); o$miss <- nrow(v$missing)
   t <- attr(v$missing, "pages", exact = TRUE)
   for (nm in names(t)) o[[nm]] <- t[[nm]]
+  # how many reason codes the file's OWN status legend declares (0 = none)
+  lg <- attr(v$missing, "legend", exact = TRUE)
+  o$legend <- if (is.null(lg)) 0L else nrow(lg)
   o$warn <- paste(unique(ws), collapse = ",")
   rm(v); gc(verbose = FALSE)
   o
@@ -92,7 +95,11 @@ for (c_ in c("mask", "none", "status", "status_unread", "status_unknown",
 cat("\n-- tables with missing cells --\n")
 print(df[!is.na(df$miss) & df$miss > 0,
          c("key", "cells", "miss", "beyond", "mask", "none", "status",
-           "status_unread", "status_unknown", "extra", "nan_words")])
+           "status_unread", "status_unknown", "extra", "nan_words", "legend")])
+
+cat("\n-- 0xa pages with NO declared legend (must be empty) --\n")
+print(df[!is.na(df$status) & df$status > 0 & df$legend == 0L,
+         c("key", "status", "legend")])
 
 cat("\n-- tables with unreadable/contradictory pages (must be empty) --\n")
 print(df[!is.na(df$unreadable) & (df$unreadable > 0 | df$contradictory > 0),

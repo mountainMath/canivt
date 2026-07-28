@@ -1130,9 +1130,10 @@ the status read happens **before** `ivt_decode_page()` so a wholly-suppressed
 page still contributes its missings.
 
 Every gap is a classed warning, never a silent guess: `canivt_status_unreadable`,
-`canivt_status_code_unknown` (a `0xa` reason code past the validated vocabulary;
-it was `canivt_status_block_undecoded` while the array itself was undecoded),
-`canivt_status_extra_block`,
+`canivt_status_code_unknown` (a `0xa` reason code the file's own status legend
+does not name; it was `canivt_status_block_undecoded` while the array itself was
+undecoded), `canivt_status_legend` (no legend declared, so the built-in NDM
+vocabulary is standing in), `canivt_status_extra_block`,
 `canivt_status_beyond_mask`, and `canivt_status_nan_quieted` (raised through
 `ivt_source_truncation()`, so strict keeps it a warning — it is damage in the
 source, not a canivt fallback).
@@ -1286,7 +1287,7 @@ It shipped that day at `W = 2` only, on a reading of the padding check that was
 
 **What it changes.** `x$missing` gains a `status` column, or `NA` where only the
 bare mask spoke. Corpus missings go 3,674,333 → **622,290,283** over 43 tables
-(622,393,786 over 45 once the width gap closed, below),
+(624,500,113 over 54 once the width gap closed, below),
 dominated by sparse NDM crosstabs whose grid is mostly `...` (98-10-0393 alone:
 231,789,142 against 27,508,287 stored cells). Nothing else moved: `dev/msweep.R`
 reports 0 cell-count mismatches, 0 errors, and `unreadable` / `contradictory`
@@ -1336,15 +1337,79 @@ The measurement was `dev/wtruth.R` — a whole-corpus census of code × cell cla
 alone. It is dev-only by design: the package must never learn a code from a
 published CSV.
 
-**What is left.** Codes 4, 5, 7 and 8 — 2,106,327 absent cells over 13 tables —
-are counted and named (`canivt_status_code_unknown`) and contribute no missing
-cell. The obstacle is ground truth, not addressing: 98-400-X2016203's Beyond
+**What was left.** Codes 4, 5, 7 and 8 — 2,106,327 absent cells over 13 tables —
+were counted and named (`canivt_status_code_unknown`) and contributed no missing
+cell. That gap was recorded as blocked on ground truth: 98-400-X2016203's Beyond
 20/20 viewer is retired (every `Rp-eng.cfm` / `CompDataDownload.cfm` request
 302s to `srvmsg404.html`) and the `SP3_*` / `SP_*` Borealis deposits ship the
-`.ivt` alone. Remaining value-suppressing legend symbols: `F` too unreliable,
-`<LOD`, `0s`, `p`, `t`. On 98-400-X2016203 code 4 lands on *Average age* /
-*Median age* × age group *0 to 14 years* at Canada/Total/Total — a
-cross-classification conflict, consistent with `F` but not proof.
+`.ivt` alone. It closed the same day, from the file itself — see below.
+
+### The codes are numbered by the FILE: header slot `@698` (2026-07-27, same day)
+
+"One vocabulary at every width" is true *within a file* and false across the
+corpus. The search for a published CSV to read codes 4/5/7/8 off was the wrong
+search: **every table carries its own status legend**, and the header points
+straight at it. Header slot **`@698`** is a u32 to an 8-byte entry array — the
+same `[u32 off][u16 len][2B]` shape as `@712`'s data-quality-flag legend
+(`ivt_f2_dqf_legend()`), which is why the structure was recognisable on sight
+once the pointer was found.
+
+- Entry 0 is the **index array**: `[04 02][u16 n_codes][u16 per_code]` followed
+  by `n_codes · per_code` u32 entry indices. `per_code` is the records-per-code
+  stride — **2** where the legend is bilingual (EN then FR), **1** where the file
+  writes English only (`ord-08035_ct1_2021`). Reading it as a constant 2 is what
+  made that file look like it had no legend at all. Entry 1 is blank; code `k`
+  is the record at index `per_code · (k − 1) + 1`.
+- Each record is `[82 01 | 02 01][u16][flag bytes][u8 sym_len incl NUL][symbol]
+  [00][u16 text_len][text]`, latin-1 (`95 95` = `..`, `78` = `x`, `ae` = `®`).
+  The flag run is 1, 5 or 7 bytes, so the symbol is found by scanning for the
+  promised NUL terminator rather than at a fixed offset. A record **may append a
+  second string** — the survey lineage writes its default-missing-value wording
+  after the label — so the gate is "the text fits", not "the text consumes the
+  record exactly"; requiring exact consumption is what left code 1 unnamed on
+  `SP3_A2FD0W_02560006` and `SP3_WLOGGX_00040207`.
+
+Four distinct vocabularies fall out, and the previously hard-coded one is only
+the first of them:
+
+Seven distinct legends over the 115 corpus tables that declare one:
+
+| lineage | n | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|--:|---|---|---|---|---|---|---|---|---|
+| NDM census (`98-10-xxxx`) | 51 | `..` | `X` | `...` | `F` | `0 s` | | | | |
+| profiles 1981–2011, 2016 `98-400-X`, 2021 custom | 31 | `-` | `..` | `x` | `...` | `F` | | | | |
+| 2011 NHS (`98-312-X`, `99-012-X`) | 2 | `-` | `..` | `x` | `...` | | | | | |
+| Business Register / Business Patterns | 13 | `-` | | | | | | | | |
+| Borealis survey (UCR, `00040xxx`, `SP3_RHUXA9_*`) | 13 | `•` | `••` | `0 s` | `x` | `®` | `•••` | `  ` | `F` | `z` |
+| Borealis justice (`table_5_c` / `table_6_c`) | 3 | `-` | `#2` | `#3` | `#4` | `#5` | `#6` | `#7` | `#8` | |
+| Borealis `optab` | 2 | ` ` | `..` | `--` | `x` | `...` | `F` | `xx` | | |
+
+So 98-400-X2016203's 1,275,435 code-4 cells are `...` **not applicable** — its
+legend simply starts one symbol earlier than NDM's — not the `F` the
+cross-classification argument above guessed at. Codes 7 and 8 on the `SP3_*`
+tables are *data not available for this reference period* and `F` *too
+unreliable to be published*; code 5 on `SP_BXW0XU_optab12` is `...`.
+
+Three confirmations that this is the right structure and not a coincidence that
+parses:
+
+- **The validated NDM counts do not move.** Codes 1/2/3 on 98-10-0002 / 0013 /
+  0023 / 0040 / 0128 still reproduce every published symbol count exactly, which
+  they must — the NDM legend *is* the vocabulary that was hard-coded.
+- **A grid closes that could not close before.** `SP3_A2FD0W_02560006`:
+  230 published + 130 missing (68 code 1 "No data" + 62 code 7 "Data not
+  available for this reference period") = 360, its whole grid.
+- **Coverage is total where it matters.** All 47 corpus tables that write a
+  `0xa` array declare a legend; `n_unknown` is 0 across the ledger. The tables
+  that declare none (`@698` = 0) are older 02-gen survey files and mask-only
+  lineages, which never write a reason code.
+
+This also fixed a **shipped correctness bug**: the hard-coded vocabulary
+mislabelled the 2016 `98-400-X`, 2021 custom and all `SP*` lineages, whose codes
+1–3 are not NDM's. `x$missing` now carries a `symbol` column alongside `status`,
+the legend travels on `attr(x$missing, "legend")`, and `IVT_STATUS_VOCAB`
+survives only as a loud fallback (`canivt_status_legend`) for an unseen file
+that declares nothing.
 
 ### Unified cell decode & metadata
 

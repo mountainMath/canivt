@@ -25,7 +25,14 @@ test_that("the bundled table decodes its mask and reports no missing cells", {
   expect_s3_class(x$missing, "tbl_df")
   # same coordinate columns as `cells`, minus the value, plus the reason
   expect_identical(names(x$missing),
-                   c(setdiff(names(x$cells), "value"), "status"))
+                   c(setdiff(names(x$cells), "value"), "symbol", "status"))
+  # the file's own reason-code legend travels with the table
+  leg <- attr(x$missing, "legend")
+  expect_s3_class(leg, "tbl_df")
+  # verbatim from the file -- the census lineage writes `X` where the published
+  # legend prints `x`, and canivt reports what the bytes say
+  expect_identical(leg$symbol, c("..", "X", "...", "F", "0 s"))
+  expect_identical(leg$code, 1:5)
   expect_identical(nrow(x$missing), 0L)
   tally <- attr(x$missing, "pages")
   expect_gt(tally[["mask"]], 0L)
@@ -159,9 +166,14 @@ test_that("a page with no readable tail contributes nothing, loudly", {
 #     a non-zero reason code.
 #
 # `status_unread_pages` counts `0xa` arrays whose header this reader does not
-# recognise; `n_unknown` counts absent cells carrying a reason code past the
-# validated vocabulary (codes 4/5/7/8, on tables with no published symbol
-# counts). Both are reported and contribute no missing cell.
+# recognise; `n_unknown` counts absent cells carrying a reason code the file's
+# OWN legend does not name. Both are reported and contribute no missing cell,
+# and both are 0 for every corpus table.
+#
+# `legend_codes` is how many reason codes the file declares at header slot 698
+# (0 = none). It is the third structural column: a table with `0xa` pages and no
+# legend would fall back to a guessed vocabulary, so `status_pages > 0` must
+# always come with `legend_codes > 0`.
 #
 # `n_beyond` counts missing cells past the reach of their page's word INDEX --
 # cells the file has no bit with which to classify. It is 0 for every corpus
@@ -184,6 +196,8 @@ status_probe <- function(row) {
   if (!is.null(cap$value)) {
     out$n_missing <- nrow(cap$value$missing)
     out$tally <- attr(cap$value$missing, "pages")
+    leg <- attr(cap$value$missing, "legend", exact = TRUE)
+    out$legend <- if (is.null(leg)) 0L else nrow(leg)
   }
   gc(verbose = FALSE)
   out
@@ -211,5 +225,8 @@ test_that("the corpus cell-status tallies match the ledger", {
     expect_identical(t[["nan_words"]], as.integer(row$nan_words), info = r$key)
     expect_identical(t[["beyond"]], as.integer(row$n_beyond), info = r$key)
     expect_identical(r$n_missing, as.integer(row$n_missing), info = r$key)
+    expect_identical(r$legend, as.integer(row$legend_codes), info = r$key)
+    # a `0xa` array is only ever named from the file's own declaration
+    if (t[["status"]] > 0L) expect_gt(r$legend, 0L)
   }
 })

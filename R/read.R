@@ -64,15 +64,17 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' @param missing If `TRUE` (default `FALSE`) also decode each page's **cell
 #'   status tail** and return, in a `missing` tibble, the coordinates of the
 #'   cells the file marks as *not available* rather than zero (same member-id
-#'   columns as `cells`, no `value`, plus a `status` column naming the reason
-#'   where the file states one: `"suppressed"` (`x`), `"not applicable"`
-#'   (`...`), `"not available"` (`..`), or `NA` where the page carries only the
-#'   bare absent mask). Off by default because it costs a second presence read
-#'   per page and its completeness is vintage-dependent: pages with no tail at
-#'   all, pages whose tail the word index does not account for, and cells
-#'   carrying a reason code past the validated vocabulary all contribute
-#'   nothing -- each reported with a classed warning rather than assumed to hold
-#'   no missings. See the "Missing values" section.
+#'   columns as `cells`, no `value`, plus `symbol` and `status` columns carrying
+#'   the reason **in the file's own words** -- the legend it declares in its
+#'   header, e.g. `x` / "Suppressed to meet the confidentiality requirements of
+#'   the Statistics Act" -- or `NA` where the page carries only the bare absent
+#'   mask). The legend itself travels as `attr(x$missing, "legend")`. Off by
+#'   default because it costs a second presence read per page and its
+#'   completeness is vintage-dependent: pages with no tail at all, pages whose
+#'   tail the word index does not account for, and cells carrying a reason code
+#'   the file's legend does not name all contribute nothing -- each reported
+#'   with a classed warning rather than assumed to hold no missings. See the
+#'   "Missing values" section.
 #' @section Missing values:
 #'   Only non-zero cells are stored, so absence covers **both** genuine zeros
 #'   and true missings (`x` suppressed, `...`/`N` not available). The two are
@@ -82,9 +84,18 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   *unmasked* means missing -- or a self-describing **reason-code array**
 #'   carrying the `..` / `x` / `...` distinction itself. `missing = TRUE`
 #'   decodes both, at every code width; only the array states a reason, so
-#'   mask-derived rows carry `status = NA`. A few tables use reason codes past
-#'   that vocabulary; those cells are counted and reported, not guessed at
-#'   (`canivt_status_code_unknown`).
+#'   mask-derived rows carry `status = NA`.
+#'
+#'   The reason codes are **numbered by the file, not by the format**: each
+#'   table declares its own legend -- symbol plus bilingual wording, in code
+#'   order -- and the same symbol sits at different codes in different lineages
+#'   (`x` is code 2 in the NDM census tables and code 3 in the 2016
+#'   `98-400-X` crosstabs). `status` is read from that declaration, so it names
+#'   whatever the file names, including symbols outside the census vocabulary
+#'   (`F` too unreliable to be published, `0 s` rounded to zero, `®` not
+#'   released yet, `z` frozen series). A code the legend does not name, or a
+#'   table that declares no legend, is reported rather than guessed at
+#'   (`canivt_status_code_unknown`, `canivt_status_legend`).
 #'
 #'   Two limits are reported rather than hidden. On float64 pages a mask word of
 #'   mostly-ones is NaN-shaped and the writer's x87 quieting overwrites one

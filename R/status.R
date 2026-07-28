@@ -24,11 +24,24 @@
 #'   wide, MSB-first and -- like the mask -- NOT pair-swapped, addressed at the
 #'   SAME padded presence-grid bit as the presence record.
 #'
-#'   `W` is a STORAGE choice, not a dialect: the vocabulary is the same at every
-#'   width (`IVT_STATUS_VOCAB`). `0` is a value or a genuine zero; `1` is
-#'   "nothing here" -- filler at a padded grid position, `..` not available for
-#'   a specific reference period at a real cell; `2` is `x` suppressed and `3`
-#'   is `...` not applicable. Codes `>= 4` occur and are NOT interpreted.
+#'   `W` is a STORAGE choice, not a dialect: it changes how many bits a code
+#'   occupies, never what the code means.
+#'
+#'   What a code MEANS is **declared per file**, by the status legend at header
+#'   slot 698 (`ivt_f2_status_legend()`): symbol plus bilingual wording, one
+#'   record per code, in code order. There is no universal vocabulary: seven
+#'   distinct legends over the 115 corpus tables that declare one. The NDM
+#'   census tables number `..` / `X` / `...` as 1 / 2 / 3; the profile,
+#'   `98-400-X` and 2021-custom lineage puts `-` (default missing value) first
+#'   and shifts all three up by one; the Borealis survey lineage declares eight
+#'   or nine codes including `0 s`, `®` and `z`; and the Borealis justice tables
+#'   decline to distinguish, naming codes 2--8 `#2`..`#8`, all "Missing value".
+#'   Code `0` is always a value or a genuine
+#'   zero, and code `1` is always the file's own "nothing here": at a padded
+#'   grid position it is filler, at a real cell it is whatever symbol the legend
+#'   names it. Every corpus table that writes a `0xa` array declares a legend
+#'   (47 / 47); `IVT_STATUS_VOCAB` survives only as a LOUD fallback for a file
+#'   that does not.
 #'
 #'   The three "incompatible packings" once recorded here (98-10-0655/0658 at
 #'   the grid index, 98-10-0040 packing tighter, 98-10-0128 in per-member
@@ -51,10 +64,12 @@
 #'   98-10-0128 (1,466,488), 98-10-0002 (735), 98-10-0013 (212). (`E` and `r`
 #'   attach to cells that carry values, so they are not in this array at all.)
 #'
-#'   Codes 4, 5, 7 and 8 remain uninterpreted: 2,106,327 absent cells over 13
-#'   tables -- 98-400-X2016203 (whose viewer is retired), the Borealis `SP3_*` /
-#'   `SP_*` survey lineage and `ord-08035_ct1_2021`, none of which publishes
-#'   symbol counts. They are counted and named, never translated.
+#'   The formerly uninterpreted codes 4/5/7/8 -- 2,106,327 absent cells over 13
+#'   tables whose published symbol counts are unobtainable (98-400-X2016203's
+#'   viewer is retired; the Borealis deposits ship the `.ivt` alone) -- are read
+#'   from those files' own legends and need no external truth at all. The same
+#'   legends reproduce every one of the published counts above, which is what
+#'   validates the per-file numbering rather than the other way round.
 #'
 #' **The tail is a sparse array of `width`-byte words, addressed by an index
 #' bitmap that occupies the WHOLE pre-value region.** That region is the `b2`
@@ -115,23 +130,118 @@
 #' @noRd
 NULL
 
-# The reason-code vocabulary of the `0xa` status array, indexed by CODE and
-# WIDTH-INDEPENDENT (see the roxygen block above). Code 0, absent from this
-# table, is a value or a genuine zero.
+# The FALLBACK reason-code vocabulary of the `0xa` status array, used only where
+# the file declares no legend of its own (`ivt_f2_status_legend()` below is the
+# primary, metadata-driven path). It is the NDM census lineage's legend, the one
+# validated cell-exact in both directions against ten published tables; it is
+# NOT universal -- the 2016 `98-400-X` and Borealis survey lineages number the
+# same symbols differently -- so supplying it is a loud fallback.
 #
-# Code 1 is "nothing here", and which nothing depends on the GRID, not on the
-# code: at a padded grid position -- one the layout says is no cell at all --
-# it is filler, and at a real cell it is `..`, not available for a specific
-# reference period. The caller separates the two with the padding set it already
-# computes from the descriptor and slot geometry.
+# Code 0, absent from this table, is a value or a genuine zero. Code 1 is
+# "nothing here", and which nothing depends on the GRID, not on the code: at a
+# padded grid position -- one the layout says is no cell at all -- it is filler,
+# and at a real cell it is the legend's first symbol. The caller separates the
+# two with the padding set it already computes from the descriptor and slot
+# geometry.
 IVT_STATUS_VOCAB <- c(                               # codes 1, 2, 3
   "not available",                                   # `..`
   "suppressed",                                      # `x`
   "not applicable")                                  # `...`
+IVT_STATUS_SYMBOLS <- c("..", "x", "...")
 
 # Codes a `W = 8` array can express -- the size of the caller's code tally, not
-# a claim that any code up to 255 occurs (the corpus tops out at 8).
+# a claim that any code up to 255 occurs (the corpus tops out at 9).
 IVT_STATUS_NCODE <- 256L
+
+# The header slot addressing the status legend's 8-byte entry array. Slot 712
+# (`ivt_f2_dqf_legend()`) is a DIFFERENT legend -- the per-cell data-quality
+# flags A-E / R / P -- laid out the same way.
+IVT_HDR_STATUS_LEGEND <- 698L
+
+# The file's OWN statement of what its `0xa` reason codes mean.
+#
+# Header slot `@698` points at an 8-byte entry array `[u32 off][u16 len][u16
+# len]`, exactly like a block directory. Entry 0 is the code INDEX array,
+# `[04 02][u16 n_codes][u16 per_code]` followed by `n_codes * per_code` u32
+# entry indices: `per_code` records per code, English first, French (where
+# stored) second. Code `k` is therefore whatever record index
+# `(k - 1) * per_code + 1` names -- the numbering is the file's, not a constant,
+# which is why the same symbol sits at code 2 in one lineage and code 3 in the
+# next.
+#
+# Each record is `[82 01 | 02 01][u16][flag bytes][u8 sym_len incl NUL][symbol]
+# [00][u16 text_len][text]`, latin-1. The flag run is 1, 5 or 7 bytes long
+# depending on the vintage, so the symbol is found structurally rather than at a
+# fixed offset: the first position that carries a plausible length byte, closes
+# its symbol with the NUL the length promises, holds printable bytes either
+# side, and declares a text that FITS the record. A record may carry a second
+# string after the first (the survey lineage appends its default-missing-value
+# wording), so the text is bounded by the record, not required to fill it.
+#
+# Returns a tibble with `code` / `symbol` / `text_en` / `text_fr`, or NULL where
+# the slot addresses no index array (the pre-legend generations write 0 there).
+ivt_f2_status_legend <- function(raw) {
+  n <- length(raw)
+  base <- rd_u32(raw, IVT_HDR_STATUS_LEGEND)
+  if (is.na(base) || base < 1024 || base + 8 > n) return(NULL)
+  ent <- function(k) {
+    if (k < 0 || base + k * 8 + 6 > n) return(NULL)
+    o <- rd_u32(raw, base + k * 8L); l <- rd_u16(raw, base + k * 8L + 4L)
+    if (is.na(o) || is.na(l) || l < 6L || o < 0 || o + l > n) return(NULL)
+    list(off = o, len = l, v = as.integer(raw[(o + 1L):(o + l)]))
+  }
+  ix <- ent(0L)
+  if (is.null(ix) || ix$v[1] != 0x04L || ix$v[2] != 0x02L) return(NULL)
+  nc <- ix$v[3] + 256L * ix$v[4]
+  per <- ix$v[5] + 256L * ix$v[6]
+  if (nc < 1L || nc > 64L || per < 1L || per > 4L) return(NULL)
+  u <- ix$v[-(1:6)]
+  if (length(u) != 4L * per * nc) return(NULL)      # length gate: the whole array
+  idx <- vapply(seq_len(per * nc), function(i)
+    sum(u[(4L * i - 3L):(4L * i)] * c(1, 256, 65536, 16777216)), 0)
+
+  # One legend record -> symbol + text, or NULL.
+  rec <- function(k) {
+    e <- ent(k)
+    if (is.null(e)) return(NULL)
+    w <- e$v; ll <- e$len
+    if (!(w[1] == 0x82L || w[1] == 0x02L) || w[2] != 0x01L) return(NULL)
+    for (i in 5:min(32L, ll - 3L)) {
+      sl <- w[i]
+      if (is.na(sl) || sl < 1L || sl > 16L || i + sl + 3L > ll) next
+      if (w[i + sl] != 0x00L) next                   # the promised terminator
+      if (sl > 1L && any(w[(i + 1L):(i + sl - 1L)] < 0x20L)) next   # printable
+      tl <- w[i + sl + 1L] + 256L * w[i + sl + 2L]
+      if (is.na(tl) || tl < 1L) next
+      # the text must FIT the record (a dropped trailing NUL leaves it one short,
+      # and a second appended string leaves room to spare)
+      if (i + sl + 2L + tl > ll + 1L) next
+      if (w[i + sl + 3L] < 0x20L) next               # text starts printable
+      sym <- if (sl > 1L) raw[(e$off + i + 1L):(e$off + i + sl - 1L)] else raw(0)
+      txt <- raw[(e$off + i + sl + 3L):(e$off + min(i + sl + 2L + tl, ll))]
+      txt <- txt[txt != as.raw(0L)]
+      return(list(sym = raw_to_latin1(sym), txt = raw_to_latin1(txt)))
+    }
+    NULL
+  }
+  recs <- lapply(idx, rec)
+  pick <- function(k, j) {
+    if (j > per) return(NA_character_)
+    r <- recs[[per * (k - 1L) + j]]
+    if (is.null(r)) NA_character_ else r$txt
+  }
+  sym <- vapply(seq_len(nc), function(k) {
+    r <- recs[[per * (k - 1L) + 1L]]
+    if (is.null(r)) NA_character_ else r$sym
+  }, "")
+  out <- tibble::tibble(
+    code    = seq_len(nc),
+    symbol  = sym,
+    text_en = vapply(seq_len(nc), pick, "", 1L),
+    text_fr = vapply(seq_len(nc), pick, "", 2L))
+  if (all(is.na(out$text_en))) return(NULL)
+  out
+}
 
 # Read the status tail of one page. Returns a list with `kind`:
 #

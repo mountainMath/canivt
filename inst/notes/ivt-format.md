@@ -239,7 +239,8 @@ block's own start. Nothing about it appears in the file header.
 are stored the same way — a sparse array of value-width words addressed by an
 index bitmap occupying the whole pre-value region — and reading the `0xa` array
 without that rebuild is what made its addressing look lineage-specific for so
-long. What remains open is only the meaning of reason codes `≥ 4`.
+long. The reason codes are numbered **per file**, by a legend the file declares
+in its header (`@698`), which is what finally named the codes `≥ 4`.
 
 ### `b0` high nibble `0x8` — the bare absent mask (1 bit per cell)
 
@@ -305,7 +306,7 @@ income) against the Beyond 20/20 web viewer, on a table whose layout is
 
 Decoded incidence over the whole 170-table corpus (`fixtures/status-ledger.csv`,
 one row per table: 105 carry mask pages, 47 carry `0xa` status pages, 36 write
-no tail at all). **45 tables report missing cells, 622,393,786 in all**; the
+no tail at all). **54 tables report missing cells, 624,500,113 in all**; the
 *beyond* column — cells the page's word index has no bit for, the only real gap
 (below) — is **0 everywhere**. The ten largest:
 
@@ -449,22 +450,49 @@ convention, not the presence one), addressed at the **same padded
 presence-grid bit** as the presence record — `lay$grid$bit`.
 
 **`W` is a storage choice, not a dialect.** A page uses the narrowest declared
-width that holds its largest code, and the vocabulary is the same at all of
-them:
+width that holds its largest code; the width changes how many bits a code
+occupies, never what it means.
 
-| code | meaning | filler byte |
-|------|---------|-------------|
-| `0` | cell carries a value, or is a genuine zero | `0x00` |
-| `1` | *nothing here* — **filler** at a padded grid position, **`..` not available for a specific reference period** at a real cell | `0x55` (`W = 2`), `0x11` (`W = 4`) |
-| `2` | **`x` — suppressed for confidentiality** | |
-| `3` | **`...` — not applicable** | |
-| `≥ 4` | **not interpreted** (see below) | |
+**What a code MEANS is declared by the file, in its own legend at header slot
+`@698`** (`ivt_f2_status_legend()`, markers.md §H.1): symbol plus bilingual
+wording, one record per code, in code order. There is no universal vocabulary —
+the same symbol sits at different codes in different lineages:
 
-Code `1` is the subtle one: it says *there is no number here* and the **grid**
-says which nothing it is. At a padded position — one the layout says is not a
-cell at all — it is filler; at a real cell it is the published `..`. The decoder
-never has to choose, because `coords_of()` already drops padded positions on
-geometric grounds; what survives that filter is `..` by construction.
+| lineage | n | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|--:|---|---|---|---|---|---|---|---|---|
+| NDM census (`98100xxx`, `98-10-xxxx`) | 51 | `..` | `X` | `...` | `F` | `0 s` | | | | |
+| profiles 1981–2011, 2016 `98-400-X`, 2021 custom | 31 | `-` | `..` | `x` | `...` | `F` | | | | |
+| 2011 NHS (`98-312-X`, `99-012-X`) | 2 | `-` | `..` | `x` | `...` | | | | | |
+| Business Register / Business Patterns | 13 | `-` | | | | | | | | |
+| Borealis survey (UCR, `00040xxx`, `SP3_RHUXA9_*`) | 13 | `•` | `••` | `0 s` | `x` | `®` | `•••` | `  ` | `F` | `z` |
+| Borealis justice (`table_5_c` / `table_6_c`) | 3 | `-` | `#2` | `#3` | `#4` | `#5` | `#6` | `#7` | `#8` | |
+| Borealis `optab` | 2 | ` ` | `..` | `--` | `x` | `...` | `F` | `xx` | | |
+
+(115 of the 170 ledger tables declare a legend; `n` counts them. Two details
+the bytes insist on: the census lineage writes **uppercase `X`** where the
+published legend prints `x`, and the survey lineage's dot symbols are written
+either as ASCII periods (`2e`, `2e 2e`, `2e 2e 2e`) or as UTF-8 bullets
+(`e2 80 a2` …) depending on the deposit — same codes, same wording, different
+bytes. The justice tables name codes 2–8 `#2`…`#8`, all worded "Missing value":
+a file may decline to distinguish its own reasons, and that is still the file
+speaking rather than a parser guessing.)
+
+Two things are constant across every legend. Code `0` is a cell that carries a
+value, or a genuine zero (filler byte `0x00`). And code `1` is the file's own
+*nothing here* — `-` "default missing value", `..`, `•` "no data" — with the
+**grid** deciding which nothing: at a padded position, one the layout says is
+not a cell at all, it is filler (`0x55` at `W = 2`, `0x11` at `W = 4`); at a
+real cell it is that published symbol. The decoder never has to choose, because
+`coords_of()` already drops padded positions on geometric grounds; what survives
+that filter is the symbol by construction.
+
+This is why the codes `≥ 4` stayed open so long while looking like a
+ground-truth problem: they were never one. 98-400-X2016203's 1,275,435 code-4
+cells are `...` **not applicable** — its legend simply starts one symbol
+earlier than the census one — and the `SP*` survey deposits, which ship the
+`.ivt` alone with nothing published to check against, name all eight or nine of
+their codes themselves. All 47 corpus tables that write a `0xa` array declare a
+legend, and `canivt_status_code_unknown` no longer fires anywhere in the corpus.
 
 ### Validation
 
@@ -548,29 +576,27 @@ zero-run length produced its own apparent packing. Rebuild the block and one
 rule covers the corpus. 92,790 of the corpus's `0xa` pages do drop an interior
 word.
 
-### What is still open (codes ≥ 4)
+### The codes ≥ 4, and how they closed
 
 Codes `4`, `5`, `7` and `8` occur on **2,106,327 absent cells over 13 of the 170
-ledger tables**. They address correctly — the pages carrying them satisfy every
-structural check above — but nothing published says what they *mean*, so they
-are counted and named, never translated
-(`canivt_status_code_unknown`; those cells contribute no row to `x$missing`):
+ledger tables**. They were open for exactly one day, recorded as blocked on
+ground truth — 98-400-X2016203's Beyond 20/20 viewer is **retired** (every
+`Rp-eng.cfm` / `CompDataDownload.cfm` request now 302s to `srvmsg404.html`) and
+the `SP*` tables are Borealis deposits that ship the `.ivt` alone. The
+`@698` legend closed them without any of it:
 
-| code | cells | tables |
-|---|---|---|
-| `4` | 1,282,224 | 98-400-X2016203 (1,275,435), `SP3_WLOGGX_00040207`, `ord-08035_ct1_2021`, `SP_U649IE_optab13` |
-| `5` | 25 | `SP_BXW0XU_optab12` |
-| `7` | 174,310 | `SP3_RHUXA9_404`/`_103`, `SP3_WLOGGX_00040200`/`_00040207`, `SP3_A2FD0W_02560006` |
-| `8` | 649,768 | the `SP3_RHUXA9_*` survey lineage |
+| code | cells | tables | what the files' own legends say |
+|---|---|---|---|
+| `4` | 1,282,224 | 98-400-X2016203 (1,275,435), `ord-08035_ct1_2021`, `SP3_WLOGGX_00040207`, `SP_U649IE_optab13` | `...` not applicable (census-crosstab/profile lineage); `x` suppressed (survey, `optab`) |
+| `5` | 25 | `SP_BXW0XU_optab12` | `...` not appropriate or not applicable |
+| `7` | 174,310 | `SP3_RHUXA9_404`/`_103`, `SP3_WLOGGX_00040200`/`_00040207`, `SP3_A2FD0W_02560006` | data not available for this reference period |
+| `8` | 649,768 | the `SP3_RHUXA9_*` survey lineage | `F` too unreliable to be published |
 
-The obstacle is ground truth, not addressing: 98-400-X2016203's Beyond 20/20
-viewer is **retired** (every `Rp-eng.cfm` / `CompDataDownload.cfm` request now
-302s to `srvmsg404.html`) and the `SP*` tables are Borealis deposits that ship
-the `.ivt` alone. The remaining legend symbols that suppress a value are `F`
-(too unreliable to be published), `<LOD`, `0s`, `p` and `t` — 98-400-X2016203's
-code 4 lands on *Average age* / *Median age* × the age group *0 to 14 years* at
-Canada/Total/Total, i.e. a cross-classification conflict, which fits `F` or a
-"not computed" symbol but is not proof.
+The guess recorded here before the legend was found — that 98-400-X2016203's
+code 4 might be `F`, because it lands on *Average age* / *Median age* × the age
+group *0 to 14 years* at Canada/Total/Total, a cross-classification conflict —
+was wrong in the symbol and right in the reading: the file calls it `...` **not
+applicable**, which is exactly what a cross-classification conflict is.
 
 One residual structural oddity: on every `W = 1/2/4` page the width is the
 narrowest that holds the page's largest code, but `W = 8` pages top out at code

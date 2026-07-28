@@ -26,17 +26,20 @@ that carries a value).
 
 Last full sweep — 170 tables, 2026-07-27: 0 cell mismatches, 0 errors;
 `mask 1,810,626 · none 604,337 · status 1,273,173 · status_unread 0 ·
-status_unknown 2,106,327 · unreadable 0 · extra 23,885 · nan_words 435,947 ·
-contradictory 0 · beyond 0 · miss 622,393,786` over 45 tables.
+status_unknown 0 · unreadable 0 · extra 23,885 · nan_words 435,947 ·
+contradictory 0 · beyond 0 · miss 624,500,113` over 54 tables.
 
 `status_unread` counts `0xa` arrays whose header this reader does not recognise
-(0 corpus-wide). `status_unknown` counts absent CELLS carrying a reason code
-past the validated vocabulary — codes 4/5/7/8 over 13 tables; they are named in
-the warning and contribute no missing cell. `miss` grew from 3,674,333 when the
-`0xa` array was decoded — the sparse-block rebuild made its addressing general,
-and the sparse NDM crosstabs it covers are mostly `...` not applicable — and
-then by a further 103,503 when the vocabulary was found to be width-independent
-(the `W = 1/4/8` pages, plus the code-1 cells that are `..` rather than filler).
+(0 corpus-wide). `status_unknown` counts absent CELLS carrying a reason code the
+file's OWN legend does not name — also 0 corpus-wide since the legend at header
+slot `@698` was decoded. `legend` is how many codes that legend declares (115 of
+the 170 tables declare one; `status > 0` must always come with `legend > 0`, and
+the sweep prints any table that violates it). `miss` grew from 3,674,333 when
+the `0xa` array was decoded — the sparse-block rebuild made its addressing
+general, and the sparse NDM crosstabs it covers are mostly `...` not
+applicable — then by 103,503 when the vocabulary was found to be
+width-independent, and finally by 2,106,327 when the per-file legend named the
+codes 4/5/7/8 that had been counted but not translated.
 
 `beyond` counts missing cells the page's word **index** has no bit for. It is now
 0 corpus-wide: on all 1,810,626 mask pages the index spans the whole grid, so an

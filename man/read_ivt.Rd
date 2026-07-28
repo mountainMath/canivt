@@ -21,15 +21,17 @@ family-1 tables.}
 \item{missing}{If \code{TRUE} (default \code{FALSE}) also decode each page's \strong{cell
 status tail} and return, in a \code{missing} tibble, the coordinates of the
 cells the file marks as \emph{not available} rather than zero (same member-id
-columns as \code{cells}, no \code{value}, plus a \code{status} column naming the reason
-where the file states one: \code{"suppressed"} (\code{x}), \code{"not applicable"}
-(\code{...}), \code{"not available"} (\code{..}), or \code{NA} where the page carries only the
-bare absent mask). Off by default because it costs a second presence read
-per page and its completeness is vintage-dependent: pages with no tail at
-all, pages whose tail the word index does not account for, and cells
-carrying a reason code past the validated vocabulary all contribute
-nothing -- each reported with a classed warning rather than assumed to hold
-no missings. See the "Missing values" section.}
+columns as \code{cells}, no \code{value}, plus \code{symbol} and \code{status} columns carrying
+the reason \strong{in the file's own words} -- the legend it declares in its
+header, e.g. \code{x} / "Suppressed to meet the confidentiality requirements of
+the Statistics Act" -- or \code{NA} where the page carries only the bare absent
+mask). The legend itself travels as \code{attr(x$missing, "legend")}. Off by
+default because it costs a second presence read per page and its
+completeness is vintage-dependent: pages with no tail at all, pages whose
+tail the word index does not account for, and cells carrying a reason code
+the file's legend does not name all contribute nothing -- each reported
+with a classed warning rather than assumed to hold no missings. See the
+"Missing values" section.}
 }
 \value{
 An object of class \code{ivt}: a list with \code{cells} (a tibble of one value
@@ -107,9 +109,18 @@ subset of the absent cells, where masked means a genuine zero and
 \emph{unmasked} means missing -- or a self-describing \strong{reason-code array}
 carrying the \code{..} / \code{x} / \code{...} distinction itself. \code{missing = TRUE}
 decodes both, at every code width; only the array states a reason, so
-mask-derived rows carry \code{status = NA}. A few tables use reason codes past
-that vocabulary; those cells are counted and reported, not guessed at
-(\code{canivt_status_code_unknown}).
+mask-derived rows carry \code{status = NA}.
+
+The reason codes are \strong{numbered by the file, not by the format}: each
+table declares its own legend -- symbol plus bilingual wording, in code
+order -- and the same symbol sits at different codes in different lineages
+(\code{x} is code 2 in the NDM census tables and code 3 in the 2016
+\code{98-400-X} crosstabs). \code{status} is read from that declaration, so it names
+whatever the file names, including symbols outside the census vocabulary
+(\code{F} too unreliable to be published, \verb{0 s} rounded to zero, \verb{®} not
+released yet, \code{z} frozen series). A code the legend does not name, or a
+table that declares no legend, is reported rather than guessed at
+(\code{canivt_status_code_unknown}, \code{canivt_status_legend}).
 
 Two limits are reported rather than hidden. On float64 pages a mask word of
 mostly-ones is NaN-shaped and the writer's x87 quieting overwrites one
