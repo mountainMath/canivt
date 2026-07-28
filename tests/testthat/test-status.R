@@ -23,8 +23,9 @@ test_that("the bundled table decodes its mask and reports no missing cells", {
   path <- system.file("extdata", "98100044.ivt", package = "canivt")
   x <- read_ivt(path, missing = TRUE)
   expect_s3_class(x$missing, "tbl_df")
-  # same coordinate columns as `cells`, minus the value
-  expect_identical(names(x$missing), setdiff(names(x$cells), "value"))
+  # same coordinate columns as `cells`, minus the value, plus the reason
+  expect_identical(names(x$missing),
+                   c(setdiff(names(x$cells), "value"), "status"))
   expect_identical(nrow(x$missing), 0L)
   tally <- attr(x$missing, "pages")
   expect_gt(tally[["mask"]], 0L)
@@ -71,6 +72,59 @@ test_that("covered_bits is the index's REACH, not the last word written", {
   expect_identical(st8$covered_bits, 256L)
 })
 
+test_that("the 0xa status array decodes at the validated W = 2", {
+  # Same sparse-word rebuild as the mask, then a self-describing header:
+  #   [form][02][W]  (+ [u16] when form 02)  [01][W]  <W-bit codes>
+  # with the code array starting at byte 5 (form 01) and addressed at the same
+  # padded presence-grid bit as the presence record.
+  lay <- list(rec_bytes = 4L, grid = list(bit = 0:7))
+  raw <- as.raw(c(
+    0xa2, 0x01, 0x10, 0x08,                        # 0xa marker, width 2, trailer 2
+    0x00, 0x80, 0x00, 0x00,                        # presence: cell 0 only
+    0x00, 0xf0,                                    # index: words 0-3 written
+    0x01, 0x00,                                    # the one stored value
+    0x01, 0x02, 0x02, 0x01, 0x02, 0x1b, 0x0b, 0x00 # the tail words
+  ))
+  st <- ivt_page_status(raw, 0L, lay, size = 20L)
+  expect_identical(st$kind, "status")
+  expect_identical(st$status_form, 1L)
+  expect_identical(st$status_width, 2L)
+  # 0 value/genuine zero, 1 filler, 2 = `x` suppressed, 3 = `...` not available
+  expect_identical(st$codes, c(0L, 1L, 2L, 3L, 0L, 0L, 2L, 3L))
+  # the one cell that carries a value is code 0, as the model requires
+  expect_identical(st$codes[[1L]], 0L)
+})
+
+test_that("a 0xa array at an unvalidated code width is counted, not guessed at", {
+  # Only W = 2's vocabulary is validated against published tables; W = 1/4/8
+  # demonstrably differ (their code 1 lands on real cells, and codes above 3
+  # occur), so those pages report themselves and decode no codes.
+  lay <- list(rec_bytes = 4L, grid = list(bit = 0:7))
+  raw <- as.raw(c(
+    0xa2, 0x01, 0x10, 0x08,
+    0x00, 0x00, 0x00, 0x00,                        # nothing present
+    0x00, 0xf0,
+    0x01, 0x02, 0x04, 0x01, 0x04, 0x1b, 0x0b, 0x00 # form 01, W = 4
+  ))
+  st <- ivt_page_status(raw, 0L, lay, size = 18L)
+  expect_identical(st$kind, "status")
+  expect_identical(st$status_width, 4L)
+  expect_null(st$codes)
+})
+
+test_that("a 0xa page whose header is not the known form decodes nothing", {
+  lay <- list(rec_bytes = 4L, grid = list(bit = 0:7))
+  raw <- as.raw(c(
+    0xa2, 0x01, 0x10, 0x08,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0xf0,
+    0x01, 0x02, 0x02, 0x01, 0x03, 0x1b, 0x0b, 0x00 # intro says W = 3, header W = 2
+  ))
+  st <- ivt_page_status(raw, 0L, lay, size = 18L)
+  expect_identical(st$kind, "status")
+  expect_null(st$codes)
+})
+
 test_that("a page with no readable tail contributes nothing, loudly", {
   # A no-tail page must NOT read as "every absent cell is missing": the
   # lineages that write no tail at all (Business Patterns, the type-00 sub-A
@@ -91,9 +145,14 @@ test_that("a page with no readable tail contributes nothing, loudly", {
 # two structural columns are the ones that must never move:
 #
 #   * `unreadable` == 0 everywhere -- the index accounts for the tail byte-exactly
-#     on all 1,810,626 mask pages of the corpus;
+#     on all 1,810,626 mask and 1,273,173 status-array pages of the corpus;
 #   * `contradictory` == 0 everywhere -- outside the NaN-shaped words no mask bit
-#     ever lands on a cell that carries a value.
+#     ever lands on a cell that carries a value, and no present cell ever carries
+#     a non-zero reason code.
+#
+# `status_open_pages` counts `0xa` arrays written at a code width whose
+# vocabulary is not validated (anything but W = 2); those pages are reported and
+# contribute nothing.
 #
 # `n_beyond` counts missing cells past the reach of their page's word INDEX --
 # cells the file has no bit with which to classify. It is 0 for every corpus
@@ -135,6 +194,8 @@ test_that("the corpus cell-status tallies match the ledger", {
     expect_identical(t[["mask"]], as.integer(row$mask_pages), info = r$key)
     expect_identical(t[["none"]], as.integer(row$no_tail_pages), info = r$key)
     expect_identical(t[["status"]], as.integer(row$status_pages), info = r$key)
+    expect_identical(t[["status_open"]], as.integer(row$status_open_pages),
+                     info = r$key)
     expect_identical(t[["extra"]], as.integer(row$extra_words), info = r$key)
     expect_identical(t[["nan_words"]], as.integer(row$nan_words), info = r$key)
     expect_identical(t[["beyond"]], as.integer(row$n_beyond), info = r$key)

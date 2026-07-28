@@ -84,14 +84,14 @@ if ("err" %in% names(df)) {
 }
 
 cat("\n-- totals --\n")
-for (c_ in c("mask", "none", "status", "unreadable", "extra", "nan_words",
-             "contradictory", "beyond", "miss"))
+for (c_ in c("mask", "none", "status", "status_open", "unreadable", "extra",
+             "nan_words", "contradictory", "beyond", "miss"))
   if (c_ %in% names(df)) cat(sprintf("%-14s %d\n", c_, sum(df[[c_]], na.rm = TRUE)))
 
 cat("\n-- tables with missing cells --\n")
 print(df[!is.na(df$miss) & df$miss > 0,
-         c("key", "cells", "miss", "beyond", "mask", "none", "status", "extra",
-           "nan_words")])
+         c("key", "cells", "miss", "beyond", "mask", "none", "status",
+           "status_open", "extra", "nan_words")])
 
 cat("\n-- tables with unreadable/contradictory pages (must be empty) --\n")
 print(df[!is.na(df$unreadable) & (df$unreadable > 0 | df$contradictory > 0),

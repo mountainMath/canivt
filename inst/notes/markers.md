@@ -90,18 +90,29 @@ Literal container markers observed as the recurring page/sub-record heads:
 ### C.1 Cell-status block descriptor (page tail) — `[form] 02 [W] …`
 
 Opens the trailing block that follows the value run on `b0` high-nibble `0xa`
-pages. **Not yet decoded by the parser** — counted as `status` pages by
-`ivt_page_status()` and read no further; see `ivt-format.md`, "The cell-status
-block". `W` = **bits per cell code** ∈ `{01, 02, 04, 08}`.
+pages. **Read off the REBUILT block** (§C.2), never off the raw tail bytes.
+`W` = **bits per cell code** ∈ `{01, 02, 04, 08}`. Header is 3 bytes, followed
+by a 2-byte **`[01][W]` array intro** — the intro repeats the width, which is
+what makes it a gate; reading it as a literal `01 02` rejects every `W ≠ 2`
+page.
 
-- **`01 02 W 01 W`** — plain array form. Observed: `01 02 02 01 02` (33 tables),
-  `01 02 04 01 04` (6 tables), `01 02 08 01 08` (1 page).
-- **`02 02 W <u16 count>`** — count-prefixed form. `98100002`, `98100013`,
-  `98100010` (`W = 1, 2`); `SP3_A2FD0W_02560006`, `SP3_RHUXA9_*` (`W = 1, 4, 8`).
+- **`01 02 W` `01 W`** — plain form; code array at block byte **5**.
+  Observed `01 02 02 01 02` (31 tables all-`W=2`), `01 02 04 01 04`,
+  `01 02 08 01 08`.
+- **`02 02 W <u16 count>` `01 W`** — count-prefixed form; code array at block
+  byte **7**. `98100002`, `98100013`, `98100010` (`W = 1, 2`);
+  `SP3_A2FD0W_02560006`, `SP3_RHUXA9_*` (`W = 1, 4, 8`).
 
-`W = 2` code vocabulary (validated cell-exact against StatCan's published
-tables): `0` value/genuine zero, `1` filler (byte `0x55`), `2` = `x` suppressed,
-`3` = `...` not available. Filler byte for `W = 4` is `0x11`.
+Codes are `W` bits, MSB-first and **not** pair-swapped (the mask convention),
+addressed at the same padded presence-grid bit as the presence record.
+
+`W = 2` code vocabulary — **decoded** (`ivt_status_array()`), validated
+cell-exact against StatCan's published tables on 7 of them: `0` value/genuine
+zero, `1` filler (byte `0x55`), `2` = `x` suppressed, `3` = `...` not available.
+`W = 1/4/8` address correctly but their vocabularies are **not** validated
+(codes above 3 occur; code 1 lands on real cells), so `ivt_page_status()`
+reports those pages and reads no codes from them. Filler byte for `W = 4` is
+`0x11`.
 
 The block's start is **implied**, never stored: `value_run_start + popcount·width`.
 Its end is the directory entry's u16 size.
@@ -365,9 +376,16 @@ layout.
   The rebuilt block's first `rec_bytes` are the 1-bit absent mask: masked absent ⇒
   genuine zero, **unmasked absent ⇒ missing**. Reached only via
   `read_ivt(missing = TRUE)`; recognizer `ivt_page_status()`, reader
-  `ivt_mask_bits()` (MSB-first, **not** pair-swapped). Still open and counted
-  rather than guessed: the `0xa` status array's addressing (§C.1) and the second
-  tail block that index bits past the mask address.
+  `ivt_mask_bits()` (MSB-first, **not** pair-swapped).
+
+- **2026-07-27** — **The `0xa` status array is decoded too** (§C.1), by the same
+  rebuild: its "lineage-specific addressing" was the block read without it, the
+  dropped all-zero words shifting everything after them. The array intro is
+  `[01][W]`, not a literal `01 02` — that misreading is what hid every `W ≠ 2`
+  page. Gate passes on 1,273,173 / 1,273,173 corpus `0xa` pages; present ⇒ code
+  0 everywhere, code 1 ⇒ padding on 166,965,381 cells. Shipped at `W = 2` only.
+  Still open and counted rather than guessed: the `W = 1/4/8` code vocabularies
+  and the second tail block that index bits past the mask address.
 
 - **2026-07-26** — **A page whose presence record is all zero is an ABSENCE.** Not
   a new marker: the page is a perfectly ordinary `[b0][01][00][08]` page with a

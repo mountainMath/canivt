@@ -27,30 +27,40 @@ cross-checked against family-1 (98-10-0241) and the legacy 1991 table (1003011).
 No unexplained "mystery blocks": 100 % of the file is accounted for by region.
 Within the value pages, **96.7 %** is marker + presence + values (all decoded
 exactly) and **3.3 %** is the pre-value region + page tail. That 3.3 % is **not**
-information-free, as this table's own numbers long suggested: on `0x8` pages the
-pre-value region is the tail's index bitmap and the tail is the absent mask
-(both decoded, see below); on `0xa` pages the tail is the reason-code array
-(still open).
+information-free, as this table's own numbers long suggested: the pre-value
+region is the tail's index bitmap and the tail is the cell-status block — the
+absent mask on `0x8` pages, the reason-code array on `0xa` ones. Both are now
+decoded (see below).
 
 ## [x] Fully decoded and exposed
 
 - [x] **All cell values.** Validated cell-for-cell vs the StatCan CSV / B20/20
   viewer (family 1: 7,489,464 cells; family 2: 14.5 M; 1991: every scraped
   ground-truth geography). One decoder for every family (`decode.R`).
-- [x] **The `0x8` page absent mask — which absent cells are ZEROS and which are
-  MISSING** (gap opened *and closed* 2026-07-27; `status.R`, opt-in via
+- [x] **The page cell-status tail — which absent cells are ZEROS and which are
+  MISSING, and why** (gap opened *and closed* 2026-07-27; `status.R`, opt-in via
   `read_ivt(missing = TRUE)` → `x$missing`). The bytes between the presence record
   and the value run are an **index bitmap** over the trailing block's
   `width`-byte words, gated on `popcount(index) · width == tail length` —
-  **1,810,626 / 1,810,626 mask pages of the corpus, 0 unreadable, 0
-  contradictory**. The rebuilt block's first `rec_bytes` are the mask (MSB-first,
-  *not* pair-swapped, addressed at `lay$grid$bit`): masked absent ⇒ genuine zero,
-  UNMASKED absent ⇒ missing. Reproduces the viewer-validated
-  `97F0020XCB2001070` measurement exactly (344 missings over the 86 tail-bearing
-  pages of geographies 1–13; **0** for Nunavut). Eight corpus tables report
-  missing cells; the remainder report none, which is the confirming half — those
-  tables publish no missings. Off by default: the ledger asserts exact cell
-  counts and warning sets, and completeness is vintage-dependent (below).
+  **1,810,626 / 1,810,626 mask pages and 1,273,173 / 1,273,173 status-array pages
+  of the corpus, 0 unreadable, 0 contradictory**. Both forms rebuild from that
+  one rule:
+  - `0x8` → the rebuilt block's first `rec_bytes` are a **1-bit absent mask**
+    (MSB-first, *not* pair-swapped, addressed at `lay$grid$bit`): masked absent ⇒
+    genuine zero, UNMASKED absent ⇒ missing. Reproduces the viewer-validated
+    `97F0020XCB2001070` measurement exactly (344 missings over the 86
+    tail-bearing pages of geographies 1–13; **0** for Nunavut).
+  - `0xa` → a **self-describing reason-code array**, `[form][02][W]` (+ `[u16]`
+    when form 02) then a `[01][W]` intro, codes `W` bits wide at the *same*
+    `lay$grid$bit`. Decoded at the validated `W = 2` (`0` value/genuine zero,
+    `1` filler, `2` = `x` suppressed, `3` = `...` not available), which is
+    1,099,887 of the corpus's 1,273,173 `0xa` pages. Its addressing was
+    "lineage-specific" only because it was read without the sparse rebuild.
+  43 corpus tables report missing cells, **622,290,283** in all; the remaining
+  127 report none, which is the confirming half — those tables publish no
+  missings. `x$missing` carries a `status` column naming the reason where the
+  file states one. Off by default: the ledger asserts exact cell counts and
+  warning sets, and completeness is vintage-dependent (below).
 - [x] **Geography — all 11 attributes**: name, DGUID/GEOUID, level, type +
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate (StatCan geo attribute keys 3,4,5,9,10,12–17), **on the
@@ -117,32 +127,30 @@ pre-value region is the tail's index bitmap and the tail is the absent mask
 
 ## [ ] Open gaps
 
-- [ ] **The `0xa` cell-status ARRAY is not decoded** (gap OPENED 2026-07-27;
-  narrowed 2026-07-27 — the `0x8` mask half is now closed, see below). Pages with
-  `b0` high nibble `0xa` carry, after the value run, a self-describing
-  `[form][02][W]` array holding **per-cell missing-data reason codes** — `W = 2`
-  vocabulary `0` value/genuine zero, `1` filler, `2` = `x` suppressed,
-  `3` = `...` not available. canivt reads exactly `popcount` values and discards
-  the block, so these codes are lost and the documented "an absent cell
-  is a zero" rule is **wrong for these tables**: absence is the union of genuine
-  zeros and true missings. `read_ivt(missing = TRUE)` counts these pages
-  (1,273,173 over 47 of the 170 ledger tables) and warns
-  `canivt_status_block_undecoded`
-  rather than guessing at them.
-  - Vocabulary validated cell-exact against StatCan's published tables
+- [ ] **The `0xa` status array's vocabulary at `W = 1`, `4` and `8`** (gap
+  narrowed 2026-07-27: the *addressing* is now general and `W = 2` is decoded,
+  see above). 173,286 pages over 16 of the 170 ledger tables are written at a
+  code width whose meaning is not validated, so their reason codes are counted
+  and reported (`canivt_status_block_undecoded`) rather than interpreted, and
+  those pages contribute no missing cells.
+  - `W = 2` vocabulary validated cell-exact against StatCan's published tables
     (`getFullTableDownloadCSV`): 98-10-0040 `10 x / 49 ...`, 98-10-0655
-    `0 / 2,600`, 98-10-0658 `0 / 1,348`, 98-10-0128 `389,888 / 1,466,488` — all
-    exact on both codes. 98-10-0655 also position-exact over all 11,154 cells;
-    98-10-0040 joins 59/59.
-  - Blocked on a general **addressing** rule: 98-10-0655/0658 index at the padded
-    presence-grid cell index, 98-10-0040 packs tighter (24-byte geography stride
-    vs a padded 128 codes), 98-10-0128 uses per-member sub-blocks
-    `[8][48 filler][variable data][48 filler]` with page-varying data length.
-    `W = 4` (6 tables), `W = 8` / `W = 1` (survey lineage) are unvalidated.
-  - Incidence: 47 of the 170 ledger tables carry `0xa` pages — 2021 NDM
-    `9810xxxx`, 2016 `98-400-X`, two 2021 custom extracts (an earlier 171-**file**
-    marker scan put 33 of them in the `W = 2` form). **No pre-2016 vintage has
-    one.**
+    `0 / 2,600`, 98-10-0658 `0 / 1,348`, 98-10-0128 `389,888 / 1,466,488`,
+    98-10-0023 `913,992 / 0`, 98-10-0129 `1,485,120 / 0`, 98-10-0478
+    `6,853 / 0` — all exact on both codes. 98-10-0655 also position-exact over
+    all 11,154 cells; 98-10-0040 joins 59/59.
+  - The addressing holds at every width — present ⇒ code 0 on all 1,273,173
+    pages, and code 1 ⇒ padding on 166,965,381 cells with zero off-diagonal —
+    so what is missing is only the *meaning* of the wider codes. Two facts say
+    they differ rather than merely widen: codes **above 3** occur (2,106,327
+    absent cells), and code 1 lands on **real** cells (68,850) at `W = 1` and on
+    two `W = 4` tables.
+  - Incidence: `W = 4` in 98-400-X2016203 (171,499 pages), the
+    `SP3_WLOGGX_000402xx` pair, `SP_BXW0XU_optab12`, `SP3_A2FD0W_02560006` and
+    parts of `ord-08035_ct1_2021` / `SP_U649IE_optab13`; `W = 8` / `W = 1` in the
+    `SP3_RHUXA9_*` survey lineage and parts of 98-10-0013 / 0002 / 0010.
+  - Cracking them needs published ground truth for one of those tables; the
+    structural tests are exhausted.
 - [ ] **The SECOND tail block is not decoded** (gap OPENED 2026-07-27). On 8 corpus
   tables some pages' index bits address words **past** the mask's `rec_bytes`, so
   the same index also addresses a further array: `SP3_1H8SBB_97-555` (11,463

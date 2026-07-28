@@ -24,8 +24,15 @@ page's tail byte-exactly) and `contradictory == 0` (no mask bit lands on a cell
 that carries a value).
 
 Last full sweep — 170 tables, 2026-07-27: 0 cell mismatches, 0 errors;
-`mask 1,810,626 · none 604,337 · status 1,273,173 · unreadable 0 · extra 23,885 ·
-nan_words 435,947 · contradictory 0 · beyond 0 · miss 3,674,333`.
+`mask 1,810,626 · none 604,337 · status 1,273,173 · status_open 173,286 ·
+unreadable 0 · extra 23,885 · nan_words 435,947 · contradictory 0 · beyond 0 ·
+miss 622,290,283`.
+
+`status_open` counts `0xa` reason-code arrays written at a code width whose
+vocabulary is not validated (anything but `W = 2`); those pages are reported and
+contribute nothing. `miss` grew from 3,674,333 when the `0xa` array was decoded —
+the sparse-block rebuild made its addressing general, and the sparse NDM
+crosstabs it covers are mostly `...` not available.
 
 `beyond` counts missing cells the page's word **index** has no bit for. It is now
 0 corpus-wide: on all 1,810,626 mask pages the index spans the whole grid, so an

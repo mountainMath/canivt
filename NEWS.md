@@ -18,10 +18,24 @@
   pages of the development corpus with no unreadable and no contradictory page.
   Value decoding is unchanged and stays presence-authoritative: the tail is read
   separately, only under `missing = TRUE`, and can never move a value.
+* **The `0xa` reason-code array is decoded too**, by the same rule. Its
+  addressing looked lineage-specific for years; it was the block being read
+  without the sparse rebuild, each table's dropped all-zero words shifting its
+  codes by a different amount. Rebuild first and one rule covers the corpus: the
+  gate passes on all 1,273,173 status-array pages, a cell that carries a value
+  has code 0 on every one of them, and code 1 falls exactly on the 166,965,381
+  grid positions the decoder independently computes as padding. Shipped at the
+  validated `W = 2` vocabulary, whose code counts equal StatCan's published
+  `x` / `...` counts exactly on seven tables (98-10-0040, 0655, 0658, 0128,
+  0023, 0129, 0478). `x$missing` gains a `status` column naming the reason where
+  the file states one. 43 corpus tables now report missing cells, 622,290,283 in
+  all — these are sparse NDM crosstabs whose grid is mostly `...`, and every one
+  of those cells used to read as a published zero.
 * The feature is off by default because completeness is vintage-dependent, and
   every gap raises its own classed warning rather than being folded silently
-  into the count: `canivt_status_block_undecoded` (the `0xa` reason-code array,
-  whose addressing is not yet general), `canivt_status_extra_block` (a second,
+  into the count: `canivt_status_block_undecoded` (a status array written at a
+  code width whose vocabulary is not validated — `W = 1/4/8`, 173,286 pages over
+  16 corpus tables), `canivt_status_extra_block` (a second,
   undecoded tail array on eight corpus tables), `canivt_status_beyond_mask`
   (cells past the last mask word a page writes — unmasked for want of a word
   rather than by the file's statement), `canivt_status_unreadable`, and

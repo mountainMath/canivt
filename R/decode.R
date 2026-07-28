@@ -660,9 +660,10 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
   skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
   extra_vals <- 0L; extra_nz <- 0L
-  miss_acc <- list(); mi <- 0L
+  miss_acc <- list(); miss_st <- list(); mi <- 0L
   st_tally <- c(mask = 0L, none = 0L, status = 0L, unreadable = 0L,
-                extra = 0L, nan_words = 0L, contradictory = 0L, beyond = 0L)
+                extra = 0L, nan_words = 0L, contradictory = 0L, beyond = 0L,
+                status_open = 0L)
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
@@ -707,11 +708,34 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
             if (any(cc$keep)) {
               mi <- mi + 1L
               miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
+              # The mask says a cell is missing, never WHY.
+              miss_st[[mi]] <- rep(NA_character_, sum(cc$keep))
               st_tally[["beyond"]] <- st_tally[["beyond"]] +
                 sum(lay$grid$bit[rows][cc$keep] >= st$covered_bits)
             }
           }
         }
+      } else if (st$kind == "status" && !is.null(st$codes)) {
+        pr <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        # A cell that CARRIES a value must be code 0: it is neither a filler nor
+        # missing. Anywhere else the array is not what we think it is, so the
+        # page contributes nothing (0 pages corpus-wide).
+        if (any(st$codes[pr] != 0L)) {
+          st_tally[["contradictory"]] <- st_tally[["contradictory"]] + 1L
+        } else {
+          rows <- which(!pr & st$codes > IVT_STATUS_FILLER)
+          if (length(rows)) {
+            cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
+            if (any(cc$keep)) {
+              mi <- mi + 1L
+              miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
+              miss_st[[mi]] <- IVT_STATUS_VOCAB[st$codes[rows][cc$keep] -
+                                                  IVT_STATUS_FILLER]
+            }
+          }
+        }
+      } else if (st$kind == "status") {
+        st_tally[["status_open"]] <- st_tally[["status_open"]] + 1L
       }
     }
     pg <- ivt_decode_page(raw, off, lay, size = s1)
@@ -760,7 +784,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
     out$value <- unlist(v_acc[seq_len(ci)], use.names = FALSE)
   }
-  if (missing) attr(out, "missing") <- ivt_missing_cells(miss_acc, mi, lay, st_tally)
+  if (missing)
+    attr(out, "missing") <- ivt_missing_cells(miss_acc, miss_st, mi, lay, st_tally)
   out
 }
 
@@ -769,32 +794,38 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
 # absent cells are zeros, so a page that does not yield one leaves its absent
 # cells UNCLASSIFIED -- silently returning "no missings there" would be exactly
 # the false "absent implies zero" model this decode exists to correct.
-ivt_missing_cells <- function(miss_acc, mi, lay, tally) {
+ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally) {
   m <- lay$n_dim
   if (mi == 0L) {
     out <- tibble::tibble(.rows = 0L)
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
+    out$status <- character(0)
   } else {
     cols <- do.call(rbind, miss_acc[seq_len(mi)])
     out <- tibble::tibble(.rows = nrow(cols))
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
+    # The REASON, where the file states one: only the `0xa` status array carries
+    # reason codes, so a mask-derived missing is NA -- missing, cause unstated.
+    out$status <- unlist(miss_st[seq_len(mi)], use.names = FALSE)
   }
   n_un <- tally[["none"]] + tally[["unreadable"]] + tally[["contradictory"]]
   if (n_un > 0L) {
     ivt_fallback(paste(
       "{n_un} page{?s} carr{?ies/y} no readable cell-status tail",
       "({tally[['none']]} with no tail, {tally[['unreadable']]} whose index does",
-      "not account for the tail, {tally[['contradictory']]} contradicting the mask",
-      "model); their absent cells are NOT classified, so the missing-cell list is",
+      "not account for the tail, {tally[['contradictory']]} whose status bits",
+      "contradict the values); their absent cells are NOT classified, so the",
+      "missing-cell list is",
       "incomplete for {?that page/those pages}."),
       class = "canivt_status_unreadable")
   }
-  if (tally[["status"]] > 0L) {
+  if (tally[["status_open"]] > 0L) {
     ivt_fallback(paste(
-      "{tally[['status']]} page{?s} carr{?ies/y} the self-describing (0xa)",
-      "cell-status array, whose per-cell ADDRESSING is not yet general; its reason",
-      "codes ({.val x}, {.val ...}) are NOT decoded and those pages contribute no",
-      "missing cells."), class = "canivt_status_block_undecoded")
+      "{tally[['status_open']]} of {tally[['status']]} self-describing (0xa)",
+      "cell-status array{?s} {?is/are} written at a code width whose VOCABULARY is",
+      "not validated (only {.val W = 2} is); {?its/their} reason codes are NOT",
+      "interpreted and {?that page contributes/those pages contribute} no missing",
+      "cells."), class = "canivt_status_block_undecoded")
   }
   if (tally[["extra"]] > 0L) {
     ivt_fallback(paste(

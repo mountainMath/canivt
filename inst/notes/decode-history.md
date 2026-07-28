@@ -1234,6 +1234,68 @@ all-zero words. www12 was unreachable while this was written, so the viewer was
 not re-scraped — the evidence here is internal, and stronger for it, being
 3M coordinates rather than 12 sampled geographies.
 
+### The `0xa` reason-code array: one addressing rule after all (2026-07-27, same day)
+
+The mask half shipped with a live gap beside it: 1,273,173 pages over 47 corpus
+tables carry the *other* status form, a self-describing array of per-cell reason
+codes, and its addressing was on record as lineage-specific. Three packings had
+been measured and none generalised — 98-10-0655/0658 indexing at the padded
+presence-grid cell, 98-10-0040 "packing tighter" (a 24-byte geography stride =
+96 codes against a padded 128), 98-10-0128 in per-member sub-blocks shaped
+`[8 codes][48 filler][variable data][48 filler]` with a page-varying data
+length. Counts came out exact on every one; only the positions were wrong.
+
+**They were the same rule, read without the sparse rebuild.** The array is
+stored exactly like the mask — value-width words selected by the index bitmap in
+the pre-value region, all-zero words simply not written — and the earlier probes
+read the codes straight off the raw tail bytes. Every dropped word shifts
+everything after it, and each table's typical zero-run length produced its own
+apparent packing. 92,790 of the corpus's `0xa` pages drop an interior word.
+Rebuild first, and the code array sits at a fixed offset addressed at the same
+`lay$grid$bit` as the presence record, MSB-first and not pair-swapped, exactly
+like the mask.
+
+**The intro is `[01][W]`, not a literal `01 02`.** With the rebuild in place the
+first corpus sweep still decoded only 1,099,887 of the 1,273,173 pages, and the
+undecoded remainder was *entirely* the `W = 4`, `W = 8` and `W = 1` tables. The
+gate had been written against `01 02` — the intro of a `W = 2` page — where the
+byte is the width repeated: a `W = 4` page opens `01 02 04 01 04`. Fixing that
+took the decode to **1,273,173 / 1,273,173**, and the repeated width is a
+genuinely useful gate: a page whose intro disagrees with its header is not a
+status array.
+
+Four checks, three of them needing no external ground truth:
+
+| check | result |
+|---|---|
+| length gate `popcount(index)·width == tail length` | 1,273,173 / 1,273,173 pages, 0 short |
+| a cell that carries a value has code 0 | every page, every `W` |
+| code 1 ⇔ the decoder's padding set | 166,965,381 cells, **zero** off-diagonal |
+| code 2 / 3 counts vs StatCan's published `x` / `...` | exact on 7 tables |
+
+The padding check is the strong one: the padding set comes from descriptor and
+slot geometry alone and the codes come from tail bytes alone, so two wholly
+independent derivations agree cell-for-cell over 167 M positions. The published
+counts add 98-10-0023 (913,992 `x`), 98-10-0129 (1,485,120) and 98-10-0478
+(6,853) to the four validated earlier.
+
+**Shipped at `W = 2` only.** The addressing generalises to every width but the
+vocabulary does not, and the sweep says so in two ways: codes **above 3** occur
+(2,106,327 absent cells at `W = 4/8`), and code 1 lands on **real** cells
+(68,850) at `W = 1` and on two `W = 4` tables — so `1` is not "filler" there.
+173,286 pages over 16 tables are therefore counted and reported
+(`canivt_status_block_undecoded`, re-aimed from "the array is undecoded" to
+"this width's vocabulary is unvalidated") and contribute nothing. Cracking them
+needs published ground truth for one of those tables.
+
+**What it changes.** `x$missing` gains a `status` column — `"suppressed"`,
+`"unavailable"`, or `NA` where only the bare mask spoke. Corpus missings go
+3,674,333 → **622,290,283** over 43 tables, dominated by sparse NDM crosstabs
+whose grid is mostly `...` (98-10-0393 alone: 231,789,142 against 27,508,287
+stored cells). Nothing else moved: `dev/msweep.R` reports 0 cell-count
+mismatches, 0 errors, and `unreadable` / `contradictory` still 0 corpus-wide —
+the latter now also enforcing present ⇒ code 0 across 1.1 M status pages.
+
 ### Unified cell decode & metadata
 
 One `ivt_layout()` + `ivt_decode()` (`decode.R`) decodes every table, reproducing the
@@ -1443,8 +1505,12 @@ original bugs behind each rule.
   between the two name copies, so two count-anchored fallbacks in
   `ivt_f2_descriptor_name()` recover them (data-dim names end in `(count)`; the geography
   name is the longest prefix that reoccurs later in the run).
-- **The `0xa` high nibble is not a suppression flag** — `0xa*` pages carry real inline
-  data; the high nibble only changes the pad/`0xFF` trailer length.
+- **The `0xa` high nibble is not a suppression flag *for the value decode*** —
+  `0xa*` pages carry real inline data and the high nibble only changes the
+  pad/`0xFF` trailer length. Superseded on the other side (2026-07-27): it
+  **also** selects which cell-status block the page appends (`0x8` → the 1-bit
+  absent mask, `0xa` → the reason-code array), so it does carry suppression
+  information — just not any that moves a value.
 - **A reference-period / facet dimension (`0x0e`) is not geography-folded:** in 98-10-0077
   *Year* is the innermost in-page dimension (the value run carries 2020 then 2015
   consecutively). The legacy `ivt_geography_count()` (0x1000 stride, since removed)

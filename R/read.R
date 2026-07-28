@@ -64,22 +64,26 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' @param missing If `TRUE` (default `FALSE`) also decode each page's **cell
 #'   status tail** and return, in a `missing` tibble, the coordinates of the
 #'   cells the file marks as *not available* rather than zero (same member-id
-#'   columns as `cells`, no `value`). Off by default because it costs a second
-#'   presence read per page and its completeness is vintage-dependent: pages
-#'   carrying the self-describing (`0xa`) reason-code array, pages with no tail
-#'   at all, and pages whose tail the word index does not account for all
-#'   contribute nothing -- each reported with a classed warning rather than
-#'   assumed to hold no missings. See the "Missing values" section.
+#'   columns as `cells`, no `value`, plus a `status` column naming the reason
+#'   where the file states one: `"suppressed"` (`x`), `"unavailable"` (`...`),
+#'   or `NA` where the page carries only the bare absent mask). Off by default
+#'   because it costs a second presence read per page and its completeness is
+#'   vintage-dependent: pages with no tail at all, pages whose tail the word
+#'   index does not account for, and reason-code arrays written at an
+#'   unvalidated code width all contribute nothing -- each reported with a
+#'   classed warning rather than assumed to hold no missings. See the "Missing
+#'   values" section.
 #' @section Missing values:
 #'   Only non-zero cells are stored, so absence covers **both** genuine zeros
 #'   and true missings (`x` suppressed, `...`/`N` not available). The two are
 #'   separated by a block each page appends after its dense value run, in one of
 #'   two forms selected by the page marker: a 1-bit **absent mask** -- a strict
 #'   subset of the absent cells, where masked means a genuine zero and
-#'   *unmasked* means missing -- which `missing = TRUE` decodes, or a
-#'   self-describing reason-code array carrying the `x` / `...` distinction
-#'   itself, whose per-cell addressing is not yet general and which is therefore
-#'   reported but not decoded.
+#'   *unmasked* means missing -- or a self-describing **reason-code array**
+#'   carrying the `x` / `...` distinction itself. `missing = TRUE` decodes both;
+#'   only the array states a reason, so mask-derived rows carry `status = NA`.
+#'   Code widths other than the validated 2-bit one are reported, not guessed at
+#'   (`canivt_status_block_undecoded`).
 #'
 #'   Two limits are reported rather than hidden. On float64 pages a mask word of
 #'   mostly-ones is NaN-shaped and the writer's x87 quieting overwrites one
