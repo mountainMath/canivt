@@ -56,18 +56,33 @@ ivt_f2_cell_grid <- function(counts, stride, pos = NULL) {
     bits[, i] <- p[idx + 1L]
     rin <- rin * counts[i]
   }
-  list(tuples = tuples + 1L, bit = as.integer(bits %*% stride))
+  bit <- as.integer(bits %*% stride)
+  c(list(tuples = tuples + 1L, bit = bit), ivt_bit_addr(bit))
 }
 
-# Read bit positions `bit` (0-based) from a byte-pair-swapped, MSB-first
-# bitstream (`bytes` as an integer vector of even length). THE bitmap
+# Where a bit position reads from: its byte (1-based, plain and pair-swapped)
+# and its MSB-first shift. A function of the bit vector ALONE, so the cell grid
+# carries it precomputed and the page loop -- which reads the same grid on every
+# page, through several readers -- does this arithmetic once for the whole
+# decode. Passing the grid itself to any of those readers reuses it; passing a
+# bare bit vector computes it, which is what every non-page caller does.
+ivt_bit_addr <- function(bit) {
+  if (is.list(bit)) return(bit[c("bidx", "bsw", "bsh")])
+  idx <- bit %/% 8L + 1L
+  list(bidx = idx, bsw = bitwXor(idx - 1L, 1L) + 1L, bsh = 7L - bit %% 8L)
+}
+
+# Read bit positions `bit` (0-based, or a cell grid) from a byte-pair-swapped,
+# MSB-first bitstream (`bytes` as an integer vector of even length). THE bitmap
 # convention of the container -- shared by the page presence records and the
 # codebook member bitmaps (`ivt_f2_footnote_bitmap()`). Returns a logical
 # vector aligned with `bit` (TRUE = bit set).
+#
+# The pair-swap is a permutation of the byte INDICES, so it is applied to the
+# address rather than by building a swapped copy of the record.
 ivt_bits_pairswap_msb <- function(bytes, bit) {
-  ev <- seq.int(1L, length(bytes), 2L); od <- ev + 1L
-  sw <- bytes; sw[ev] <- bytes[od]; sw[od] <- bytes[ev]
-  bitwAnd(bitwShiftR(sw[bit %/% 8L + 1L], 7L - (bit %% 8L)), 1L) == 1L
+  a <- ivt_bit_addr(bit)
+  bitwAnd(bitwShiftR(bytes[a$bsw], a$bsh), 1L) == 1L
 }
 
 # Decode the presence of a single `rec_bytes`-byte record at 0-based offset `ps`:

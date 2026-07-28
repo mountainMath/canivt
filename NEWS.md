@@ -23,6 +23,20 @@
   more on a sparse crosstab), it is refused above
   `getOption("canivt.max_cells", 1e8)` grid cells with a message naming the size
   and both ways forward.
+* **The page loop was cut down to what it must do**, since completing the grid
+  is now the default and the fold is where a large table spends its time. The
+  presence record is read and counted once per page rather than once per reader;
+  the bit addressing every page reads through — byte index and shift, for the
+  presence record, the absent mask and the status array at each of its four code
+  widths — is a property of the cell grid, so it is computed once for the whole
+  table instead of once per page; a `W`-bit status code is lifted out with one
+  shift and one mask rather than `W` separate bit reads; the status index is
+  unpacked by table lookup; and `ivt_complete_cells()` no longer builds a
+  character vector as long as the grid to recover a code → label mapping the
+  file's own legend already states. Completing 98-10-0241 — 7,489,464 stored
+  cells folded out to 39,154,752 published rows — takes about 6.5 s, and the
+  store-only decode of the same table about 3 s. Every corpus ledger number is
+  unchanged, which is what makes these safe to have done.
 * **`ivt_write_parquet()` and `ivt_write_csv()` convert a chunk at a time.**
   Hand either of them the *path* of an `.ivt` instead of an `ivt` object and the
   table is decoded, written and dropped one slice at a time, so the completed

@@ -260,6 +260,10 @@ ivt_layout_impl <- function(raw, d = NULL) {
     if (!is.null(p)) pos1[[t]] <- p - 1L
   }
   grid <- ivt_f2_cell_grid(ipc, lay$stride, pos = pos1)
+  # The status tail addresses the same grid at whichever width the page declares
+  # (`missing = TRUE` only), so the addressing for all four is precomputed here
+  # rather than on each of the table's pages.
+  grid$code <- ivt_status_code_addr(grid$bit)
 
   # Paged dimensions, innermost-first: the straddle window, then every dimension
   # outside the straddle toward geography. When geography straddles, this is just
@@ -352,7 +356,7 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_, pres = NULL,
   # presence record; taking it from the caller saves a second pass over the
   # bitmap on every page of every completed table.
   if (is.null(pres))
-    pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+    pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid)
   nv <- sum(pres)
   vend <- vstart + nvf * width
   if ((!is.na(size) && vend > size) || off + vend > length(raw)) {
@@ -476,7 +480,7 @@ ivt_page_preflight <- function(raw, lay = NULL, max_pages = 8L) {
     # (the Business-Register PRSIC2june2001).
     nvf <- ivt_f2_record_popcount(raw, off + 4L, lay$rec_bytes)
     if (nvf == 0L) next
-    nv <- sum(ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit))
+    nv <- sum(ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid))
     end <- 4L + lay$rec_bytes + tr + nvf * w
     if (end > s1 || off + end > n || nv > cap) return(FALSE)
     # Exact fit is the norm for pages that carry no auxiliary head and no
@@ -584,7 +588,7 @@ ivt_skip_is_lost_page <- function(raw, off, size, lay, n = length(raw)) {
   if (!(w %in% IVT_MARKER_WIDTHS) || !(hi %in% c(0x80L, 0xa0L))) return(FALSE)
   rb <- lay$rec_bytes
   if (off + 4L + rb > n || 4L + rb > size) return(FALSE)      # presence record must fit
-  nv <- sum(ivt_f2_record_present(raw, off + 4L, rb, lay$grid$bit))
+  nv <- sum(ivt_f2_record_present(raw, off + 4L, rb, lay$grid))
   nv > 0L && 4L + rb + nv * w <= size                         # tightest value run fits
 }
 
@@ -846,8 +850,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE,
       st_tally[["extra"]] <- st_tally[["extra"]] + st$extra_words
       st_tally[["nan_words"]] <- st_tally[["nan_words"]] + st$nan_words
       if (st$kind == "mask") {
-        mb <- ivt_mask_bits(st$mask_bytes, lay$grid$bit)
-        pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        mb <- ivt_mask_bits(st$mask_bytes, lay$grid)
+        pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid)
         pr <- pres
         # A masked cell that CARRIES a value contradicts the model (masked means
         # "absent and a genuine zero"). On float64 pages it is the x87 quieting
@@ -886,7 +890,7 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE,
           }
         }
       } else if (st$kind == "status" && !is.null(st$codes)) {
-        pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid)
         pr <- pres
         # A cell that CARRIES a value must be code 0: it is neither a filler nor
         # missing. Anywhere else the array is not what we think it is, so the

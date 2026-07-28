@@ -19,6 +19,56 @@ test_that("ivt_mask_bits reads MSB-first and does NOT pair-swap", {
                          ivt_bits_pairswap_msb(b, 0:15)))
 })
 
+test_that("the grid's precomputed bit addressing reads what the arithmetic does", {
+  # Every page of a table reads the same grid bits, so the addressing rides on
+  # the grid rather than being recomputed per page. Both forms must agree, or
+  # the speed-up would be a silent decode change.
+  set.seed(11)
+  bytes <- sample(0:255, 64, replace = TRUE)
+  bit <- sample(0:511)
+  grid <- c(list(bit = bit), ivt_bit_addr(bit))   # what ivt_f2_cell_grid() builds
+  expect_identical(ivt_bits_pairswap_msb(bytes, grid),
+                   ivt_bits_pairswap_msb(bytes, bit))
+  expect_identical(ivt_mask_bits(bytes, grid), ivt_mask_bits(bytes, bit))
+  # ... and the pair-swap really is an address permutation, not a copy
+  sw <- bytes; ev <- seq.int(1L, 64L, 2L)
+  sw[ev] <- bytes[ev + 1L]; sw[ev + 1L] <- bytes[ev]
+  expect_identical(ivt_bits_pairswap_msb(bytes, bit), ivt_mask_bits(sw, bit))
+})
+
+test_that("a W-bit status code reads the same in one mask as in W bit reads", {
+  set.seed(12)
+  blk <- sample(0:255, 512, replace = TRUE)
+  bit <- sample(0:255)
+  addr <- ivt_status_code_addr(bit)
+  for (w in IVT_STATUS_WIDTHS) {
+    a0 <- 5L                                     # the form-01 array start
+    # the bit-at-a-time reading this replaced: `w` bits, MSB-first
+    want <- integer(length(bit))
+    for (b in seq_len(w))
+      want <- want * 2L + as.integer(ivt_mask_bits(blk, a0 * 8L + bit * w + b - 1L))
+    ca <- addr[[as.character(w)]]
+    expect_identical(bitwAnd(bitwShiftR(blk[a0 + ca$byte + 1L], ca$sh), ca$mask),
+                     want, info = paste("width", w))
+  }
+})
+
+test_that("the sparse rebuild scatters words to the positions the index names", {
+  # words 0 and 3 written, of a 4-word buffer: word 1 and 2 stay zero, which is
+  # the file's own statement about them
+  tail <- c(11L, 12L, 33L, 34L)
+  expect_identical(ivt_status_scatter(c(0L, 3L), tail, 2L, 8L),
+                   c(11L, 12L, 0L, 0L, 0L, 0L, 33L, 34L))
+  # a word addressed past the end is dropped, not wrapped
+  expect_identical(ivt_status_scatter(c(0L, 9L), tail, 2L, 8L),
+                   c(11L, 12L, 0L, 0L, 0L, 0L, 0L, 0L))
+  # a buffer that is not a whole number of words still comes back its own length
+  expect_identical(ivt_status_scatter(0L, c(7L, 8L), 2L, 5L),
+                   c(7L, 8L, 0L, 0L, 0L))
+  expect_identical(ivt_status_scatter(integer(0), integer(0), 4L, 8L),
+                   integer(8))
+})
+
 test_that("the bundled table decodes its mask and reports no missing cells", {
   path <- system.file("extdata", "98100044.ivt", package = "canivt")
   x <- read_ivt(path, missing = TRUE, complete = FALSE)

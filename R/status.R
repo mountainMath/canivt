@@ -323,15 +323,17 @@ ivt_page_status <- function(raw, off, lay, size = NA_integer_, nvf = NULL) {
 # the caller counts them (the mask's second block) or sizes the buffer to hold
 # them (the status array). An unwritten word stays zero, which is the file's own
 # statement about it, not a gap.
+#
+# A word is `w` bytes and the destinations are word-aligned, so the scatter is a
+# column assignment on a `w`-row matrix rather than two index vectors as long as
+# the written region.
 ivt_status_scatter <- function(wi, tail, w, nbytes) {
-  buf <- integer(nbytes)
-  keep <- wi < nbytes %/% w
-  if (any(keep)) {
-    dst <- rep(wi[keep] * w, each = w) + seq_len(w)
-    src <- rep((which(keep) - 1L) * w, each = w) + seq_len(w)
-    buf[dst] <- tail[src]
-  }
-  buf
+  nw <- nbytes %/% w
+  keep <- wi < nw
+  buf <- matrix(0L, w, nw)
+  if (any(keep))
+    buf[, wi[keep] + 1L] <- matrix(tail, nrow = w)[, keep, drop = FALSE]
+  c(as.vector(buf), integer(nbytes - nw * w))
 }
 
 # Decode a `0xa` self-describing status array. `codes` comes back with one code
@@ -358,11 +360,10 @@ ivt_status_array <- function(wi, tail, w, tr, lay) {
   # index always reaches the whole array.
   if (need > tr * 8L * w) return(out)
   if (need > length(blk)) blk <- c(blk, integer(need - length(blk)))
-  base <- a0 * 8L + gb * wid
-  codes <- integer(length(gb))
-  for (b in seq_len(wid))                         # `wid` bits, MSB-first
-    codes <- codes * 2L + as.integer(ivt_mask_bits(blk, base + b - 1L))
-  out$codes <- codes
+  ca <- lay$grid$code                             # precomputed for the whole table
+  if (is.null(ca)) ca <- ivt_status_code_addr(gb)
+  ca <- ca[[as.character(wid)]]
+  out$codes <- bitwAnd(bitwShiftR(blk[a0 + ca$byte + 1L], ca$sh), ca$mask)
   out
 }
 
@@ -371,7 +372,25 @@ ivt_status_array <- function(wi, tail, w, tr, lay) {
 # own -- one file mixes several.
 IVT_STATUS_WIDTHS <- c(1L, 2L, 4L, 8L)
 
-# Read bit positions `bit` (0-based) of a reconstructed mask: MSB-first, and --
-# unlike the presence record and every codebook bitmap -- NOT byte-pair-swapped.
-ivt_mask_bits <- function(bytes, bit)
-  bitwAnd(bitwShiftR(bytes[bit %/% 8L + 1L], 7L - (bit %% 8L)), 1L) == 1L
+# Read bit positions `bit` (0-based, or a cell grid) of a reconstructed mask:
+# MSB-first, and -- unlike the presence record and every codebook bitmap -- NOT
+# byte-pair-swapped.
+ivt_mask_bits <- function(bytes, bit) {
+  a <- ivt_bit_addr(bit)
+  bitwAnd(bitwShiftR(bytes[a$bidx], a$bsh), 1L) == 1L
+}
+
+# Where each grid cell's status code sits, at each declared width: the byte it
+# starts in (0-based, from the array's own start) and the shift and mask that
+# lift it out. Every width divides 8 and the array starts byte-aligned, so a
+# code never straddles a byte -- one shift and one mask reads it, instead of one
+# bit read per bit of the width. A function of the grid bits alone, so the
+# layout carries the whole table (`ivt_layout()`) and no page recomputes it.
+ivt_status_code_addr <- function(bit) {
+  out <- lapply(IVT_STATUS_WIDTHS, function(w) {
+    b <- bit * w
+    list(byte = b %/% 8L, sh = 8L - w - b %% 8L, mask = bitwShiftL(1L, w) - 1L)
+  })
+  names(out) <- as.character(IVT_STATUS_WIDTHS)
+  out
+}
