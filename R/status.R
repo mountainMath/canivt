@@ -256,7 +256,7 @@ ivt_f2_status_legend <- function(raw) {
 # plus `nan_words` (mask words whose bytes are NaN-shaped, so one status bit may
 # have been destroyed by the writer) and `extra_words` (index bits addressing
 # words past the mask -- the undecoded second block).
-ivt_page_status <- function(raw, off, lay, size = NA_integer_) {
+ivt_page_status <- function(raw, off, lay, size = NA_integer_, nvf = NULL) {
   none <- list(kind = "none", nan_words = 0L, extra_words = 0L)
   n <- length(raw)
   b0 <- as.integer(raw[off + 1L])
@@ -267,7 +267,9 @@ ivt_page_status <- function(raw, off, lay, size = NA_integer_) {
   tr <- tryCatch(ivt_value_trailer(b0, b2, b3), error = function(e) NA_integer_)
   if (is.na(tr)) return(none)
   rb <- lay$rec_bytes
-  nvf <- ivt_f2_record_popcount(raw, off + 4L, rb)
+  # The value decode needs the same popcount; the caller passes it in so the
+  # record is counted once per page rather than once per reader.
+  if (is.null(nvf)) nvf <- ivt_f2_record_popcount(raw, off + 4L, rb)
   ts <- 4L + rb + tr + nvf * w                    # first byte past the value run
   if (is.na(size)) return(none)
   tl <- size - ts
@@ -283,7 +285,7 @@ ivt_page_status <- function(raw, off, lay, size = NA_integer_) {
   # that also carries the second block, and the length invariant then failed on
   # 6 of the 106 tables of the ledger it was first measured on.)
   reg <- as.integer(raw[off + 4L + rb + seq_len(tr)])
-  sel <- ivt_bits_pairswap_msb(reg, seq.int(0L, tr * 8L - 1L))
+  sel <- ivt_bits_pairswap_all(reg)
   if (sum(sel) * w != tl) return(bad)
   wi <- which(sel) - 1L                           # 0-based word indices, ascending
   tail <- as.integer(raw[off + ts + seq_len(tl)])

@@ -89,6 +89,17 @@ decoded (see below).
   `complete = FALSE` returns the store; the corpus grid totals 4,297,528,389
   rows against 365,994,134 stored cells (~11.7×), hence the
   `getOption("canivt.max_cells", 1e8)` guard.
+
+  The fold has its own corpus ledger (2026-07-28,
+  `fixtures/complete-ledger.csv`, measured by `dev/csweep.R`) — the corpus and
+  status ledgers are both contracts about the *store*, so nothing watched it
+  before. It pins `prod(lay$counts)` for all 170 tables and, for the 126 whose
+  grid fits the 5M-cell sweep budget, the identity
+  `stored + zeros + flagged == rows == grid` plus the value sum: 0 grid
+  mismatches, 0 store mismatches against the corpus ledger, over 57,004,403
+  completed rows (25,924,121 stored · 29,476,599 zeros · 1,603,683 flagged, of
+  which 1,597,318 carry a symbol the file's own legend names). It is what an
+  optimisation that quietly mislays a page's zeros has to get past.
 - [x] **Geography — all 11 attributes**: name, DGUID/GEOUID, level, type +
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate (StatCan geo attribute keys 3,4,5,9,10,12–17), **on the

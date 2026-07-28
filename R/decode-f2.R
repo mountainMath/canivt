@@ -79,6 +79,21 @@ ivt_f2_record_present <- function(raw, ps, rec_bytes, bit)
 IVT_POPCOUNT <- vapply(0:255, function(b) sum(bitwAnd(bitwShiftR(b, 0:7), 1L)),
                        integer(1))
 
+# Column `b + 1` holds byte value `b`'s eight bits, MSB-first.
+IVT_BITMAT <- vapply(0:255, function(b) bitwAnd(bitwShiftR(b, 7:0), 1L) == 1L,
+                     logical(8))
+
+# Unpack an ENTIRE byte region to its bits -- the same reading as
+# `ivt_bits_pairswap_msb(bytes, 0:(8n - 1))`, by table lookup instead of
+# per-bit arithmetic. The cell-status index is read this way on every page of
+# every table opened with `missing = TRUE`, so the whole-region form is worth
+# having separately.
+ivt_bits_pairswap_all <- function(bytes) {
+  ev <- seq.int(1L, length(bytes), 2L); od <- ev + 1L
+  sw <- bytes; sw[ev] <- bytes[od]; sw[od] <- bytes[ev]
+  as.vector(IVT_BITMAT[, sw + 1L])
+}
+
 # How many values the page carries, straight from its presence record: the
 # popcount of the WHOLE record, not of the bits the layout models. The
 # byte-pair-swap only permutes bytes, so it does not affect a popcount and is

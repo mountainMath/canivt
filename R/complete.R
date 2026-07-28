@@ -40,40 +40,38 @@ ivt_complete_budget <- function(lay, max_cells = getOption("canivt.max_cells",
   invisible(ncell)
 }
 
-# Assemble the completed grid. `full_md`/`full_v`/`full_cd` hold, per directory
-# coordinate, the kept grid coordinates, their values (0 where absent and
-# unremarked, NA where flagged) and their reason codes (0 none, -1 "missing,
-# reason unstated" from a 1-bit mask, >0 a code from the file's own legend).
-ivt_complete_cells <- function(full_md, full_v, full_cd, fi, lay, tally,
+# Assemble the completed grid. `cols` is one member-id vector per dimension (in
+# `lay$slugs` order), `v` the values (0 where absent and unremarked, NA where
+# flagged) and `cd` the reason codes (0 none, -1 "missing, reason unstated" from
+# a 1-bit mask, >0 a code from the file's own legend) -- all three already
+# allocated to the full grid length and filled in place by `ivt_decode()`.
+ivt_complete_cells <- function(cols, v, cd, lay, tally,
                                unk_tal = integer(IVT_STATUS_NCODE),
                                leg_declared = TRUE, legend = NULL) {
   m <- lay$n_dim
-  if (fi == 0L) {
-    out <- tibble::tibble(.rows = 0L)
-    for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
-    out$value <- numeric(0)
-    cdv <- integer(0)
-  } else {
-    cols <- do.call(rbind, full_md[seq_len(fi)])
-    out <- tibble::tibble(.rows = nrow(cols))
-    for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[, j]
-    out$value <- unlist(full_v[seq_len(fi)], use.names = FALSE)
-    cdv <- unlist(full_cd[seq_len(fi)], use.names = FALSE)
-  }
+  out <- tibble::tibble(.rows = length(v))
+  for (j in seq_len(m)) out[[lay$slugs[j]]] <- cols[[j]]
+  out$value <- v
+  cdv <- cd
   leg <- legend
   if (is.null(leg)) leg <- list(text_en = IVT_STATUS_VOCAB,
                                 symbol = IVT_STATUS_SYMBOLS)
   # Only a positive code names a reason: 0 is "nothing to say" and -1 is a mask
   # bit, which says a cell is missing but never why.
   idx <- cdv; idx[idx <= 0L] <- NA_integer_
-  sym <- leg$symbol[idx]; sta <- leg$text_en[idx]
   # A code the legend does not name is NOT guessed at (it is counted and
   # reported by `ivt_status_report()`); the cell keeps its NA value and stays
   # unlabelled.
   lvl_s <- unique(leg$symbol[!is.na(leg$symbol)])
   lvl_t <- unique(leg$text_en[!is.na(leg$text_en)])
-  out$symbol <- factor(sym, levels = lvl_s)
-  out$status <- factor(sta, levels = lvl_t)
+  # Straight to level indices. Going through the labels first (`factor(
+  # leg$symbol[idx], ...)`) materialises a character vector as long as the whole
+  # grid and hashes it, to recover a mapping that is already known from the
+  # legend -- which on a completed table is tens of millions of strings to
+  # relabel the few thousand cells that carry a code at all.
+  smap <- match(leg$symbol, lvl_s); tmap <- match(leg$text_en, lvl_t)
+  out$symbol <- structure(smap[idx], levels = lvl_s, class = "factor")
+  out$status <- structure(tmap[idx], levels = lvl_t, class = "factor")
   ivt_status_report(tally, unk_tal, leg_declared, sum(is.na(out$value)),
                     unclassified = FALSE)
   attr(out, "pages") <- tally

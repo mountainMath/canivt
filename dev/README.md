@@ -6,6 +6,7 @@
 |---|---|
 | `range-harvest.R` (+ `rh_inflate.py`) | catalogue-wide metadata inventory that fetches only the front metadata region of each remote `.ivt` instead of the whole file |
 | `msweep.R` | corpus-wide cell-status (missing-data) sweep — the measurement behind the figures in `coverage.md` / `decode-history.md`, and the source of `tests/testthat/fixtures/status-ledger.csv` |
+| `csweep.R` | corpus-wide sweep of the COMPLETED grid — the source of `tests/testthat/fixtures/complete-ledger.csv` |
 | `mvalidate.R` | semantic validation of the `0x8` absent mask from a table's **own arithmetic** — no external ground truth |
 | `wtruth.R` (+ `wprobe-core.R`, `wprobe.R`, `wcoord.R`) | whole-corpus census of `0xa` reason codes × cell class × code width — the measurement that made the code vocabulary width-independent |
 
@@ -46,6 +47,29 @@ codes 4/5/7/8 that had been counted but not translated.
 unwritten mask word is the file declaring that word all-zero, not a mask that
 stopped short (it read 2,290,657 before `covered_bits` was changed from the last
 word *written* to the index's *reach* — the missing-cell counts did not move).
+
+## csweep.R — the completed-grid sweep
+
+```sh
+Rscript dev/csweep.R out.csv [budget]   # same env as msweep.R
+```
+
+The corpus and status ledgers are both contracts about the **store** (both
+sweeps read `complete = FALSE`, because a decode regression is what moves the
+file's own stored-value count). This one watches the **fold** that turns the
+store into the published table, which nothing else did: per table it records the
+published grid `prod(lay$counts)` — from the layout alone, so every table is
+covered whatever its size — and, for the tables under `budget` (default
+5,000,000 cells), the completed `rows`, the `stored` / `zeros` / `flagged`
+partition of them, how many flagged cells the file's own legend `symbolled`, and
+the value sum. `stored + zeros + flagged == rows == grid` is the identity that
+fails the moment a page's absences land in the wrong bucket.
+
+Last full sweep — 170 tables, 2026-07-28: 0 errors, 0 grid mismatches, 0 store
+mismatches against the corpus ledger. Over the 126 completed tables:
+`grid = rows = 57,004,403 · stored 25,924,121 · zeros 29,476,599 ·
+flagged 1,603,683 · symbolled 1,597,318`. The whole corpus's grid is
+4,297,528,389 rows against 366M stored cells.
 
 ## mvalidate.R — does the mask mean what we say it means?
 

@@ -98,20 +98,101 @@ test_that("reason codes are named from the FILE's legend, and only where named",
   leg <- tibble::tibble(code = 1:3, symbol = c("-", "..", "x"),
                         text_en = c("nil", "not available", "suppressed"),
                         text_fr = c("nul", "indisponible", "confidentiel"))
-  md <- matrix(1:5, 5L, 1L)
   #                 value   nil   n/a   suppressed   a code the legend omits
   v  <- c(7, NA, NA, NA, NA)
   cd <- c(0L, 1L, 2L, 3L, 9L)
-  out <- ivt_complete_cells(list(md), list(v), list(cd), 1L, lay, tally,
-                            legend = leg)
+  out <- ivt_complete_cells(list(1:5), v, cd, lay, tally, legend = leg)
   expect_identical(as.character(out$symbol), c(NA, "-", "..", "x", NA))
   expect_identical(as.character(out$status),
                    c(NA, "nil", "not available", "suppressed", NA))
   # the unnamed code is not guessed at: NA value, no label
   expect_true(is.na(out$value[5L]))
   # -1 is the 1-bit mask's "missing, reason unstated" -- flagged, never labelled
-  out2 <- ivt_complete_cells(list(md[1:2, , drop = FALSE]), list(c(7, NA)),
-                             list(c(0L, -1L)), 1L, lay, tally, legend = leg)
+  out2 <- ivt_complete_cells(list(1:2), c(7, NA), c(0L, -1L), lay, tally,
+                             legend = leg)
   expect_identical(as.character(out2$symbol), c(NA_character_, NA_character_))
   expect_true(is.na(out2$value[2L]))
+})
+
+# --- corpus sweep (opt-in) -----------------------------------------------------
+#
+# The corpus and status ledgers are both contracts about the STORE -- both sweeps
+# read `complete = FALSE`, because a decode regression moves the file's own
+# stored-value count. Nothing there watches the FOLD that turns the store into
+# the published table, so an optimisation that quietly mislays a page's zeros
+# would pass the whole suite. fixtures/complete-ledger.csv is that net.
+#
+# `grid` -- the published grid, `prod(lay$counts)` -- is checked for every corpus
+# table from the layout alone. The rest is measured on the 126 tables whose grid
+# fits the sweep budget (5,000,000 cells); completing the corpus's 4.3 billion
+# rows would be the sweep's cost rather than its subject. What it pins:
+#
+#   * `rows == grid` -- one row per real coordinate, no more and no fewer;
+#   * `stored` == the corpus ledger's `n_cells` -- the fold neither invents nor
+#     drops a stored value;
+#   * `zeros` / `flagged` -- how the ABSENT cells were classified. This is the
+#     column that moves if the cell-status tail is mis-scattered: the two are a
+#     partition of `grid - stored`, so a bit lost in one lands in the other.
+#   * `symbolled` -- flagged cells the file's own legend names (the rest are the
+#     1-bit mask's "missing, reason unstated").
+#   * `vsum` -- the value sum, so a value scattered to the wrong coordinate
+#     shows up even when every count is right.
+#
+# Re-measure with dev/csweep.R.
+
+corpus_dir <- Sys.getenv("CANIVT_IVT_CACHE")
+corpus_on <- nzchar(Sys.getenv("CANIVT_CORPUS_TESTS")) &&
+  nzchar(corpus_dir) && dir.exists(corpus_dir)
+
+complete_ledger <- utils::read.csv(
+  testthat::test_path("fixtures", "complete-ledger.csv"), stringsAsFactors = FALSE)
+
+complete_probe <- function(row) {
+  hit <- list.files(file.path(corpus_dir, row$key), pattern = "\\.ivt$",
+                    ignore.case = TRUE, full.names = TRUE)
+  if (!length(hit)) return(list(key = row$key, absent = TRUE))
+  raw <- readBin(hit[[1L]], "raw", file.size(hit[[1L]]))
+  cap <- ivt_test_capture(ivt_quietly(ivt_layout(raw)))
+  rm(raw)
+  out <- list(key = row$key, absent = FALSE, error = cap$error)
+  if (!is.null(cap$value)) out$grid <- prod(as.numeric(cap$value$counts))
+  if (is.na(row$rows)) { gc(verbose = FALSE); return(out) }
+  cap <- ivt_test_capture(read_ivt(hit[[1L]]))
+  if (!is.null(cap$error)) { out$error <- cap$error; return(out) }
+  cl <- cap$value$cells
+  na <- is.na(cl$value)
+  out$rows <- nrow(cl)
+  out$flagged <- sum(na)
+  out$symbolled <- sum(!is.na(cl$symbol))
+  out$zeros <- sum(cl$value[!na] == 0)
+  out$stored <- out$rows - out$flagged - out$zeros
+  out$vsum <- sum(cl$value, na.rm = TRUE)
+  rm(cap, cl); gc(verbose = FALSE)
+  out
+}
+
+test_that("the corpus completes to the ledgered published grids", {
+  skip_if(!corpus_on, "corpus tests are opt-in: set CANIVT_CORPUS_TESTS=1 (and CANIVT_IVT_CACHE)")
+  got <- ivt_test_pmap(split(complete_ledger, seq_len(nrow(complete_ledger))),
+                       complete_probe)
+  store <- utils::read.csv(testthat::test_path("fixtures", "corpus-ledger.csv"),
+                           stringsAsFactors = FALSE)
+  for (r in got) {
+    row <- complete_ledger[complete_ledger$key == r$key, ]
+    if (isTRUE(r$absent)) { skip(paste("not in cache:", r$key)); next }
+    expect_null(r$error, info = r$key)
+    expect_equal(r$grid, row$grid, info = r$key)
+    if (is.na(row$rows)) next                       # over the sweep's budget
+    # the whole point: one row per coordinate, and the absences partitioned
+    expect_equal(r$rows, row$grid, info = r$key)
+    expect_equal(r$rows, row$rows, info = r$key)
+    expect_equal(r$stored, row$stored, info = r$key)
+    expect_equal(r$zeros, row$zeros, info = r$key)
+    expect_equal(r$flagged, row$flagged, info = r$key)
+    expect_equal(r$symbolled, row$symbolled, info = r$key)
+    expect_equal(r$vsum, row$vsum, info = r$key)
+    # ... and the store the fold started from is the one the corpus ledger pins
+    want <- store$n_cells[store$key == r$key]
+    if (length(want) == 1L) expect_equal(r$stored, want, info = r$key)
+  }
 })

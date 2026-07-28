@@ -326,7 +326,8 @@ ivt_layout_impl <- function(raw, d = NULL) {
 # the b3 >= 0x0a pages append suppression-mask records after the run), so an
 # overrun means the marker was misread (wrong width, trailer or head) and the
 # values would be garbage.
-ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
+ivt_decode_page <- function(raw, off, lay, size = NA_integer_, pres = NULL,
+                            nvf = NULL) {
   b0 <- as.integer(raw[off + 1L]); b2 <- as.integer(raw[off + 3L])
   b3 <- as.integer(raw[off + 4L])
   w <- bitwAnd(b0, 0x0FL)
@@ -345,9 +346,13 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   # against. The grid's own popcount only says how many of those values this
   # layout has a cell for; the two agree everywhere the members fill their
   # declared slot allocation, so the extra popcount is the only cost paid there.
-  nvf <- ivt_f2_record_popcount(raw, off + 4L, lay$rec_bytes)
+  if (is.null(nvf)) nvf <- ivt_f2_record_popcount(raw, off + 4L, lay$rec_bytes)
   if (nvf == 0L) return(NULL)
-  pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+  # The cell-status read (`missing = TRUE`) has already unpacked this page's
+  # presence record; taking it from the caller saves a second pass over the
+  # bitmap on every page of every completed table.
+  if (is.null(pres))
+    pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
   nv <- sum(pres)
   vend <- vstart + nvf * width
   if ((!is.na(size) && vend > size) || off + vend > length(raw)) {
@@ -667,15 +672,98 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
     list(md = md, keep = keep, bads = bads)
   }
 
+  # The `keep` half of `coords_of()` alone, for complete mode: the window block
+  # has already resolved which grid rows this entry keeps, and `ent_ok` the
+  # paged half, so no coordinate matrix has to be built to find out.
+  keep_of <- function(rows, r) {
+    if (!ent_ok[r]) return(logical(length(rows)))
+    win_blk[[win_col[r] + 1L]]$pos[rows] > 0L
+  }
+
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
-  # complete-grid accumulators: coordinates / values / reason codes, one entry
-  # per directory coordinate whether or not a page was ever written for it.
   ncoord <- nrow(coord)
-  full_md <- if (complete) vector("list", ncoord) else NULL
-  full_v  <- if (complete) vector("list", ncoord) else NULL
-  full_cd <- if (complete) vector("list", ncoord) else NULL
-  fi <- 0L; unclassified <- 0
+  unclassified <- 0
   gtup <- lay$grid$tuples; ngrid <- nrow(gtup)
+
+  # --- complete mode: the published grid is known before a page is read -------
+  # Every directory entry contributes the SAME block of grid rows, differing only
+  # by which straddle window it carries and by one scalar member id per paged
+  # dimension. So there are `window_count` distinct coordinate blocks, not one
+  # per entry, and the whole output can be sized and allocated up front -- the
+  # entry loop then only scatters values into it. (Recomputing the block per
+  # entry, which is what `coords_of()` does, was a quarter of the runtime and
+  # held two copies of the coordinate columns at once.)
+  win_blk <- NULL; pg_val <- NULL; ent_ok <- NULL; ent_base <- NULL
+  out_v <- NULL; out_cd <- NULL; n_pt <- 0L; blk_len <- 0L; ok_pt <- NULL
+  if (complete) {
+    win_blk <- lapply(seq_len(lay$ent_counts[1L]) - 1L, function(w) {
+      md <- matrix(0L, ngrid, m)
+      for (t in seq_along(inpage_dim)) {
+        di <- inpage_dim[t]
+        md[, di] <- if (di == straddle) w * ipc1 + gtup[, t] else gtup[, t]
+      }
+      # Same test `coords_of()` applies to the straddle: a declared slot map
+      # resolves bit positions to member ids, otherwise the window's padding tail
+      # past the member count falls away.
+      sp <- lay$slot_pos[[straddle]]
+      if (!is.null(sp)) {
+        mid <- match(md[, straddle], sp)
+        keep <- !is.na(mid)
+        md[, straddle] <- ifelse(keep, mid, 1L)
+      } else {
+        keep <- md[, straddle] <= lay$counts[straddle]
+      }
+      rows <- which(keep)
+      pos <- integer(ngrid); pos[rows] <- seq_along(rows)
+      # A window that keeps the whole grid -- every full window of an unpadded
+      # straddle, i.e. most pages of most tables -- needs no position lookup at
+      # all: a grid row IS its offset in the block.
+      list(n = length(rows), pos = pos, full = length(rows) == ngrid,
+           # A row the straddle's SLOT MAP drops sits at a deleted slot; one the
+           # member-count cap drops is window padding. Only the former is a hole,
+           # so only the former can lose a value worth reporting.
+           bad = if (!is.null(sp)) !keep else NULL,
+           cols = lapply(inpage_dim, function(di) md[rows, di]))
+    })
+    # The paged dimensions contribute one member id per entry, so their validity
+    # is an entry-level yes/no -- resolved for the whole cartesian at once.
+    ent_ok <- rep(TRUE, ncoord); ent_bad <- integer(ncoord)
+    if (length(paged_dim)) {
+      pg_val <- matrix(0L, ncoord, length(paged_dim))
+      for (t in seq_along(paged_dim)) {
+        v <- paged_member[, t] + 1L
+        sp <- lay$slot_pos[[paged_dim[t]]]
+        if (!is.null(sp)) {
+          mid <- match(v, sp)
+          ent_ok <- ent_ok & !is.na(mid)
+          ent_bad <- ent_bad + is.na(mid)         # holes counted per dimension
+          v <- ifelse(is.na(mid), 1L, mid)
+        }
+        pg_val[, t] <- v
+      }
+    }
+    # The entry cartesian runs the straddle window FASTEST, so the emitted rows
+    # are the same window run -- every window's block, in order -- repeated once
+    # per paged-member tuple. An entry's output offset is therefore arithmetic,
+    # and the coordinate columns are plain `rep()` patterns built once at the
+    # end: nothing about a coordinate has to be written per entry, per page or
+    # per cell. The loop only scatters the cells that are NOT the published zero.
+    nwin <- lay$ent_counts[1L]
+    nblk <- vapply(win_blk, `[[`, 0L, "n")
+    win_off <- c(0L, cumsum(nblk))[seq_len(nwin)]
+    blk_len <- sum(nblk)
+    # A paged tuple's validity does not depend on the window, so it is one bit
+    # per tuple; an invalid tuple emits nothing and the rest close up behind it.
+    ok_pt <- ent_ok[seq.int(1L, ncoord, by = nwin)]
+    n_pt <- sum(ok_pt)
+    nout <- as.numeric(blk_len) * n_pt
+    ent_base <- (cumsum(ok_pt) - 1L)[(seq_len(ncoord) - 1L) %/% nwin + 1L] *
+      as.numeric(blk_len) + win_off[win_col + 1L]
+    # Integer offsets where the grid fits one, so the scatter below indexes with
+    # an integer vector rather than paying a double-to-index conversion per cell.
+    if (nout <= .Machine$integer.max) ent_base <- as.integer(ent_base)
+    out_v <- numeric(nout); out_cd <- integer(nout)
+  }
   skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
   extra_vals <- 0L; extra_nz <- 0L
   miss_acc <- list(); miss_st <- list(); miss_sy <- list(); mi <- 0L
@@ -700,6 +788,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
     # `pg` (the values), `fr`/`fc` (the reason-coded rows), `unk` (a page whose
     # own statement we could not read, so its absences are not classified).
     pg <- NULL; fr <- integer(0); fc <- integer(0); undet <- FALSE
+    pres <- NULL                      # the status read's presence record, reused
+    nvf <- NULL                       # ... and its popcount
     repeat {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) break
@@ -724,13 +814,18 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
     # page carries no values at all (`ivt_decode_page()` returns NULL) yet its
     # mask still says which of its absent cells are missing rather than zero.
     if (missing) {
-      st <- ivt_page_status(raw, off, lay, s1)
+      # Counted once per page and handed to both readers: the status tail and
+      # the value run are both sized by the presence record's popcount.
+      if (as.integer(raw[off + 1L]) >= 0x80L)
+        nvf <- ivt_f2_record_popcount(raw, off + 4L, lay$rec_bytes)
+      st <- ivt_page_status(raw, off, lay, s1, nvf = nvf)
       st_tally[[st$kind]] <- st_tally[[st$kind]] + 1L
       st_tally[["extra"]] <- st_tally[["extra"]] + st$extra_words
       st_tally[["nan_words"]] <- st_tally[["nan_words"]] + st$nan_words
       if (st$kind == "mask") {
         mb <- ivt_mask_bits(st$mask_bytes, lay$grid$bit)
-        pr <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        pr <- pres
         # A masked cell that CARRIES a value contradicts the model (masked means
         # "absent and a genuine zero"). On float64 pages it is the x87 quieting
         # artefact -- the destroyed bit sits in a NaN-shaped word -- and the page
@@ -746,24 +841,30 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
           # collide with a stated reason.
           if (complete) { fr <- rows; fc <- rep(-1L, length(rows)) }
           if (length(rows)) {
-            cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
-            if (any(cc$keep)) {
-              # Complete mode carries the same cells in the grid itself, so it
-              # takes the tallies and skips the second copy.
+            # Complete mode carries the same cells in the grid itself, so it
+            # takes the tallies and skips the second copy -- and with them the
+            # coordinate build, since the window block already knows which grid
+            # rows this entry keeps.
+            kp <- if (complete) keep_of(rows, r) else NULL
+            cc <- if (complete) NULL
+                  else coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
+            if (is.null(kp)) kp <- cc$keep
+            if (any(kp)) {
               if (!complete) {
                 mi <- mi + 1L
-                miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
+                miss_acc[[mi]] <- cc$md[kp, , drop = FALSE]
                 # The mask says a cell is missing, never WHY.
-                miss_st[[mi]] <- rep(NA_character_, sum(cc$keep))
-                miss_sy[[mi]] <- rep(NA_character_, sum(cc$keep))
+                miss_st[[mi]] <- rep(NA_character_, sum(kp))
+                miss_sy[[mi]] <- rep(NA_character_, sum(kp))
               }
               st_tally[["beyond"]] <- st_tally[["beyond"]] +
-                sum(lay$grid$bit[rows][cc$keep] >= st$covered_bits)
+                sum(lay$grid$bit[rows][kp] >= st$covered_bits)
             }
           }
         }
       } else if (st$kind == "status" && !is.null(st$codes)) {
-        pr <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        pres <- ivt_f2_record_present(raw, off + 4L, lay$rec_bytes, lay$grid$bit)
+        pr <- pres
         # A cell that CARRIES a value must be code 0: it is neither a filler nor
         # missing. Anywhere else the array is not what we think it is, so the
         # page contributes nothing (0 pages corpus-wide).
@@ -778,10 +879,13 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
           rows <- which(!pr & st$codes > 0L)
           if (complete) { fr <- rows; fc <- st$codes[rows] }
           if (length(rows)) {
-            cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
-            if (any(cc$keep)) {
-              cd <- st$codes[rows][cc$keep]
-              md <- cc$md[cc$keep, , drop = FALSE]
+            kp <- if (complete) keep_of(rows, r) else NULL
+            cc <- if (complete) NULL
+                  else coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
+            if (is.null(kp)) kp <- cc$keep
+            if (any(kp)) {
+              cd <- st$codes[rows][kp]
+              md <- if (complete) NULL else cc$md[kp, , drop = FALSE]
               # Codes the legend does not name are counted, never guessed at:
               # they contribute no missing cell and are reported loudly.
               unk <- cd > length(leg_txt) | is.na(leg_txt[cd])
@@ -789,7 +893,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
                 st_tally[["status_unknown"]] <-
                   st_tally[["status_unknown"]] + sum(unk)
                 unk_tal <- unk_tal + tabulate(cd[unk] + 1L, IVT_STATUS_NCODE)
-                cd <- cd[!unk]; md <- md[!unk, , drop = FALSE]
+                cd <- cd[!unk]
+                if (!complete) md <- md[!unk, , drop = FALSE]
               }
               if (length(cd) && !complete) {
                 mi <- mi + 1L
@@ -807,43 +912,61 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
         undet <- TRUE
       }
     }
-    pg <- ivt_decode_page(raw, off, lay, size = s1)
+    pg <- ivt_decode_page(raw, off, lay, size = s1, pres = pres, nvf = nvf)
     if (is.null(pg)) break
     extra_vals <- extra_vals + pg$extra; extra_nz <- extra_nz + pg$extra_nz
+    # Complete mode addresses the grid by position, so it never builds the
+    # per-page coordinate matrix -- it only needs the same deleted-slot tally,
+    # which the window block and the entry's paged members already carry.
+    if (complete) {
+      if (ent_bad[r] > 0L)
+        hole_vals <- hole_vals + ent_bad[r] * sum(pg$vals != 0)
+      hb <- win_blk[[win_col[r] + 1L]]$bad
+      if (!is.null(hb)) hole_vals <- hole_vals + sum(pg$vals[hb[pg$rows]] != 0)
+      break
+    }
     # A value at a deleted slot would be a format misunderstanding -- counted
     # and reported loudly below.
     cc <- coords_of(pg$tuples, r)
     md <- cc$md; keep <- cc$keep; vv <- pg$vals
     for (bad in cc$bads) hole_vals <- hole_vals + sum(vv[bad] != 0)
-    # Complete mode re-derives the same rows from the whole grid below, so it
-    # keeps only the tallies from here -- accumulating both would double the
-    # peak memory of the very tables that make it expensive.
-    if (complete) break
     if (!all(keep)) { md <- md[keep, , drop = FALSE]; vv <- vv[keep] }
     if (!nrow(md)) break
     ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- vv
     break
     }
-    if (complete) {
-      cf <- coords_of(gtup, r)
-      kp <- cf$keep
-      if (any(kp)) {
-        v <- numeric(ngrid)                    # absent and unremarked == zero
-        cdv <- integer(ngrid)
-        if (!is.null(pg)) v[pg$rows] <- pg$vals
-        if (length(fr)) { v[fr] <- NA_real_; cdv[fr] <- fc }
+    if (complete && ent_ok[r]) {
+      blk <- win_blk[[win_col[r] + 1L]]
+      nb <- blk$n
+      if (nb > 0L) {
+        # `out_v` opens as zeros -- the published value of an absent, unremarked
+        # cell -- so only the stored values and the flagged cells are written.
+        b <- ent_base[r]; nknown <- 0L
+        if (!is.null(pg)) {
+          if (blk$full) {
+            out_v[b + pg$rows] <- pg$vals; nknown <- nknown + length(pg$rows)
+          } else {
+            pp <- blk$pos[pg$rows]; ok <- pp > 0L
+            out_v[b + pp[ok]] <- pg$vals[ok]; nknown <- nknown + sum(ok)
+          }
+        }
+        if (length(fr)) {
+          # Only the reason code is scattered; a flagged cell never carries a
+          # value, so `value = NA` follows from `code != 0` and is written for
+          # the whole grid in one pass after the loop.
+          if (blk$full) {
+            out_cd[b + fr] <- fc; nknown <- nknown + length(fr)
+          } else {
+            pf <- blk$pos[fr]; ok <- pf > 0L
+            out_cd[b + pf[ok]] <- fc[ok]; nknown <- nknown + sum(ok)
+          }
+        }
         if (undet) {
           # The page wrote a statement we could not read, so its absences are
           # published as zeros without the file having said so -- counted here
           # and reported loudly, never folded in silently.
-          known <- logical(ngrid)
-          if (!is.null(pg)) known[pg$rows] <- TRUE
-          known[fr] <- TRUE
-          unclassified <- unclassified + sum(kp & !known)
+          unclassified <- unclassified + (nb - nknown)
         }
-        fi <- fi + 1L
-        full_md[[fi]] <- cf$md[kp, , drop = FALSE]
-        full_v[[fi]] <- v[kp]; full_cd[[fi]] <- cdv[kp]
       }
     }
   }
@@ -878,7 +1001,22 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
         "statement could not be read; {?it is/they are} published as zeros",
         "without the file having said so."),
         class = "canivt_absent_unclassified")
-    return(ivt_complete_cells(full_md, full_v, full_cd, fi, lay, st_tally,
+    # The coordinates, at last: an in-page dimension repeats its window run once
+    # per emitted paged tuple, a paged dimension holds one member id for a whole
+    # run. Neither depends on anything a page said, so both are built here in one
+    # `rep()` each rather than accumulated a page at a time.
+    out_v[out_cd != 0L] <- NA_real_        # every flagged cell, in one pass
+    out_cols <- vector("list", m)
+    for (t in seq_along(inpage_dim)) {
+      v <- unlist(lapply(win_blk, function(b) b$cols[[t]]), use.names = FALSE)
+      out_cols[[inpage_dim[t]]] <- rep(if (is.null(v)) integer(0) else v,
+                                       times = n_pt)
+    }
+    for (t in seq_along(paged_dim))
+      out_cols[[paged_dim[t]]] <-
+        rep(pg_val[seq.int(1L, ncoord, by = lay$ent_counts[1L]), t][ok_pt],
+            each = blk_len)
+    return(ivt_complete_cells(out_cols, out_v, out_cd, lay, st_tally,
                               unk_tal, leg_declared,
                               if (leg_declared) leg else NULL))
   }
