@@ -663,7 +663,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
   miss_acc <- list(); miss_st <- list(); mi <- 0L
   st_tally <- c(mask = 0L, none = 0L, status = 0L, unreadable = 0L,
                 extra = 0L, nan_words = 0L, contradictory = 0L, beyond = 0L,
-                status_open = 0L)
+                status_unread = 0L, status_unknown = 0L)
+  unk_tal <- integer(IVT_STATUS_NCODE)         # cells per UNINTERPRETED code
   for (r in seq_len(nrow(coord))) {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
     if (is.null(en)) next
@@ -723,19 +724,35 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
         if (any(st$codes[pr] != 0L)) {
           st_tally[["contradictory"]] <- st_tally[["contradictory"]] + 1L
         } else {
-          rows <- which(!pr & st$codes > IVT_STATUS_FILLER)
+          # Code 1 says "nothing here" and the GRID says which nothing: at a
+          # padded position it is filler, at a real cell it is `..`. That is
+          # exactly the test `coords_of()` already applies, so the two separate
+          # themselves without the codes being read a second time.
+          rows <- which(!pr & st$codes > 0L)
           if (length(rows)) {
             cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
             if (any(cc$keep)) {
-              mi <- mi + 1L
-              miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
-              miss_st[[mi]] <- IVT_STATUS_VOCAB[st$codes[rows][cc$keep] -
-                                                  IVT_STATUS_FILLER]
+              cd <- st$codes[rows][cc$keep]
+              md <- cc$md[cc$keep, , drop = FALSE]
+              # Codes past the validated vocabulary are counted, never guessed
+              # at: they contribute no missing cell and are reported loudly.
+              unk <- cd > length(IVT_STATUS_VOCAB)
+              if (any(unk)) {
+                st_tally[["status_unknown"]] <-
+                  st_tally[["status_unknown"]] + sum(unk)
+                unk_tal <- unk_tal + tabulate(cd[unk] + 1L, IVT_STATUS_NCODE)
+                cd <- cd[!unk]; md <- md[!unk, , drop = FALSE]
+              }
+              if (length(cd)) {
+                mi <- mi + 1L
+                miss_acc[[mi]] <- md
+                miss_st[[mi]] <- IVT_STATUS_VOCAB[cd]
+              }
             }
           }
         }
       } else if (st$kind == "status") {
-        st_tally[["status_open"]] <- st_tally[["status_open"]] + 1L
+        st_tally[["status_unread"]] <- st_tally[["status_unread"]] + 1L
       }
     }
     pg <- ivt_decode_page(raw, off, lay, size = s1)
@@ -785,7 +802,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
     out$value <- unlist(v_acc[seq_len(ci)], use.names = FALSE)
   }
   if (missing)
-    attr(out, "missing") <- ivt_missing_cells(miss_acc, miss_st, mi, lay, st_tally)
+    attr(out, "missing") <-
+      ivt_missing_cells(miss_acc, miss_st, mi, lay, st_tally, unk_tal)
   out
 }
 
@@ -794,7 +812,8 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
 # absent cells are zeros, so a page that does not yield one leaves its absent
 # cells UNCLASSIFIED -- silently returning "no missings there" would be exactly
 # the false "absent implies zero" model this decode exists to correct.
-ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally) {
+ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally,
+                              unk_tal = integer(IVT_STATUS_NCODE)) {
   m <- lay$n_dim
   if (mi == 0L) {
     out <- tibble::tibble(.rows = 0L)
@@ -819,13 +838,26 @@ ivt_missing_cells <- function(miss_acc, miss_st, mi, lay, tally) {
       "incomplete for {?that page/those pages}."),
       class = "canivt_status_unreadable")
   }
-  if (tally[["status_open"]] > 0L) {
+  if (tally[["status_unread"]] > 0L) {
     ivt_fallback(paste(
-      "{tally[['status_open']]} of {tally[['status']]} self-describing (0xa)",
-      "cell-status array{?s} {?is/are} written at a code width whose VOCABULARY is",
-      "not validated (only {.val W = 2} is); {?its/their} reason codes are NOT",
-      "interpreted and {?that page contributes/those pages contribute} no missing",
-      "cells."), class = "canivt_status_block_undecoded")
+      "{tally[['status_unread']]} of {tally[['status']]} self-describing (0xa)",
+      "cell-status array{?s} carr{?ies/y} a header this reader does not",
+      "recognise; {?it was/they were} not read, so {?that page contributes/those",
+      "pages contribute} no missing cells."),
+      class = "canivt_status_unread")
+  }
+  # Reason codes above the validated vocabulary. The addressing is sound (they
+  # sit at real absent cells, on pages whose present cells all read code 0), but
+  # what they SAY is unknown, so they are counted and named rather than folded
+  # into `status` under a guessed label.
+  if (tally[["status_unknown"]] > 0L) {
+    inv <- paste0(which(unk_tal > 0L) - 1L, ": ", unk_tal[unk_tal > 0L],
+                  collapse = ", ")
+    ivt_fallback(paste(
+      "{tally[['status_unknown']]} absent cell{?s} carr{?ies/y} a (0xa) reason",
+      "code past the validated vocabulary, so {?it is/they are} NOT interpreted",
+      "and {?is/are} absent from the missing-cell list; codes seen",
+      "(code: cells): {inv}."), class = "canivt_status_code_unknown")
   }
   if (tally[["extra"]] > 0L) {
     ivt_fallback(paste(

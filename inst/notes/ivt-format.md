@@ -235,11 +235,11 @@ the directory entry's u16 size. Its *kind* is declared by the page marker's `b0`
 block's own start. Nothing about it appears in the file header.
 
 **Both forms are decoded** (`R/status.R`, `read_ivt(missing = TRUE)`): the `0x8`
-1-bit mask, and the `0xa` reason-code array at its validated `W = 2` width. Both
+1-bit mask, and the `0xa` reason-code array at every declared code width. Both
 are stored the same way — a sparse array of value-width words addressed by an
 index bitmap occupying the whole pre-value region — and reading the `0xa` array
 without that rebuild is what made its addressing look lineage-specific for so
-long. What remains open is only the code *vocabulary* at `W = 1/4/8`.
+long. What remains open is only the meaning of reason codes `≥ 4`.
 
 ### `b0` high nibble `0x8` — the bare absent mask (1 bit per cell)
 
@@ -305,7 +305,7 @@ income) against the Beyond 20/20 web viewer, on a table whose layout is
 
 Decoded incidence over the whole 170-table corpus (`fixtures/status-ledger.csv`,
 one row per table: 105 carry mask pages, 47 carry `0xa` status pages, 36 write
-no tail at all). **43 tables report missing cells, 622,290,283 in all**; the
+no tail at all). **45 tables report missing cells, 622,393,786 in all**; the
 *beyond* column — cells the page's word index has no bit for, the only real gap
 (below) — is **0 everywhere**. The ten largest:
 
@@ -323,13 +323,13 @@ no tail at all). **43 tables report missing cells, 622,290,283 in all**; the
 | `98100231` | 6,827,404 | array | 0 |
 
 The scale is the point: these are sparse NDM crosstabs whose grid is mostly
-`...` not available, and every one of those cells used to read as a published
+`...` not applicable, and every one of those cells used to read as a published
 zero. The eight mask-only tables are far smaller — `97F0015X` 2,080,404,
 `SP3_AVQOPM_97F0007XCB2001042` 1,586,079, `SP3_H7WG5V_EDDTAB16` 5,276,
 `97-563-XCB2006072` 1,485, `SP3_GPVU3L_00060210` 517, `97F0020XCB2001070` 344,
 `SP3_NIQKF5_95f0487xcb01003` 220, `SP3_GPVU3L_00060208` 8.
 
-The remaining 127 tables — CMHC T1/T2/T3, 98-312-XCB2011033, 98100045/66/179/662,
+The remaining 125 tables — CMHC T1/T2/T3, 98-312-XCB2011033, 98100045/179/662,
 and the rest — report exactly **0** missing cells: mask == presence complement,
 which is the "no missings published" case.
 
@@ -448,44 +448,70 @@ Codes are `W` bits wide, **MSB-first and NOT pair-swapped** (the mask
 convention, not the presence one), addressed at the **same padded
 presence-grid bit** as the presence record — `lay$grid$bit`.
 
-`W = 2` is by far the most common. Its code values are **validated against
-StatCan's own published tables**:
+**`W` is a storage choice, not a dialect.** A page uses the narrowest declared
+width that holds its largest code, and the vocabulary is the same at all of
+them:
 
 | code | meaning | filler byte |
 |------|---------|-------------|
 | `0` | cell carries a value, or is a genuine zero | `0x00` |
-| `1` | filler — grid position outside the real cartesian | `0x55` |
+| `1` | *nothing here* — **filler** at a padded grid position, **`..` not available for a specific reference period** at a real cell | `0x55` (`W = 2`), `0x11` (`W = 4`) |
 | `2` | **`x` — suppressed for confidentiality** | |
-| `3` | **`...` — not available** | |
+| `3` | **`...` — not applicable** | |
+| `≥ 4` | **not interpreted** (see below) | |
 
-Counting `W = 2` codes over the whole block and comparing with the `Symbol`
-columns of `getFullTableDownloadCSV`:
+Code `1` is the subtle one: it says *there is no number here* and the **grid**
+says which nothing it is. At a padded position — one the layout says is not a
+cell at all — it is filler; at a real cell it is the published `..`. The decoder
+never has to choose, because `coords_of()` already drops padded positions on
+geometric grounds; what survives that filter is `..` by construction.
 
-| table | IVT code 2 / code 3 | published `x` / `...` |
-|---|---|---|
-| 98-10-0040 | 10 / 49 | 10 / 49 |
-| 98-10-0655 | 0 / 2,600 | 0 / 2,600 |
-| 98-10-0658 | 0 / 1,348 | 0 / 1,348 |
-| 98-10-0128 | 389,888 / 1,466,488 | 389,888 / 1,466,488 |
-| 98-10-0023 | 913,992 / 0 | 913,992 / 0 |
-| 98-10-0129 | 1,485,120 / 0 | 1,485,120 / 0 |
-| 98-10-0478 | 6,853 / 0 | 6,853 / 0 |
+### Validation
 
-Exact on both codes on all seven, including 1.86M flagged cells. **Positionally**,
-indexing the array at the presence-bitmap cell index on 98-10-0655 reproduces the
-published symbols over all 11,154 cells with zero errors; 98-10-0040 joins 59/59
-with nothing unmatched in either direction.
+Counting codes over the whole block and comparing against the `Symbols` columns
+of `getFullTableDownloadCSV`, in **both** directions (every published symbol
+accounted for, and no code without one):
 
-Three further structural checks, all corpus-wide over the 1,273,173 `0xa` pages
-of the 170-table ledger, and none of which uses any external ground truth:
+| table | `..` / code 1 at real cells | `x` / code 2 | `...` / code 3 |
+|---|---|---|---|
+| 98-10-0002 | 612 / 612 | – | 735 / 735 |
+| 98-10-0013 | 330 / 330 | – | 212 / 212 |
+| 98-10-0010 | 0 / 0 | – | – |
+| 98-10-0040 | – | 10 / 10 | 49 / 49 |
+| 98-10-0655 | – | – | 2,600 / 2,600 |
+| 98-10-0658 | – | – | 1,348 / 1,348 |
+| 98-10-0128 | – | 389,888 / 389,888 | 1,466,488 / 1,466,488 |
+| 98-10-0023 | – | 913,992 / 913,992 | 32 / 32 |
+| 98-10-0129 | – | 1,485,120 / 1,485,120 | – |
+| 98-10-0478 | – | 6,853 / 6,853 | – |
+
+Exact on every code on all ten, including 2.8M flagged cells, and the
+present + absent totals reproduce each published grid exactly (71,084 / 38,129 /
+2,464 / 12,528 / 11,154 …). The `..` rows are the decisive ones for code 1:
+98-10-0002's 612 arrive as 12 on its `W = 1` pages plus 600 on its `W = 2`
+pages, so the *same* code carries the *same* meaning across a width change
+inside one file. (`E` "use with caution" and `r` "revised" attach to cells that
+carry values, so they are not in this array at all — which is why the present
+cells are uniformly code 0.)
+
+**Positionally**, indexing the array at the presence-bitmap cell index on
+98-10-0655 reproduces the published symbols over all 11,154 cells with zero
+errors; 98-10-0040 joins 59/59 with nothing unmatched in either direction.
+
+Three structural checks, all corpus-wide over the 1,273,173 `0xa` pages of the
+170-table ledger, and none of which uses any external ground truth:
 
 - the length gate `popcount(index)·width == tail length` passes on
   **1,273,173 / 1,273,173** pages;
 - a cell that **carries a value** has code `0` on every page, at every `W`;
-- code `1` falls **exactly** on the grid positions the decoder drops as padding
-  — 166,965,381 cells, zero off-diagonal in either direction. The padding set
-  comes from descriptor and slot geometry alone and the codes come from tail
-  bytes alone, so this is two independent derivations of the same set.
+- **every** grid position the decoder drops as padding carries code `1` —
+  166,965,381 of them, at every width, with the padding set computed from
+  descriptor and slot geometry alone and the codes from tail bytes alone. The
+  converse does *not* hold, and that is the point: code 1 also lands on 68,850
+  **real** cells, and those are exactly the published `..`.
+
+Two files (`ord-08035_ct1_2021`, `SP_U649IE_optab13`) mix `W = 2` and `W = 4`
+pages, which on its own rules out the width carrying meaning.
 
 ### This overturns "an absent cell is a zero"
 
@@ -522,24 +548,33 @@ zero-run length produced its own apparent packing. Rebuild the block and one
 rule covers the corpus. 92,790 of the corpus's `0xa` pages do drop an interior
 word.
 
-### What is still open (`W` other than 2)
+### What is still open (codes ≥ 4)
 
-The **addressing** is now general — present ⇒ code 0 and code 1 ⇒ padding hold
-at every width — but only the `W = 2` **vocabulary** is validated, so nothing
-else is interpreted (`canivt_status_block_undecoded`; 173,286 pages over 16 of
-the 170 ledger tables):
+Codes `4`, `5`, `7` and `8` occur on **2,106,327 absent cells over 13 of the 170
+ledger tables**. They address correctly — the pages carrying them satisfy every
+structural check above — but nothing published says what they *mean*, so they
+are counted and named, never translated
+(`canivt_status_code_unknown`; those cells contribute no row to `x$missing`):
 
-- `W = 4` (`01 02 04 01 04`, filler byte `0x11`): 98-400-X2016203 (171,499
-  pages), the `SP3_WLOGGX_000402xx` pair, `SP_BXW0XU_optab12`,
-  `SP3_A2FD0W_02560006` and part of `ord-08035_ct1_2021` / `SP_U649IE_optab13`.
-- `W = 8` and `W = 1`, count-prefixed, in the `SP3_RHUXA9_*` survey lineage and
-  parts of 98-10-0013 / 98-10-0002 / 98-10-0010.
+| code | cells | tables |
+|---|---|---|
+| `4` | 1,282,224 | 98-400-X2016203 (1,275,435), `SP3_WLOGGX_00040207`, `ord-08035_ct1_2021`, `SP_U649IE_optab13` |
+| `5` | 25 | `SP_BXW0XU_optab12` |
+| `7` | 174,310 | `SP3_RHUXA9_404`/`_103`, `SP3_WLOGGX_00040200`/`_00040207`, `SP3_A2FD0W_02560006` |
+| `8` | 649,768 | the `SP3_RHUXA9_*` survey lineage |
 
-Two facts say the wider vocabularies are genuinely different rather than the
-same one in a wider field: codes **above 3** occur (2,106,327 absent cells), and
-code 1 lands on **real** cells (68,850) at `W = 1` and on two of the `W = 4`
-tables — so `1` is not simply "filler" there. Cracking them needs published
-ground truth for one of those tables.
+The obstacle is ground truth, not addressing: 98-400-X2016203's Beyond 20/20
+viewer is **retired** (every `Rp-eng.cfm` / `CompDataDownload.cfm` request now
+302s to `srvmsg404.html`) and the `SP*` tables are Borealis deposits that ship
+the `.ivt` alone. The remaining legend symbols that suppress a value are `F`
+(too unreliable to be published), `<LOD`, `0s`, `p` and `t` — 98-400-X2016203's
+code 4 lands on *Average age* / *Median age* × the age group *0 to 14 years* at
+Canada/Total/Total, i.e. a cross-classification conflict, which fits `F` or a
+"not computed" symbol but is not proof.
+
+One residual structural oddity: on every `W = 1/2/4` page the width is the
+narrowest that holds the page's largest code, but `W = 8` pages top out at code
+8, which four bits would hold. The width is over-wide there, not meaningful.
 
 Form incidence, from the earlier 171-**file** marker scan (a different sample
 from the 170-table ledger): 33 carry `W = 2` status arrays — the 2021

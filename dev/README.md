@@ -7,6 +7,7 @@
 | `range-harvest.R` (+ `rh_inflate.py`) | catalogue-wide metadata inventory that fetches only the front metadata region of each remote `.ivt` instead of the whole file |
 | `msweep.R` | corpus-wide cell-status (missing-data) sweep — the measurement behind the figures in `coverage.md` / `decode-history.md`, and the source of `tests/testthat/fixtures/status-ledger.csv` |
 | `mvalidate.R` | semantic validation of the `0x8` absent mask from a table's **own arithmetic** — no external ground truth |
+| `wtruth.R` (+ `wprobe-core.R`, `wprobe.R`, `wcoord.R`) | whole-corpus census of `0xa` reason codes × cell class × code width — the measurement that made the code vocabulary width-independent |
 
 ## msweep.R — the cell-status sweep
 
@@ -24,15 +25,18 @@ page's tail byte-exactly) and `contradictory == 0` (no mask bit lands on a cell
 that carries a value).
 
 Last full sweep — 170 tables, 2026-07-27: 0 cell mismatches, 0 errors;
-`mask 1,810,626 · none 604,337 · status 1,273,173 · status_open 173,286 ·
-unreadable 0 · extra 23,885 · nan_words 435,947 · contradictory 0 · beyond 0 ·
-miss 622,290,283`.
+`mask 1,810,626 · none 604,337 · status 1,273,173 · status_unread 0 ·
+status_unknown 2,106,327 · unreadable 0 · extra 23,885 · nan_words 435,947 ·
+contradictory 0 · beyond 0 · miss 622,393,786` over 45 tables.
 
-`status_open` counts `0xa` reason-code arrays written at a code width whose
-vocabulary is not validated (anything but `W = 2`); those pages are reported and
-contribute nothing. `miss` grew from 3,674,333 when the `0xa` array was decoded —
-the sparse-block rebuild made its addressing general, and the sparse NDM
-crosstabs it covers are mostly `...` not available.
+`status_unread` counts `0xa` arrays whose header this reader does not recognise
+(0 corpus-wide). `status_unknown` counts absent CELLS carrying a reason code
+past the validated vocabulary — codes 4/5/7/8 over 13 tables; they are named in
+the warning and contribute no missing cell. `miss` grew from 3,674,333 when the
+`0xa` array was decoded — the sparse-block rebuild made its addressing general,
+and the sparse NDM crosstabs it covers are mostly `...` not applicable — and
+then by a further 103,503 when the vocabulary was found to be width-independent
+(the `W = 1/4/8` pages, plus the code-1 cells that are `..` rather than filler).
 
 `beyond` counts missing cells the page's word **index** has no bit for. It is now
 0 corpus-wide: on all 1,810,626 mask pages the index spans the whole grid, so an
@@ -70,6 +74,27 @@ Results, 2026-07-27 (the run that closed the `beyond` caveat):
 | `97F0015X` | Age (7) | 34,616 | 0 | 100 % | 5 · 10 · 15 · 25 · 30 · 35 |
 | `97F0007XCB2001042` | Sex (3) | 3,053,547 | 0 | 89.5 % | 25 · 30 |
 | `97-563-XCB2006072` | Age (5) | 457,336 | 0 | 100 % | — |
+
+## wtruth.R — the `0xa` code census
+
+```sh
+Rscript dev/wtruth.R out.csv <table-key> [<table-key> ...]
+```
+
+One tidy row per (table, code width, cell class, code), where the **cell class**
+— `present` / `padding` / `absent` — comes from the layout alone (descriptor +
+slot geometry), never from the status bytes. That separation is the whole point:
+"code *k* means symbol *s*" then rests on two independent derivations, and the
+codes can be matched against the `Symbols` columns of a published
+`getFullTableDownloadCSV` without the parser ever seeing one. `PAGEMAX` rows
+tally pages by width × largest code, which is what showed the width to be the
+narrowest that holds the page's codes rather than a change of vocabulary.
+
+`wprobe-core.R` holds the shared page reader; `wprobe.R` is the single-table
+tally and `wcoord.R` maps cells carrying a chosen code back to member ids and
+labels, for looking a coordinate up in the published table. **All four are
+dev-only and must never be wired into the package** — the file's own bytes are
+the parsing authority; published CSVs validate, they do not decide.
 
 ## range-harvest.R — what it does
 

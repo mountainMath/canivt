@@ -23,19 +23,26 @@
   without the sparse rebuild, each table's dropped all-zero words shifting its
   codes by a different amount. Rebuild first and one rule covers the corpus: the
   gate passes on all 1,273,173 status-array pages, a cell that carries a value
-  has code 0 on every one of them, and code 1 falls exactly on the 166,965,381
-  grid positions the decoder independently computes as padding. Shipped at the
-  validated `W = 2` vocabulary, whose code counts equal StatCan's published
-  `x` / `...` counts exactly on seven tables (98-10-0040, 0655, 0658, 0128,
-  0023, 0129, 0478). `x$missing` gains a `status` column naming the reason where
-  the file states one. 43 corpus tables now report missing cells, 622,290,283 in
-  all — these are sparse NDM crosstabs whose grid is mostly `...`, and every one
-  of those cells used to read as a published zero.
+  has code 0 on every one of them, and every one of the 166,965,381 grid
+  positions the decoder independently computes as padding carries code 1.
+* **The array's code width `W` is a storage choice, not a dialect**, so the one
+  vocabulary is decoded at every width: `0` a value or a genuine zero, `1`
+  *nothing here* — filler at a padded grid position and `..` *not available for
+  a specific reference period* at a real cell — `2` `x` suppressed, `3` `...`
+  not applicable. Validated cell-exact against StatCan's published tables in
+  **both** directions on ten of them (98-10-0002, 0010, 0013, 0023, 0040, 0128,
+  0129, 0478, 0655, 0658): every published symbol is matched by a code count and
+  no code is left without a symbol. `x$missing` gains a `status` column naming
+  the reason where the file states one. 45 corpus tables report missing cells —
+  sparse NDM crosstabs whose grid is mostly `...`, every one of those cells
+  having previously read as a published zero.
 * The feature is off by default because completeness is vintage-dependent, and
   every gap raises its own classed warning rather than being folded silently
-  into the count: `canivt_status_block_undecoded` (a status array written at a
-  code width whose vocabulary is not validated — `W = 1/4/8`, 173,286 pages over
-  16 corpus tables), `canivt_status_extra_block` (a second,
+  into the count: `canivt_status_code_unknown` (a reason code past the validated
+  vocabulary — codes 4/5/7/8, 2,106,327 absent cells over 13 corpus tables, none
+  of which publishes symbol counts to crack them against),
+  `canivt_status_unread` (a status array whose header this reader does not
+  recognise), `canivt_status_extra_block` (a second,
   undecoded tail array on eight corpus tables), `canivt_status_beyond_mask`
   (cells past the last mask word a page writes — unmasked for want of a word
   rather than by the file's statement), `canivt_status_unreadable`, and

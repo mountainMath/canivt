@@ -72,7 +72,7 @@ test_that("covered_bits is the index's REACH, not the last word written", {
   expect_identical(st8$covered_bits, 256L)
 })
 
-test_that("the 0xa status array decodes at the validated W = 2", {
+test_that("the 0xa status array decodes at W = 2", {
   # Same sparse-word rebuild as the mask, then a self-describing header:
   #   [form][02][W]  (+ [u16] when form 02)  [01][W]  <W-bit codes>
   # with the code array starting at byte 5 (form 01) and addressed at the same
@@ -89,27 +89,29 @@ test_that("the 0xa status array decodes at the validated W = 2", {
   expect_identical(st$kind, "status")
   expect_identical(st$status_form, 1L)
   expect_identical(st$status_width, 2L)
-  # 0 value/genuine zero, 1 filler, 2 = `x` suppressed, 3 = `...` not available
+  # 0 value/genuine zero, 1 nothing-here, 2 = `x` suppressed, 3 = `...` n/a
   expect_identical(st$codes, c(0L, 1L, 2L, 3L, 0L, 0L, 2L, 3L))
   # the one cell that carries a value is code 0, as the model requires
   expect_identical(st$codes[[1L]], 0L)
 })
 
-test_that("a 0xa array at an unvalidated code width is counted, not guessed at", {
-  # Only W = 2's vocabulary is validated against published tables; W = 1/4/8
-  # demonstrably differ (their code 1 lands on real cells, and codes above 3
-  # occur), so those pages report themselves and decode no codes.
+test_that("the same array decodes at W = 4 -- the width is storage, not dialect", {
+  # A page uses the narrowest width that holds its largest code, so W carries no
+  # meaning of its own (two corpus files mix W = 2 and W = 4 pages). Codes past
+  # the validated vocabulary still come back as codes; refusing to TRANSLATE
+  # them is the caller's job, not this reader's.
   lay <- list(rec_bytes = 4L, grid = list(bit = 0:7))
   raw <- as.raw(c(
-    0xa2, 0x01, 0x10, 0x08,
+    0xa2, 0x01, 0x10, 0x08,                        # 0xa marker, width 2, trailer 2
     0x00, 0x00, 0x00, 0x00,                        # nothing present
-    0x00, 0xf0,
-    0x01, 0x02, 0x04, 0x01, 0x04, 0x1b, 0x0b, 0x00 # form 01, W = 4
+    0x00, 0xf8,                                    # index: words 0-4 written
+    0x01, 0x02, 0x04, 0x01, 0x04,                  # form 01, W = 4, `[01][W]` intro
+    0x01, 0x23, 0x45, 0x78, 0x00                   # eight 4-bit codes
   ))
-  st <- ivt_page_status(raw, 0L, lay, size = 18L)
+  st <- ivt_page_status(raw, 0L, lay, size = 20L)
   expect_identical(st$kind, "status")
   expect_identical(st$status_width, 4L)
-  expect_null(st$codes)
+  expect_identical(st$codes, c(0L, 1L, 2L, 3L, 4L, 5L, 7L, 8L))
 })
 
 test_that("a 0xa page whose header is not the known form decodes nothing", {
@@ -123,6 +125,12 @@ test_that("a 0xa page whose header is not the known form decodes nothing", {
   st <- ivt_page_status(raw, 0L, lay, size = 18L)
   expect_identical(st$kind, "status")
   expect_null(st$codes)
+
+  # a width the array cannot be written at is refused outright
+  raw3 <- raw; raw3[13L] <- as.raw(0x03); raw3[15L] <- as.raw(0x03)
+  st3 <- ivt_page_status(raw3, 0L, lay, size = 18L)
+  expect_identical(st3$kind, "status")
+  expect_null(st3$codes)
 })
 
 test_that("a page with no readable tail contributes nothing, loudly", {
@@ -150,9 +158,10 @@ test_that("a page with no readable tail contributes nothing, loudly", {
 #     ever lands on a cell that carries a value, and no present cell ever carries
 #     a non-zero reason code.
 #
-# `status_open_pages` counts `0xa` arrays written at a code width whose
-# vocabulary is not validated (anything but W = 2); those pages are reported and
-# contribute nothing.
+# `status_unread_pages` counts `0xa` arrays whose header this reader does not
+# recognise; `n_unknown` counts absent cells carrying a reason code past the
+# validated vocabulary (codes 4/5/7/8, on tables with no published symbol
+# counts). Both are reported and contribute no missing cell.
 #
 # `n_beyond` counts missing cells past the reach of their page's word INDEX --
 # cells the file has no bit with which to classify. It is 0 for every corpus
@@ -194,7 +203,9 @@ test_that("the corpus cell-status tallies match the ledger", {
     expect_identical(t[["mask"]], as.integer(row$mask_pages), info = r$key)
     expect_identical(t[["none"]], as.integer(row$no_tail_pages), info = r$key)
     expect_identical(t[["status"]], as.integer(row$status_pages), info = r$key)
-    expect_identical(t[["status_open"]], as.integer(row$status_open_pages),
+    expect_identical(t[["status_unread"]], as.integer(row$status_unread_pages),
+                     info = r$key)
+    expect_identical(t[["status_unknown"]], as.integer(row$n_unknown),
                      info = r$key)
     expect_identical(t[["extra"]], as.integer(row$extra_words), info = r$key)
     expect_identical(t[["nan_words"]], as.integer(row$nan_words), info = r$key)

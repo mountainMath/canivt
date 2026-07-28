@@ -22,14 +22,14 @@ family-1 tables.}
 status tail} and return, in a \code{missing} tibble, the coordinates of the
 cells the file marks as \emph{not available} rather than zero (same member-id
 columns as \code{cells}, no \code{value}, plus a \code{status} column naming the reason
-where the file states one: \code{"suppressed"} (\code{x}), \code{"unavailable"} (\code{...}),
-or \code{NA} where the page carries only the bare absent mask). Off by default
-because it costs a second presence read per page and its completeness is
-vintage-dependent: pages with no tail at all, pages whose tail the word
-index does not account for, and reason-code arrays written at an
-unvalidated code width all contribute nothing -- each reported with a
-classed warning rather than assumed to hold no missings. See the "Missing
-values" section.}
+where the file states one: \code{"suppressed"} (\code{x}), \code{"not applicable"}
+(\code{...}), \code{"not available"} (\code{..}), or \code{NA} where the page carries only the
+bare absent mask). Off by default because it costs a second presence read
+per page and its completeness is vintage-dependent: pages with no tail at
+all, pages whose tail the word index does not account for, and cells
+carrying a reason code past the validated vocabulary all contribute
+nothing -- each reported with a classed warning rather than assumed to hold
+no missings. See the "Missing values" section.}
 }
 \value{
 An object of class \code{ivt}: a list with \code{cells} (a tibble of one value
@@ -105,10 +105,11 @@ separated by a block each page appends after its dense value run, in one of
 two forms selected by the page marker: a 1-bit \strong{absent mask} -- a strict
 subset of the absent cells, where masked means a genuine zero and
 \emph{unmasked} means missing -- or a self-describing \strong{reason-code array}
-carrying the \code{x} / \code{...} distinction itself. \code{missing = TRUE} decodes both;
-only the array states a reason, so mask-derived rows carry \code{status = NA}.
-Code widths other than the validated 2-bit one are reported, not guessed at
-(\code{canivt_status_block_undecoded}).
+carrying the \code{..} / \code{x} / \code{...} distinction itself. \code{missing = TRUE}
+decodes both, at every code width; only the array states a reason, so
+mask-derived rows carry \code{status = NA}. A few tables use reason codes past
+that vocabulary; those cells are counted and reported, not guessed at
+(\code{canivt_status_code_unknown}).
 
 Two limits are reported rather than hidden. On float64 pages a mask word of
 mostly-ones is NaN-shaped and the writer's x87 quieting overwrites one

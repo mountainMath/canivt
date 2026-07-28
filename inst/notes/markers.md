@@ -106,13 +106,13 @@ page.
 Codes are `W` bits, MSB-first and **not** pair-swapped (the mask convention),
 addressed at the same padded presence-grid bit as the presence record.
 
-`W = 2` code vocabulary — **decoded** (`ivt_status_array()`), validated
-cell-exact against StatCan's published tables on 7 of them: `0` value/genuine
-zero, `1` filler (byte `0x55`), `2` = `x` suppressed, `3` = `...` not available.
-`W = 1/4/8` address correctly but their vocabularies are **not** validated
-(codes above 3 occur; code 1 lands on real cells), so `ivt_page_status()`
-reports those pages and reads no codes from them. Filler byte for `W = 4` is
-`0x11`.
+Code vocabulary — **decoded at every `W`** (`ivt_status_array()`); the width is
+a storage choice, not a dialect. `0` value/genuine zero; `1` nothing here —
+**filler** at a padded grid position (byte `0x55` at `W = 2`, `0x11` at `W = 4`)
+and **`..` not available** at a real cell; `2` = `x` suppressed; `3` = `...` not
+applicable. Validated cell-exact against StatCan's published tables on 10 of
+them, in both directions. Codes `≥ 4` occur (2,106,327 absent cells over 13
+tables) and are counted, never translated.
 
 The block's start is **implied**, never stored: `value_run_start + popcount·width`.
 Its end is the directory entry's u16 size.
@@ -383,9 +383,10 @@ layout.
   dropped all-zero words shifting everything after them. The array intro is
   `[01][W]`, not a literal `01 02` — that misreading is what hid every `W ≠ 2`
   page. Gate passes on 1,273,173 / 1,273,173 corpus `0xa` pages; present ⇒ code
-  0 everywhere, code 1 ⇒ padding on 166,965,381 cells. Shipped at `W = 2` only.
-  Still open and counted rather than guessed: the `W = 1/4/8` code vocabularies
-  and the second tail block that index bits past the mask address.
+  0 everywhere, padding ⇒ code 1 on 166,965,381 cells. **Shipped at every `W`**
+  (same day): the vocabulary is width-independent, `1` also meaning `..` where
+  it lands on a real cell. Still open and counted rather than guessed: reason
+  codes `≥ 4`, and the second tail block that index bits past the mask address.
 
 - **2026-07-26** — **A page whose presence record is all zero is an ABSENCE.** Not
   a new marker: the page is a perfectly ordinary `[b0][01][00][08]` page with a

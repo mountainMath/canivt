@@ -1130,7 +1130,9 @@ the status read happens **before** `ivt_decode_page()` so a wholly-suppressed
 page still contributes its missings.
 
 Every gap is a classed warning, never a silent guess: `canivt_status_unreadable`,
-`canivt_status_block_undecoded` (the `0xa` array), `canivt_status_extra_block`,
+`canivt_status_code_unknown` (a `0xa` reason code past the validated vocabulary;
+it was `canivt_status_block_undecoded` while the array itself was undecoded),
+`canivt_status_extra_block`,
 `canivt_status_beyond_mask`, and `canivt_status_nan_quieted` (raised through
 `ivt_source_truncation()`, so strict keeps it a warning — it is damage in the
 source, not a canivt fallback).
@@ -1270,7 +1272,7 @@ Four checks, three of them needing no external ground truth:
 |---|---|
 | length gate `popcount(index)·width == tail length` | 1,273,173 / 1,273,173 pages, 0 short |
 | a cell that carries a value has code 0 | every page, every `W` |
-| code 1 ⇔ the decoder's padding set | 166,965,381 cells, **zero** off-diagonal |
+| padding ⇒ code 1 | 166,965,381 cells, every width, no exception |
 | code 2 / 3 counts vs StatCan's published `x` / `...` | exact on 7 tables |
 
 The padding check is the strong one: the padding set comes from descriptor and
@@ -1279,22 +1281,70 @@ independent derivations agree cell-for-cell over 167 M positions. The published
 counts add 98-10-0023 (913,992 `x`), 98-10-0129 (1,485,120) and 98-10-0478
 (6,853) to the four validated earlier.
 
-**Shipped at `W = 2` only.** The addressing generalises to every width but the
-vocabulary does not, and the sweep says so in two ways: codes **above 3** occur
-(2,106,327 absent cells at `W = 4/8`), and code 1 lands on **real** cells
-(68,850) at `W = 1` and on two `W = 4` tables — so `1` is not "filler" there.
-173,286 pages over 16 tables are therefore counted and reported
-(`canivt_status_block_undecoded`, re-aimed from "the array is undecoded" to
-"this width's vocabulary is unvalidated") and contribute nothing. Cracking them
-needs published ground truth for one of those tables.
+It shipped that day at `W = 2` only, on a reading of the padding check that was
+**one implication too strong** — see the next section, which corrects it.
 
-**What it changes.** `x$missing` gains a `status` column — `"suppressed"`,
-`"unavailable"`, or `NA` where only the bare mask spoke. Corpus missings go
-3,674,333 → **622,290,283** over 43 tables, dominated by sparse NDM crosstabs
-whose grid is mostly `...` (98-10-0393 alone: 231,789,142 against 27,508,287
-stored cells). Nothing else moved: `dev/msweep.R` reports 0 cell-count
-mismatches, 0 errors, and `unreadable` / `contradictory` still 0 corpus-wide —
-the latter now also enforcing present ⇒ code 0 across 1.1 M status pages.
+**What it changes.** `x$missing` gains a `status` column, or `NA` where only the
+bare mask spoke. Corpus missings go 3,674,333 → **622,290,283** over 43 tables
+(622,393,786 over 45 once the width gap closed, below),
+dominated by sparse NDM crosstabs whose grid is mostly `...` (98-10-0393 alone:
+231,789,142 against 27,508,287 stored cells). Nothing else moved: `dev/msweep.R`
+reports 0 cell-count mismatches, 0 errors, and `unreadable` / `contradictory`
+still 0 corpus-wide — the latter now also enforcing present ⇒ code 0 across
+1.1 M status pages.
+
+### `W` is a storage choice: one vocabulary at every width (2026-07-27, same day)
+
+The gap left above was "the `W = 1/4/8` vocabularies are unvalidated", and the
+argument for it was two measurements: codes **above 3** occur (2,106,327 absent
+cells), and code 1 lands on 68,850 **real** cells — "so `1` is not filler
+there". The second half of that was the mistake. The padding check is
+`padding ⇒ code 1`, which is what was measured; it was written down as an
+equivalence, and the 68,850 counterexamples to the *converse* were then read as
+evidence that the wider widths meant something else.
+
+They are not counterexamples. Code 1 says **"nothing here"**, and the grid — not
+the code — says which nothing: at a padded position it is filler, at a real cell
+it is the published `..`, *not available for a specific reference period*. The
+decoder never has to choose between them, because `coords_of()` already drops
+padded positions on geometric grounds; whatever survives that filter is `..`.
+
+Three things then fall out at once:
+
+- **Width is storage.** `ord-08035_ct1_2021` and `SP_U649IE_optab13` each mix
+  `W = 2` and `W = 4` pages, and 98-10-0002 splits its 612 `..` as 12 on `W = 1`
+  pages plus 600 on `W = 2` pages — the same code, the same meaning, across a
+  width change inside one file. A page uses the narrowest width holding its
+  largest code (`W = 8` pages, topping out at code 8, are the one over-wide
+  case).
+- **Code 3 was mislabelled.** The published legend is `..` = *not available for
+  a specific reference period* and `...` = *not applicable*; code 3 is `...`, so
+  its `status` string moves from `"unavailable"` to `"not applicable"`, and the
+  new code 1 takes `"not available"`.
+- **The validation closes in both directions.** Ten NDM tables, every published
+  symbol matched by a code count and no code left without a symbol: `..`
+  98-10-0002 (612), 98-10-0013 (330), 98-10-0010 (0); `x` 98-10-0023 (913,992),
+  98-10-0040 (10), 98-10-0128 (389,888), 98-10-0129 (1,485,120), 98-10-0478
+  (6,853); `...` 98-10-0655 (2,600), 98-10-0658 (1,348), 98-10-0040 (49),
+  98-10-0128 (1,466,488), 98-10-0002 (735), 98-10-0013 (212). Present + absent
+  reproduces each published grid exactly. `E` and `r` never appear, which is the
+  confirming detail: they attach to cells that *carry* values, and every present
+  cell is code 0.
+
+The measurement was `dev/wtruth.R` — a whole-corpus census of code × cell class
+(present / padding / absent) at every width, the class derived from the layout
+alone. It is dev-only by design: the package must never learn a code from a
+published CSV.
+
+**What is left.** Codes 4, 5, 7 and 8 — 2,106,327 absent cells over 13 tables —
+are counted and named (`canivt_status_code_unknown`) and contribute no missing
+cell. The obstacle is ground truth, not addressing: 98-400-X2016203's Beyond
+20/20 viewer is retired (every `Rp-eng.cfm` / `CompDataDownload.cfm` request
+302s to `srvmsg404.html`) and the `SP3_*` / `SP_*` Borealis deposits ship the
+`.ivt` alone. Remaining value-suppressing legend symbols: `F` too unreliable,
+`<LOD`, `0s`, `p`, `t`. On 98-400-X2016203 code 4 lands on *Average age* /
+*Median age* × age group *0 to 14 years* at Canada/Total/Total — a
+cross-classification conflict, consistent with `F` but not proof.
 
 ### Unified cell decode & metadata
 

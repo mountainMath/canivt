@@ -52,12 +52,14 @@ decoded (see below).
     tail-bearing pages of geographies 1–13; **0** for Nunavut).
   - `0xa` → a **self-describing reason-code array**, `[form][02][W]` (+ `[u16]`
     when form 02) then a `[01][W]` intro, codes `W` bits wide at the *same*
-    `lay$grid$bit`. Decoded at the validated `W = 2` (`0` value/genuine zero,
-    `1` filler, `2` = `x` suppressed, `3` = `...` not available), which is
-    1,099,887 of the corpus's 1,273,173 `0xa` pages. Its addressing was
-    "lineage-specific" only because it was read without the sparse rebuild.
-  43 corpus tables report missing cells, **622,290,283** in all; the remaining
-  127 report none, which is the confirming half — those tables publish no
+    `lay$grid$bit`. Decoded at **every** width — `W` is a storage choice, not a
+    dialect: `0` value/genuine zero, `1` nothing here (filler at a padded grid
+    position, `..` not available at a real cell), `2` = `x` suppressed, `3` =
+    `...` not applicable. All 1,273,173 of the corpus's `0xa` pages. Its
+    addressing was "lineage-specific" only because it was read without the
+    sparse rebuild.
+  45 corpus tables report missing cells, **622,393,786** in all; the remaining
+  125 report none, which is the confirming half — those tables publish no
   missings. `x$missing` carries a `status` column naming the reason where the
   file states one. Off by default: the ledger asserts exact cell counts and
   warning sets, and completeness is vintage-dependent (below).
@@ -127,30 +129,32 @@ decoded (see below).
 
 ## [ ] Open gaps
 
-- [ ] **The `0xa` status array's vocabulary at `W = 1`, `4` and `8`** (gap
-  narrowed 2026-07-27: the *addressing* is now general and `W = 2` is decoded,
-  see above). 173,286 pages over 16 of the 170 ledger tables are written at a
-  code width whose meaning is not validated, so their reason codes are counted
-  and reported (`canivt_status_block_undecoded`) rather than interpreted, and
-  those pages contribute no missing cells.
-  - `W = 2` vocabulary validated cell-exact against StatCan's published tables
-    (`getFullTableDownloadCSV`): 98-10-0040 `10 x / 49 ...`, 98-10-0655
-    `0 / 2,600`, 98-10-0658 `0 / 1,348`, 98-10-0128 `389,888 / 1,466,488`,
-    98-10-0023 `913,992 / 0`, 98-10-0129 `1,485,120 / 0`, 98-10-0478
-    `6,853 / 0` — all exact on both codes. 98-10-0655 also position-exact over
-    all 11,154 cells; 98-10-0040 joins 59/59.
-  - The addressing holds at every width — present ⇒ code 0 on all 1,273,173
-    pages, and code 1 ⇒ padding on 166,965,381 cells with zero off-diagonal —
-    so what is missing is only the *meaning* of the wider codes. Two facts say
-    they differ rather than merely widen: codes **above 3** occur (2,106,327
-    absent cells), and code 1 lands on **real** cells (68,850) at `W = 1` and on
-    two `W = 4` tables.
-  - Incidence: `W = 4` in 98-400-X2016203 (171,499 pages), the
-    `SP3_WLOGGX_000402xx` pair, `SP_BXW0XU_optab12`, `SP3_A2FD0W_02560006` and
-    parts of `ord-08035_ct1_2021` / `SP_U649IE_optab13`; `W = 8` / `W = 1` in the
-    `SP3_RHUXA9_*` survey lineage and parts of 98-10-0013 / 0002 / 0010.
-  - Cracking them needs published ground truth for one of those tables; the
-    structural tests are exhausted.
+- [ ] **The `0xa` status array's reason codes `≥ 4`** (gap narrowed to this on
+  2026-07-27; the width gap it replaces is CLOSED — see above). 2,106,327 absent
+  cells over 13 of the 170 ledger tables carry a code the vocabulary does not
+  cover; they are counted and named (`canivt_status_code_unknown`) rather than
+  interpreted, and contribute no row to `x$missing`.
+  - Codes 1/2/3 validated cell-exact against StatCan's published tables
+    (`getFullTableDownloadCSV`), in **both** directions on ten tables:
+    `..` 98-10-0002 `612`, 98-10-0013 `330`, 98-10-0010 `0`; `x` 98-10-0023
+    `913,992`, 98-10-0040 `10`, 98-10-0128 `389,888`, 98-10-0129 `1,485,120`,
+    98-10-0478 `6,853`; `...` 98-10-0655 `2,600`, 98-10-0658 `1,348`,
+    98-10-0040 `49`, 98-10-0128 `1,466,488`, 98-10-0002 `735`, 98-10-0013
+    `212`. 98-10-0655 also position-exact over all 11,154 cells; 98-10-0040
+    joins 59/59.
+  - Width-independence is what made this general: 98-10-0002's 612 `..` split
+    12 / 600 across its `W = 1` and `W = 2` pages, and two files mix `W = 2`
+    with `W = 4`. Structurally, present ⇒ code 0 and padding ⇒ code 1 hold at
+    every width over all 1,273,173 pages (166,965,381 padded cells).
+  - Incidence of the open codes: `4` 1,282,224 (98-400-X2016203 1,275,435,
+    `SP3_WLOGGX_00040207`, `ord-08035_ct1_2021`, `SP_U649IE_optab13`); `5` 25
+    (`SP_BXW0XU_optab12`); `7` 174,310 (`SP3_RHUXA9_404`/`_103`,
+    `SP3_WLOGGX_000402xx`, `SP3_A2FD0W_02560006`); `8` 649,768 (`SP3_RHUXA9_*`).
+  - Cracking them needs published ground truth, and none of those tables has
+    any: 98-400-X2016203's Beyond 20/20 viewer is **retired** (every
+    `Rp-eng.cfm` request 302s to `srvmsg404.html`) and the `SP*` deposits ship
+    the `.ivt` alone. Remaining value-suppressing legend symbols: `F`, `<LOD`,
+    `0s`, `p`, `t`.
 - [ ] **The SECOND tail block is not decoded** (gap OPENED 2026-07-27). On 8 corpus
   tables some pages' index bits address words **past** the mask's `rec_bytes`, so
   the same index also addresses a further array: `SP3_1H8SBB_97-555` (11,463

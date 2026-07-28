@@ -18,14 +18,17 @@
 #'   the other side by the CMHC crosstabs (0 unflagged absent cells; their B20/20
 #'   CSV exports publish no missings at all).
 #' - `0xa` -> a self-describing status ARRAY carrying the reason codes
-#'   themselves, decoded here at `W = 2`. Its header is
-#'   `[form][02][W]` (+ a `[u16 count]` when `form == 02`) followed by a
-#'   two-byte `[01][W]` array intro, so the code array starts at byte 5 (form
-#'   01) or byte 7 (form 02). Codes are `W` bits wide, MSB-first and -- like the
-#'   mask -- NOT pair-swapped, addressed at the SAME padded presence-grid bit as
-#'   the presence record. The `W = 2` vocabulary is `0` value or genuine zero,
-#'   `1` filler (a padded grid position that is no cell at all), `2` = `x`
-#'   suppressed, `3` = `...` not available.
+#'   themselves. Its header is `[form][02][W]` (+ a `[u16 count]` when
+#'   `form == 02`) followed by a two-byte `[01][W]` array intro, so the code
+#'   array starts at byte 5 (form 01) or byte 7 (form 02). Codes are `W` bits
+#'   wide, MSB-first and -- like the mask -- NOT pair-swapped, addressed at the
+#'   SAME padded presence-grid bit as the presence record.
+#'
+#'   `W` is a STORAGE choice, not a dialect: the vocabulary is the same at every
+#'   width (`IVT_STATUS_VOCAB`). `0` is a value or a genuine zero; `1` is
+#'   "nothing here" -- filler at a padded grid position, `..` not available for
+#'   a specific reference period at a real cell; `2` is `x` suppressed and `3`
+#'   is `...` not applicable. Codes `>= 4` occur and are NOT interpreted.
 #'
 #'   The three "incompatible packings" once recorded here (98-10-0655/0658 at
 #'   the grid index, 98-10-0040 packing tighter, 98-10-0128 in per-member
@@ -33,18 +36,25 @@
 #'   dropped all-zero words shift everything after them. Rebuild the block first
 #'   and one rule covers the corpus.
 #'
-#'   Four independent checks, all corpus-wide: the length gate below passes on
-#'   1,273,173 / 1,273,173 `0xa` pages; a PRESENT cell carries code 0 on every
-#'   decoded page; code 1 falls exactly on the grid positions the decoder drops
-#'   as padding (10.6M cells, zero off-diagonal, and the padding set is computed
-#'   from descriptor/slot geometry alone); and the code 2/3 counts equal
-#'   StatCan's published `x` / `...` counts on 98-10-0655 (2,600), 98-10-0658
-#'   (1,348), 98-10-0040 (10/49), 98-10-0128 (389,888/1,466,488), 98-10-0023
-#'   (913,992), 98-10-0129 (1,485,120) and 98-10-0478 (6,853).
+#'   The evidence, all corpus-wide unless noted. Structural: the length gate
+#'   below passes on 1,273,173 / 1,273,173 `0xa` pages; a PRESENT cell carries
+#'   code 0 at every width; code 1 covers the decoder's padding set exactly
+#'   (166,965,381 cells, computed from descriptor/slot geometry alone) at every
+#'   width, and lands on a real cell only 68,850 times; and two files
+#'   (`ord-08035_ct1_2021`, `SP_U649IE_optab13`) mix `W = 2` and `W = 4` pages,
+#'   so the width cannot be carrying meaning. Published: over ten NDM tables
+#'   every symbol count matches the code count in BOTH directions -- `..` on
+#'   98-10-0002 (612, all code 1, on `W = 1` and `W = 2` pages) and 98-10-0013
+#'   (330), none on 98-10-0010 (0); `x` on 98-10-0023 (913,992), 98-10-0040
+#'   (10), 98-10-0128 (389,888), 98-10-0129 (1,485,120), 98-10-0478 (6,853);
+#'   `...` on 98-10-0655 (2,600), 98-10-0658 (1,348), 98-10-0040 (49),
+#'   98-10-0128 (1,466,488), 98-10-0002 (735), 98-10-0013 (212). (`E` and `r`
+#'   attach to cells that carry values, so they are not in this array at all.)
 #'
-#'   `W = 1`, `4` and `8` occur too; their vocabularies are NOT validated (`W =
-#'   1` demonstrably differs -- its code 1 lands on real cells), so those pages
-#'   are counted and reported, never interpreted.
+#'   Codes 4, 5, 7 and 8 remain uninterpreted: 2,106,327 absent cells over 13
+#'   tables -- 98-400-X2016203 (whose viewer is retired), the Borealis `SP3_*` /
+#'   `SP_*` survey lineage and `ord-08035_ct1_2021`, none of which publishes
+#'   symbol counts. They are counted and named, never translated.
 #'
 #' **The tail is a sparse array of `width`-byte words, addressed by an index
 #' bitmap that occupies the WHOLE pre-value region.** That region is the `b2`
@@ -105,19 +115,31 @@
 #' @noRd
 NULL
 
-# The `W = 2` reason-code vocabulary of the `0xa` status array, in code order
-# (code 0 is the array's own 0). Only code 2 and 3 are missing values; code 1 is
-# a padded grid position that is no cell at all.
-IVT_STATUS_VOCAB <- c("suppressed", "unavailable")   # codes 2 and 3
-IVT_STATUS_FILLER <- 1L
+# The reason-code vocabulary of the `0xa` status array, indexed by CODE and
+# WIDTH-INDEPENDENT (see the roxygen block above). Code 0, absent from this
+# table, is a value or a genuine zero.
+#
+# Code 1 is "nothing here", and which nothing depends on the GRID, not on the
+# code: at a padded grid position -- one the layout says is no cell at all --
+# it is filler, and at a real cell it is `..`, not available for a specific
+# reference period. The caller separates the two with the padding set it already
+# computes from the descriptor and slot geometry.
+IVT_STATUS_VOCAB <- c(                               # codes 1, 2, 3
+  "not available",                                   # `..`
+  "suppressed",                                      # `x`
+  "not applicable")                                  # `...`
+
+# Codes a `W = 8` array can express -- the size of the caller's code tally, not
+# a claim that any code up to 255 occurs (the corpus tops out at 8).
+IVT_STATUS_NCODE <- 256L
 
 # Read the status tail of one page. Returns a list with `kind`:
 #
 #   "none"       the page carries no status tail (dense page, unrecognised
 #                marker, or no bytes past the value run)
 #   "status"     a `0xa` self-describing reason-code array; `codes` holds one
-#                code per padded grid position when the array is decodable (a
-#                validated `W = 2` vocabulary), and is NULL otherwise
+#                code per padded grid position when the header parses, and is
+#                NULL otherwise
 #   "unreadable" a tail is present but the index does not account for it
 #   "mask"       decoded; `mask_bytes` holds the reconstructed 1-bit absent mask
 #
@@ -201,9 +223,11 @@ ivt_status_scatter <- function(wi, tail, w, nbytes) {
 }
 
 # Decode a `0xa` self-describing status array. `codes` comes back with one code
-# per padded grid position (`lay$grid$bit` order) at the validated `W = 2`; at
-# every other width -- and on any header this does not recognise -- the page is
-# reported present-but-uninterpreted (`codes = NULL`) rather than guessed at.
+# per padded grid position (`lay$grid$bit` order) at EVERY declared width; on a
+# header this does not recognise the page is reported present-but-unread
+# (`codes = NULL`) rather than guessed at. Interpreting the codes is the
+# caller's job -- `IVT_STATUS_VOCAB` covers 1..3, and anything above that is
+# counted and reported, never translated.
 ivt_status_array <- function(wi, tail, w, tr, lay) {
   out <- list(kind = "status", nan_words = 0L, extra_words = 0L, codes = NULL)
   blk <- ivt_status_scatter(wi, tail, w, (max(wi) + 1L) * w)
@@ -212,8 +236,8 @@ ivt_status_array <- function(wi, tail, w, tr, lay) {
   if (!form %in% c(1L, 2L) || blk[2L] != 0x02L) return(out)
   a0 <- if (form == 1L) 5L else 7L                # 0-based start of the code array
   if (blk[a0 - 1L] != 0x01L || blk[a0] != wid) return(out)  # the `[01][W]` intro
+  if (!wid %in% IVT_STATUS_WIDTHS) return(out)
   out$status_form <- form; out$status_width <- wid
-  if (wid != 2L) return(out)                      # vocabulary unvalidated elsewhere
   gb <- lay$grid$bit
   need <- (a0 * 8L + (max(gb) + 1L) * wid + 7L) %/% 8L      # bytes the array spans
   # The index's reach is the epistemic boundary here exactly as it is for the
@@ -223,10 +247,17 @@ ivt_status_array <- function(wi, tail, w, tr, lay) {
   if (need > tr * 8L * w) return(out)
   if (need > length(blk)) blk <- c(blk, integer(need - length(blk)))
   base <- a0 * 8L + gb * wid
-  out$codes <- as.integer(ivt_mask_bits(blk, base)) * 2L +
-    as.integer(ivt_mask_bits(blk, base + 1L))
+  codes <- integer(length(gb))
+  for (b in seq_len(wid))                         # `wid` bits, MSB-first
+    codes <- codes * 2L + as.integer(ivt_mask_bits(blk, base + b - 1L))
+  out$codes <- codes
   out
 }
+
+# Code widths the array declares. A page uses the narrowest that holds its
+# largest code, so the width is a STORAGE choice and carries no meaning of its
+# own -- one file mixes several.
+IVT_STATUS_WIDTHS <- c(1L, 2L, 4L, 8L)
 
 # Read bit positions `bit` (0-based) of a reconstructed mask: MSB-first, and --
 # unlike the presence record and every codebook bitmap -- NOT byte-pair-swapped.
