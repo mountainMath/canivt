@@ -4,7 +4,13 @@
 \alias{ivt_read_table}
 \title{Download and read a StatCan IVT table in one step}
 \usage{
-ivt_read_table(pid, dest_dir = NULL, lang = c("en", "fr"), ...)
+ivt_read_table(
+  pid,
+  dest_dir = NULL,
+  lang = c("en", "fr"),
+  missing = FALSE,
+  ...
+)
 }
 \arguments{
 \item{pid}{StatCan product id, e.g. \code{"98100241"} or \code{9810024101}. Any
@@ -15,6 +21,10 @@ per-table folder under the IVT cache (\link[=ivt_cache_dir]{ivt_cache_dir("ivt")
 i.e. option \code{canivt.ivt_cache} or \code{\link[=tempdir]{tempdir()}} when unset).}
 
 \item{lang}{\code{"en"} (default) or \code{"fr"} endpoint.}
+
+\item{missing}{Passed to \code{\link[=read_ivt]{read_ivt()}}: when \code{TRUE}, also decode each page's
+cell-status block, adding \verb{$missing} (which absent cells are suppressed,
+not applicable, and so on, per the file's own legend).}
 
 \item{...}{Passed to \code{\link[=ivt_download]{ivt_download()}}.}
 }
