@@ -153,6 +153,56 @@ test_that("a page with no readable tail contributes nothing, loudly", {
   expect_identical(ivt_page_status(raw, 0L, lay)$kind, "none")
 })
 
+# --- the export path -----------------------------------------------------------
+#
+# The data table carries only the cells that HAVE a value, so on its own it
+# cannot say which of the rest are zeros; the cell-status sidecar is what makes
+# an exported table complete. These check that it travels -- labelled exactly
+# like the data, so the two join -- and that a table decoded without it exports
+# no sidecar rather than an empty one.
+
+test_that("ivt_tidy_missing labels the coordinates exactly like ivt_tidy", {
+  path <- system.file("extdata", "98100044.ivt", package = "canivt")
+  x <- read_ivt(path, missing = TRUE)
+  m <- ivt_tidy_missing(x)
+  # the value column is replaced by the reason; everything else lines up
+  expect_identical(names(m), c(setdiff(names(ivt_tidy(x)), "value"),
+                               "symbol", "status"))
+  expect_identical(names(ivt_tidy_missing(x, dim_names = "label")),
+                   c(setdiff(names(ivt_tidy(x, dim_names = "label")), "value"),
+                     "symbol", "status"))
+  # the compact id form keeps the member-id coordinates, not labels
+  expect_identical(names(ivt_tidy_missing(x, labels = FALSE)),
+                   c(setdiff(names(x$cells), "value"), "symbol", "status"))
+  # the file's legend rides along
+  expect_identical(attr(m, "legend"), attr(x$missing, "legend"))
+  # and a table read without `missing` says so rather than returning nothing
+  expect_error(ivt_tidy_missing(read_ivt(path)), "no cell-status table")
+})
+
+test_that("the cell-status sidecar is written, found and read back", {
+  skip_if_not_installed("arrow")
+  path <- system.file("extdata", "98100044.ivt", package = "canivt")
+  dir <- withr::local_tempdir()
+  x <- read_ivt(path, missing = TRUE)
+  pq <- ivt_write_parquet(x, file.path(dir, "t_en.parquet"))
+  side <- ivt_missing_path(pq)
+  # unlike the member sidecar this keeps the language marker: it is labelled
+  # like the data it accompanies, so there is one per language
+  expect_identical(basename(side), "t_en_missing.parquet")
+  expect_true(file.exists(side))
+  expect_identical(names(tibble::as_tibble(arrow::read_parquet(side))),
+                   names(ivt_tidy_missing(x)))
+  # ivt_missing() resolves the sidecar from the data path alone
+  expect_s3_class(ivt_missing(pq), "Dataset")
+  # a table decoded without the status block writes no sidecar and reports none
+  y <- read_ivt(path)
+  pq2 <- ivt_write_parquet(y, file.path(dir, "u_en.parquet"))
+  expect_false(file.exists(ivt_missing_path(pq2)))
+  expect_null(ivt_missing(y))
+  expect_null(ivt_missing(pq2))
+})
+
 # --- corpus sweep (opt-in) -----------------------------------------------------
 #
 # Same opt-in contract as test-corpus.R. fixtures/status-ledger.csv records, per

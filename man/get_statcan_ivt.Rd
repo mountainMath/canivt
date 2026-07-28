@@ -8,6 +8,7 @@ get_statcan_ivt(
   catalogue,
   geo_attributes = FALSE,
   labels = TRUE,
+  missing = FALSE,
   dim_names = c("slug", "label"),
   language = "en",
   keep_ivt = FALSE,
@@ -34,6 +35,15 @@ geography attribute table (slower) so geographies can be labelled by name.}
 \item{labels}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: write labelled columns
 (\code{TRUE}, default) or the compact integer-id table.}
 
+\item{missing}{Passed to \code{\link[=read_ivt]{read_ivt()}}: also decode each page's cell-status
+block, and cache it as a \verb{<key>_<lang>_missing.parquet} sidecar giving, for
+every cell the data table does not carry, whether it is a genuine zero or a
+missing value and -- where the file states one -- why. Off by default
+because it costs a second read per page and, on a large sparse crosstab,
+far more rows than the data itself (most of them coordinates that simply do
+not exist). A cached Parquet with no sidecar is re-decoded when this is
+\code{TRUE}.}
+
 \item{dim_names}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: name the data-dimension
 columns by the full dimension label (\code{"label"}, default) or the terse
 structural slug (\code{"slug"}).}
@@ -57,7 +67,8 @@ path is attached as \code{attr(., "path")}; the resolved catalogue row (if any)
 as \code{attr(., "catalogue_row")}; the member-level table (\code{\link[=ivt_members]{ivt_members()}},
 read from the \verb{_members.parquet} sidecar when present) as
 \code{attr(., "members")} -- \code{\link[=collect_ivt]{collect_ivt()}} uses it to convert dimension
-columns into full-level factors.
+columns into full-level factors -- and, when \code{missing = TRUE}, a lazy
+connection to the cell-status sidecar as \code{attr(., "missing")}.
 }
 \description{
 One-stop accessor: given a table id, this resolves the product (the

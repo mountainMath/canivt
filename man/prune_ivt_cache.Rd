@@ -22,8 +22,9 @@ listed files, subject to \code{kind}/\code{language}).}
 \item{language}{Restrict Parquets to these languages (\code{"en"}/\code{"fr"}); \code{.ivt}
 files (language \code{NA}) are excluded when \code{language} is set. \code{NULL} = all.}
 
-\item{sidecars}{Also delete a \verb{<key>_members.parquet} sidecar once no Parquet
-references it (default \code{TRUE}).}
+\item{sidecars}{Also delete a \verb{<key>_members.parquet} /
+\verb{<key>_<lang>_missing.parquet} sidecar once no Parquet references it
+(default \code{TRUE}).}
 
 \item{dry_run}{If \code{TRUE}, report what would be removed without deleting.}
 }

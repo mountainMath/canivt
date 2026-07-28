@@ -42,6 +42,14 @@
 #'   geography attribute table (slower) so geographies can be labelled by name.
 #' @param labels Passed to [ivt_write_parquet()]: write labelled columns
 #'   (`TRUE`, default) or the compact integer-id table.
+#' @param missing Passed to [read_ivt()]: also decode each page's cell-status
+#'   block, and cache it as a `<key>_<lang>_missing.parquet` sidecar giving, for
+#'   every cell the data table does not carry, whether it is a genuine zero or a
+#'   missing value and -- where the file states one -- why. Off by default
+#'   because it costs a second read per page and, on a large sparse crosstab,
+#'   far more rows than the data itself (most of them coordinates that simply do
+#'   not exist). A cached Parquet with no sidecar is re-decoded when this is
+#'   `TRUE`.
 #' @param dim_names Passed to [ivt_write_parquet()]: name the data-dimension
 #'   columns by the full dimension label (`"label"`, default) or the terse
 #'   structural slug (`"slug"`).
@@ -59,7 +67,8 @@
 #'   as `attr(., "catalogue_row")`; the member-level table ([ivt_members()],
 #'   read from the `_members.parquet` sidecar when present) as
 #'   `attr(., "members")` -- [collect_ivt()] uses it to convert dimension
-#'   columns into full-level factors.
+#'   columns into full-level factors -- and, when `missing = TRUE`, a lazy
+#'   connection to the cell-status sidecar as `attr(., "missing")`.
 #' @seealso [statcan_ivt_catalogue()], [read_ivt()]
 #' @examples
 #' # Downloads, decodes and caches. Returns NULL with a warning if offline
@@ -73,7 +82,8 @@
 #' }
 #' @export
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
-                            dim_names = c("slug", "label"), language = "en",
+                            missing = FALSE, dim_names = c("slug", "label"),
+                            language = "en",
                             keep_ivt = FALSE, refresh = FALSE, quiet = FALSE)
   ivt_offline_grace({
   if (!requireNamespace("arrow", quietly = TRUE)) {
@@ -92,7 +102,11 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   parquet <- file.path(ivt_cache_dir("data"),
                        paste0(key, "_", language, ".parquet"))
 
-  if (!refresh && file.exists(parquet)) {
+  # A cached Parquet answers the request only if it also carries what was asked
+  # for: a table cached without the cell-status sidecar cannot supply it, so
+  # `missing = TRUE` re-decodes rather than quietly returning less.
+  if (!refresh && file.exists(parquet) &&
+      (!isTRUE(missing) || file.exists(ivt_missing_path(parquet)))) {
     return(ivt_parquet_connection(parquet, NULL))
   }
 
@@ -123,7 +137,7 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
 
   # 3. Decode and cache the tidy table as Parquet.
   if (!quiet) cli::cli_inform("Decoding {.path {ivt_path}}")
-  tab <- read_ivt(ivt_path, geo_attributes = geo_attributes)
+  tab <- read_ivt(ivt_path, geo_attributes = geo_attributes, missing = missing)
   ivt_write_parquet(tab, path = parquet, labels = labels, dim_names = dim_names,
                     language = language)
 
@@ -136,8 +150,8 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
 #' (in the data cache), one row per file, enriched with catalogue metadata
 #' (matched product number, title, census year, topic) when the file's cache key
 #' matches a product in the [statcan_ivt_catalogue()]. The member sidecars
-#' (`_members.parquet`) and the catalogue cache itself are infrastructure and are
-#' not listed.
+#' (`_members.parquet`), the cell-status sidecars (`_missing.parquet`) and the
+#' catalogue cache itself are infrastructure and are not listed.
 #'
 #' @param catalogue A catalogue tibble (from [statcan_ivt_catalogue()]) used to
 #'   enrich the listing. `NULL` (default) reads the **cached** catalogue if one
@@ -169,10 +183,10 @@ list_ivt_cache <- function(catalogue = NULL) {
     else basename(dirname(f)), "")
 
   # parsed data Parquets: <data_dir>/<key>[_en|_fr].parquet. Drop the member
-  # sidecars and the catalogue cache (not data tables).
+  # and cell-status sidecars and the catalogue cache (not data tables).
   pq <- list.files(data_dir, pattern = "\\.parquet$", full.names = TRUE,
                    ignore.case = TRUE)
-  pq <- pq[!grepl("_members\\.parquet$", pq, ignore.case = TRUE)]
+  pq <- pq[!grepl("_(members|missing)\\.parquet$", pq, ignore.case = TRUE)]
   pq <- pq[!(basename(pq) %in% c("statcan_ivt_catalogue.parquet",
                                  "borealis_ivt_catalogue.parquet"))]
   pq_stem <- tools::file_path_sans_ext(basename(pq))
@@ -297,8 +311,9 @@ ivt_cache_match <- function(rows, wants) {
 #' @param kind Restrict to `"ivt"` and/or `"parquet"` files. `NULL` = both.
 #' @param language Restrict Parquets to these languages (`"en"`/`"fr"`); `.ivt`
 #'   files (language `NA`) are excluded when `language` is set. `NULL` = all.
-#' @param sidecars Also delete a `<key>_members.parquet` sidecar once no Parquet
-#'   references it (default `TRUE`).
+#' @param sidecars Also delete a `<key>_members.parquet` /
+#'   `<key>_<lang>_missing.parquet` sidecar once no Parquet references it
+#'   (default `TRUE`).
 #' @param dry_run If `TRUE`, report what would be removed without deleting.
 #' @return Invisibly, a tibble of the removed (or, for `dry_run`, matched) files
 #'   with `kind` (`"ivt"`/`"parquet"`/`"sidecar"`), `path` and `bytes`.
@@ -327,15 +342,18 @@ prune_ivt_cache <- function(x = NULL, kind = NULL, language = NULL,
 
   paths <- unique(rows$path[!is.na(rows$path) & file.exists(rows$path)])
 
-  # orphaned member sidecars: those not referenced by any Parquet that remains
-  # after `paths` are removed (also sweeps pre-existing orphans).
+  # orphaned sidecars (member tables and cell-status tables alike): those not
+  # referenced by any Parquet that remains after `paths` are removed (also
+  # sweeps pre-existing orphans).
   orphan <- character(0)
-  all_side <- list.files(data_dir, pattern = "_members\\.parquet$",
+  all_side <- list.files(data_dir, pattern = "_(members|missing)\\.parquet$",
                          full.names = TRUE, ignore.case = TRUE)
   if (isTRUE(sidecars) && length(all_side)) {
     cur <- list_ivt_cache()
     remaining_pq <- cur$path[cur$kind == "parquet" & !(cur$path %in% paths)]
-    keep <- normalizePath(unique(ivt_members_path(remaining_pq)), mustWork = FALSE)
+    keep <- normalizePath(unique(c(ivt_members_path(remaining_pq),
+                                   ivt_missing_path(remaining_pq))),
+                          mustWork = FALSE)
     orphan <- all_side[!(normalizePath(all_side, mustWork = FALSE) %in% keep)]
   }
 
@@ -343,7 +361,7 @@ prune_ivt_cache <- function(x = NULL, kind = NULL, language = NULL,
   bytes <- file.info(remove)$size
   removed <- tibble::tibble(
     kind = ifelse(grepl("\\.ivt$", remove, ignore.case = TRUE), "ivt",
-           ifelse(grepl("_members\\.parquet$", remove, ignore.case = TRUE),
+           ifelse(grepl("_(members|missing)\\.parquet$", remove, ignore.case = TRUE),
                   "sidecar", "parquet")),
     path = remove, bytes = bytes)
 
@@ -378,6 +396,15 @@ ivt_parquet_connection <- function(parquet, row) {
   attr(ds, "path") <- parquet
   attr(ds, "catalogue_row") <- row
   attr(ds, "members") <- ivt_read_members(ivt_members_path(parquet))
+  # The cell-status sidecar can dwarf the data (a sparse crosstab's absent cells
+  # outnumber its values), so attach it LAZILY -- an Arrow connection, not a
+  # materialised tibble like the small member table.
+  mp <- ivt_missing_path(parquet)
+  if (file.exists(mp)) {
+    md <- tryCatch(arrow::open_dataset(mp), error = function(e) NULL)
+    if (!is.null(md)) attr(md, "path") <- mp
+    attr(ds, "missing") <- md
+  }
   ds
 }
 

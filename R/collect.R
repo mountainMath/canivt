@@ -229,6 +229,60 @@ ivt_members_path <- function(path) {
   paste0(stem, "_members.parquet")
 }
 
+#' Get the cell-status (missing-cell) table
+#'
+#' The one accessor for "which of the cells this table does not carry are
+#' missing rather than zero, and why", whichever form the table is in: an `ivt`
+#' object from [read_ivt(missing = TRUE)][read_ivt], a Parquet path, or the
+#' Arrow connection [get_statcan_ivt()] returns.
+#'
+#' Only cells with a value are stored, so an absent cell is *either* a published
+#' zero or a missing value, and this table is the only thing that separates
+#' them: every row is an absent cell the file marks as **not** a zero, with the
+#' reason the file states (`symbol` / `status`), or `NA` where the page carries
+#' only the bare absent mask. Absent cells that appear in neither table are
+#' genuine zeros.
+#'
+#' @param x An `ivt` object, a `.parquet` path, or an Arrow dataset / dplyr query
+#'   from [get_statcan_ivt()].
+#' @return For an `ivt`, the `missing` tibble (member-id coordinates); for a
+#'   Parquet source, a lazy [arrow::open_dataset()] connection to the
+#'   `_missing.parquet` sidecar with the same labelled coordinates as the data.
+#'   `NULL` when the table carries none -- i.e. it was decoded without
+#'   `missing = TRUE`.
+#' @seealso [read_ivt()], [ivt_tidy_missing()], [ivt_write_parquet()]
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt_missing(read_ivt(path, missing = TRUE))
+#' @export
+ivt_missing <- function(x) {
+  if (inherits(x, "ivt")) return(x$missing)
+  src <- x
+  for (i in seq_len(32L)) {
+    m <- attr(src, "missing", exact = TRUE)
+    if (!is.null(m)) return(m)
+    p <- ivt_data_path(src)
+    if (!is.na(p)) {
+      mp <- ivt_missing_path(p)
+      if (file.exists(mp) && requireNamespace("arrow", quietly = TRUE))
+        return(tryCatch(arrow::open_dataset(mp), error = function(e) NULL))
+    }
+    if (is.data.frame(src)) return(NULL)     # no query layers to walk
+    nxt <- tryCatch(src$.data, error = function(e) NULL)
+    if (is.null(nxt)) break
+    src <- nxt
+  }
+  NULL
+}
+
+# The cell-status sidecar path for a data Parquet: <name>_missing.parquet next
+# to it. Unlike the member sidecar this KEEPS the language marker
+# (`<key>_en_missing.parquet`), because the table is labelled like the data it
+# accompanies -- one file per language, not one shared by both.
+ivt_missing_path <- function(path) {
+  paste0(sub("\\.parquet$", "", path, ignore.case = TRUE), "_missing.parquet")
+}
+
 #' Detect the language of an IVT Parquet
 #'
 #' Reads the language marker (`_en` / `_fr` before `.parquet`) that

@@ -25,8 +25,8 @@ Lists the raw \code{.ivt} inputs (in the ivt cache) and the parsed data Parquets
 (in the data cache), one row per file, enriched with catalogue metadata
 (matched product number, title, census year, topic) when the file's cache key
 matches a product in the \code{\link[=statcan_ivt_catalogue]{statcan_ivt_catalogue()}}. The member sidecars
-(\verb{_members.parquet}) and the catalogue cache itself are infrastructure and are
-not listed.
+(\verb{_members.parquet}), the cell-status sidecars (\verb{_missing.parquet}) and the
+catalogue cache itself are infrastructure and are not listed.
 }
 \examples{
 # Lists whatever is in the configured cache directories (empty when unset):

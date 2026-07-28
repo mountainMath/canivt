@@ -274,6 +274,15 @@ x$missing        # one row per cell the file says is MISSING, same coordinate
 attr(x$missing, "legend")   # that legend: code, symbol, English and French text
 ```
 
+The status travels with the data on the way out, which matters because the
+exported table holds only the cells that *have* a value: completing the grid
+from it alone puts a zero where a suppressed value belongs.
+`ivt_tidy_missing()` labels those coordinates exactly as `ivt_tidy()` labels the
+values, so the two line up column for column, and `ivt_write_parquet()` /
+`ivt_write_csv()` write it beside the data table as a `_missing` sidecar
+(`get_statcan_ivt(missing = TRUE)` caches one too; `ivt_missing()` reads it back
+from any of these).
+
 Both are stored the same way: a sparse array of value-width words, addressed by
 the index bitmap in the trailer + head region, with all-zero words simply not
 written. The gate is the length identity `popcount(index) · width == tail

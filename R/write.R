@@ -9,6 +9,13 @@
 #' @param members Also write the member-level table ([ivt_members()]) as a
 #'   `<name>_members.parquet` sidecar next to `path` (`TRUE`, default), so
 #'   [collect_ivt()] can convert dimension columns to full-level factors.
+#' @param missing Also write the cell-status table ([ivt_tidy_missing()]) as a
+#'   `<name>_missing.parquet` sidecar next to `path` (`TRUE`, default), when `x`
+#'   carries one -- i.e. when it was read with `read_ivt(missing = TRUE)`. The
+#'   data table holds only the cells that have a value; this sidecar is what
+#'   says of the rest which are genuine zeros (absent from both) and which are
+#'   missing, and why. Its coordinate columns are labelled exactly like the data
+#'   table's, so the two join. Silently skipped when `x$missing` is `NULL`.
 #' @param dim_names How to name the data-dimension columns (passed to
 #'   [ivt_tidy()] and the member sidecar): `"slug"` (default, the terse
 #'   structural slug) or `"label"` (the full dimension name). Slug columns can be
@@ -27,8 +34,8 @@
 #' }
 #' @export
 ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
-                              dim_names = c("slug", "label"), language = "en",
-                              ...) {
+                              missing = TRUE, dim_names = c("slug", "label"),
+                              language = "en", ...) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to write Parquet.")
   }
@@ -44,6 +51,12 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
     mem <- ivt_members(x, dim_names = dim_names, language = language)
     if (nrow(mem)) arrow::write_parquet(mem, ivt_members_path(path))
   }
+  if (isTRUE(missing) && !is.null(x$missing)) {
+    arrow::write_parquet(
+      ivt_tidy_missing(x, labels = labels, dim_names = dim_names,
+                       language = language),
+      ivt_missing_path(path))
+  }
   invisible(path)
 }
 
@@ -52,6 +65,10 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
 #' @inheritParams ivt_write_parquet
 #' @param path Output `.csv` path. Defaults to `<product_id>.csv` in the data
 #'   cache ([ivt_cache_dir("data")][ivt_cache_dir]).
+#' @param missing Also write the cell-status table ([ivt_tidy_missing()]) to a
+#'   `<name>_missing.csv` next to `path` (`TRUE`, default), when `x` carries one
+#'   (i.e. was read with `read_ivt(missing = TRUE)`). Silently skipped
+#'   otherwise.
 #' @param ... Passed to the CSV writer ([readr::write_csv()] if available, else
 #'   [utils::write.csv()]).
 #' @return `path`, invisibly.
@@ -61,16 +78,21 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
 #' out <- ivt_write_csv(ivt, file.path(tempdir(), "98100044.csv"))
 #' file.exists(out)
 #' @export
-ivt_write_csv <- function(x, path = NULL, labels = TRUE,
+ivt_write_csv <- function(x, path = NULL, labels = TRUE, missing = TRUE,
                           dim_names = c("slug", "label"), language = "en", ...) {
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
   if (is.null(path)) path <- ivt_data_cache_file(x, paste0("_", language, ".csv"))
-  df <- ivt_tidy(x, labels = labels, dim_names = dim_names, language = language)
-  if (requireNamespace("readr", quietly = TRUE)) {
-    readr::write_csv(df, path, ...)
-  } else {
-    utils::write.csv(df, path, row.names = FALSE, ...)
+  wr <- function(df, p) {
+    if (requireNamespace("readr", quietly = TRUE)) readr::write_csv(df, p, ...)
+    else utils::write.csv(df, p, row.names = FALSE, ...)
+  }
+  wr(ivt_tidy(x, labels = labels, dim_names = dim_names, language = language),
+     path)
+  if (isTRUE(missing) && !is.null(x$missing)) {
+    wr(ivt_tidy_missing(x, labels = labels, dim_names = dim_names,
+                        language = language),
+       paste0(sub("\\.csv$", "", path, ignore.case = TRUE), "_missing.csv"))
   }
   invisible(path)
 }

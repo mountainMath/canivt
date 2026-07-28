@@ -9,6 +9,7 @@ ivt_write_parquet(
   path = NULL,
   labels = TRUE,
   members = TRUE,
+  missing = TRUE,
   dim_names = c("slug", "label"),
   language = "en",
   ...
@@ -27,6 +28,14 @@ default) or the compact integer-id table (\code{FALSE}).}
 \item{members}{Also write the member-level table (\code{\link[=ivt_members]{ivt_members()}}) as a
 \verb{<name>_members.parquet} sidecar next to \code{path} (\code{TRUE}, default), so
 \code{\link[=collect_ivt]{collect_ivt()}} can convert dimension columns to full-level factors.}
+
+\item{missing}{Also write the cell-status table (\code{\link[=ivt_tidy_missing]{ivt_tidy_missing()}}) as a
+\verb{<name>_missing.parquet} sidecar next to \code{path} (\code{TRUE}, default), when \code{x}
+carries one -- i.e. when it was read with \code{read_ivt(missing = TRUE)}. The
+data table holds only the cells that have a value; this sidecar is what
+says of the rest which are genuine zeros (absent from both) and which are
+missing, and why. Its coordinate columns are labelled exactly like the data
+table's, so the two join. Silently skipped when \code{x$missing} is \code{NULL}.}
 
 \item{dim_names}{How to name the data-dimension columns (passed to
 \code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"slug"} (default, the terse

@@ -55,6 +55,24 @@
   `canivt_status_nan_quieted` (a NaN-shaped mask word quieted by the writer's
   x87 load/store, which destroys one status bit in the source file; a warning
   even under `canivt.strict`, since it is source damage rather than a fallback).
+* **The cell status now survives export.** An exported table carries only the
+  cells that *have* a value, so on its own it cannot say which of the rest are
+  zeros — anyone completing the grid fills a suppressed cell with `0`. New
+  `ivt_tidy_missing()` labels the missing-cell table exactly as `ivt_tidy()`
+  labels the values, so the two line up column for column;
+  `ivt_write_parquet()` / `ivt_write_csv()` write it beside the data as a
+  `<name>_missing.parquet` / `.csv` sidecar (default `missing = TRUE`, skipped
+  when the table carries no status block); `get_statcan_ivt(missing = TRUE)`
+  decodes and caches it, attaching a lazy connection as `attr(., "missing")`;
+  and `ivt_missing()` returns it from any of those forms. Unlike the member
+  sidecar this one keeps the language marker (`<key>_en_missing.parquet`),
+  because its coordinates — and the wording of `status` — are language-specific.
+* `ivt_tidy(x, missing = TRUE)` returns the two together instead: the missing
+  cells appended as `value = NA` rows, with `symbol`/`status` columns. That is
+  the form to use when the result will be completed to a full grid, since an
+  absent row is otherwise indistinguishable from a published zero. The writers
+  keep the sidecar rather than this merged form by default, so exporting a
+  sparse crosstab does not multiply the table by its absences.
 
 # canivt 0.4.3
 

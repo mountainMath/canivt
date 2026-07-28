@@ -103,6 +103,15 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   and cannot be recovered (`canivt_status_nan_quieted`). And on a few
 #'   2001/2006 vintages the page's word index also addresses a second, undecoded
 #'   block past the mask (`canivt_status_extra_block`).
+#'
+#'   The status travels out of the package with the data: [ivt_tidy_missing()]
+#'   labels the missing-cell table exactly as [ivt_tidy()] labels the values,
+#'   [ivt_write_parquet()] / [ivt_write_csv()] write it beside the data table as
+#'   a `_missing` sidecar, [get_statcan_ivt()] caches it under `missing = TRUE`,
+#'   and [ivt_missing()] gets it back from any of those forms. That matters
+#'   because an exported table holds only the cells that have a value:
+#'   reconstructing the full grid from it alone fills every suppressed cell with
+#'   a zero, which the sidecar is what prevents.
 #' @return An object of class `ivt`: a list with `cells` (a tibble of one value
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
 #'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`,
@@ -248,6 +257,16 @@ ivt_metadata <- function(path) {
 #'   from the label indentation, the same measure carried by [ivt_members()]).
 #'   Opt-in, so the default output -- and hence the Parquet written by
 #'   [ivt_write_parquet()] -- is unchanged.
+#' @param missing If `TRUE` (default `FALSE`) append the table's **missing**
+#'   cells -- the ones the file marks as not available rather than zero -- as
+#'   rows with `value = NA`, and add `symbol` and `status` columns giving the
+#'   reason the file states (`NA` on every cell that has a value, and on a
+#'   missing cell whose page carries only the bare absent mask). Requires
+#'   `read_ivt(path, missing = TRUE)`. This is the form to use when the result
+#'   will be completed to a full grid, since an absent row is otherwise
+#'   indistinguishable from a published zero; [ivt_tidy_missing()] returns the
+#'   same cells on their own, which is what [ivt_write_parquet()] writes as a
+#'   sidecar rather than doubling the exported table.
 #' @return A tibble.
 #' @examples
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")
@@ -257,10 +276,15 @@ ivt_metadata <- function(path) {
 #' @export
 ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
                      dim_names = c("slug", "label"), language = "en",
-                     depth = FALSE) {
+                     depth = FALSE, missing = FALSE) {
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
+  if (isTRUE(missing)) {
+    return(ivt_tidy_bind_missing(x, labels = labels, trim_labels = trim_labels,
+                                 dim_names = dim_names, language = language,
+                                 depth = depth))
+  }
   if (!labels) {
     cells <- x$cells
     datacols <- setdiff(names(cells), c("geo", "value"))
@@ -270,6 +294,87 @@ ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
     return(cells)
   }
   ivt_f2_tidy(x, trim_labels, dim_names, language, depth)
+}
+
+# The long form that carries both: values, then the cells the file says are
+# missing, as `value = NA` rows. Keeping the two tidied separately and binding
+# them here means the coordinate labelling is computed by one code path, so the
+# halves cannot drift apart.
+ivt_tidy_bind_missing <- function(x, labels, trim_labels, dim_names, language,
+                                  depth) {
+  val <- ivt_tidy(x, labels = labels, trim_labels = trim_labels,
+                  dim_names = dim_names, language = language, depth = depth)
+  mis <- ivt_tidy_missing(x, labels = labels, trim_labels = trim_labels,
+                          dim_names = dim_names, language = language,
+                          depth = depth)
+  val$symbol <- NA_character_
+  val$status <- NA_character_
+  mis$value <- NA_real_
+  out <- rbind(val, mis[names(val)])
+  attr(out, "legend") <- attr(mis, "legend", exact = TRUE)
+  tibble::as_tibble(out)
+}
+
+#' Tidy the cell-status (missing-cell) table
+#'
+#' The companion of [ivt_tidy()] for `x$missing`: labels the coordinate columns
+#' exactly as [ivt_tidy()] labels `x$cells`, so the two tables line up column for
+#' column and the missing cells can be joined onto -- or unioned with -- the
+#' values. Requires `read_ivt(path, missing = TRUE)`.
+#'
+#' The result has no `value` column (these cells have no value); in its place
+#' are `symbol` and `status`, the reason the file states for the absence, or
+#' `NA` where the page carries only the bare absent mask (missing, cause not
+#' stated). The file's own reason-code legend rides along as
+#' `attr(., "legend")`, and the per-page-class tally as `attr(., "pages")`.
+#'
+#' @inheritParams ivt_tidy
+#' @return A tibble: the coordinate columns of [ivt_tidy()], then `symbol` and
+#'   `status`.
+#' @seealso [read_ivt()] (the "Missing values" section), [ivt_write_parquet()],
+#'   which writes this table as a `_missing.parquet` sidecar.
+#' @examples
+#' path <- system.file("extdata", "98100044.ivt", package = "canivt")
+#' ivt <- read_ivt(path, missing = TRUE)
+#' ivt_tidy_missing(ivt)
+#' @export
+ivt_tidy_missing <- function(x, labels = TRUE, trim_labels = TRUE,
+                             dim_names = c("slug", "label"), language = "en",
+                             depth = FALSE) {
+  stopifnot(inherits(x, "ivt"))
+  dim_names <- match.arg(dim_names)
+  language <- ivt_norm_lang(language)
+  miss <- x$missing
+  if (is.null(miss)) {
+    cli::cli_abort(c(
+      "This {.cls ivt} carries no cell-status table.",
+      i = "Decode it with {.code read_ivt(path, missing = TRUE)}."))
+  }
+  status_cols <- intersect(c("symbol", "status"), names(miss))
+  # Reuse the value tidier verbatim rather than reimplementing the labelling:
+  # the missing table has exactly the coordinate columns of `cells`, so hand
+  # ivt_tidy() a stand-in `cells` carrying a dummy value and drop that column
+  # again. Identical labelling on both tables is the whole point -- it is what
+  # makes the sidecar joinable to the data it accompanies.
+  y <- x
+  y$cells <- miss[setdiff(names(miss), status_cols)]
+  y$cells$value <- NA_real_
+  out <- ivt_tidy(y, labels = labels, trim_labels = trim_labels,
+                  dim_names = dim_names, language = language, depth = depth)
+  out$value <- NULL
+  for (nm in status_cols) out[[nm]] <- miss[[nm]]
+  leg <- attr(miss, "legend", exact = TRUE)
+  # `status` is decoded in English; the legend carries the French wording too,
+  # so swap it in per row (falling back to English where the file states none,
+  # as everywhere else in the language handling).
+  if (language == "fr" && !is.null(out$status) && !is.null(leg$text_fr) &&
+      !anyDuplicated(leg$text_en)) {
+    fr <- leg$text_fr[match(out$status, leg$text_en)]
+    out$status[!is.na(fr)] <- fr[!is.na(fr)]
+  }
+  attr(out, "legend") <- leg
+  attr(out, "pages") <- attr(miss, "pages", exact = TRUE)
+  out
 }
 
 # On the compact id path (`labels = FALSE`) there is no member label in the
@@ -313,5 +418,10 @@ print.ivt <- function(x, ...) {
     else
       "geography keyed by member id (read_ivt(geo_attributes=TRUE) for names)"
   cli::cli_text(cli::col_grey(geo_msg))
+  # An absent cell is a zero or a missing value; say which was decoded, so a
+  # table read without the status block does not look like one with no missings.
+  cli::cli_text(cli::col_grey(if (is.null(x$missing))
+      "cell status not decoded (read_ivt(missing=TRUE) to tell zeros from missings)"
+    else "{nrow(x$missing)} missing cell{?s} decoded (the rest of the absences are zeros)"))
   invisible(x)
 }

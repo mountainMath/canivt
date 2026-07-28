@@ -152,6 +152,29 @@ plot_data |>
        caption = "Data: Decoded from the Beyond 20/20 .ivt file (97-570-X1981004)")
 ```
 
+## A note on cells that aren't there
+
+An IVT stores only the cells that have a value, so a coordinate missing from the
+result is **not** necessarily a zero — it may be a suppressed or not-applicable
+value. Which it is, the file does say, in a status block after each page's
+values; it is off by default because on a large sparse crosstab those cells
+outnumber the data. Turn it on when you intend to fill the grid in:
+
+```r
+tab <- ivt_read_table("98100040", missing = TRUE)
+
+ivt_tidy(tab, missing = TRUE)          # missing cells as `value = NA` rows,
+                                       # with `symbol` / `status` saying why
+ivt_missing(tab)                       # just those cells
+attr(ivt_missing(tab), "legend")       # the symbols, in the file's own words
+
+get_statcan_ivt("98-10-0040", missing = TRUE)   # cached alongside the data
+```
+
+Without it, completing the grid with zeros turns every suppressed value into a
+`0`. See `?read_ivt` for the caveats (a few vintages write no status block at
+all, and each gap warns rather than being folded into the count).
+
 ## Recap
 
 ```r

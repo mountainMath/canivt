@@ -128,6 +128,15 @@ status bit per such word \strong{in the source file}; those cells read as zeros
 and cannot be recovered (\code{canivt_status_nan_quieted}). And on a few
 2001/2006 vintages the page's word index also addresses a second, undecoded
 block past the mask (\code{canivt_status_extra_block}).
+
+The status travels out of the package with the data: \code{\link[=ivt_tidy_missing]{ivt_tidy_missing()}}
+labels the missing-cell table exactly as \code{\link[=ivt_tidy]{ivt_tidy()}} labels the values,
+\code{\link[=ivt_write_parquet]{ivt_write_parquet()}} / \code{\link[=ivt_write_csv]{ivt_write_csv()}} write it beside the data table as
+a \verb{_missing} sidecar, \code{\link[=get_statcan_ivt]{get_statcan_ivt()}} caches it under \code{missing = TRUE},
+and \code{\link[=ivt_missing]{ivt_missing()}} gets it back from any of those forms. That matters
+because an exported table holds only the cells that have a value:
+reconstructing the full grid from it alone fills every suppressed cell with
+a zero, which the sidecar is what prevents.
 }
 
 \examples{

@@ -8,6 +8,7 @@ ivt_write_csv(
   x,
   path = NULL,
   labels = TRUE,
+  missing = TRUE,
   dim_names = c("slug", "label"),
   language = "en",
   ...
@@ -21,6 +22,11 @@ cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}).}
 
 \item{labels}{Passed to \code{\link[=ivt_tidy]{ivt_tidy()}}: write labelled columns (\code{TRUE},
 default) or the compact integer-id table (\code{FALSE}).}
+
+\item{missing}{Also write the cell-status table (\code{\link[=ivt_tidy_missing]{ivt_tidy_missing()}}) to a
+\verb{<name>_missing.csv} next to \code{path} (\code{TRUE}, default), when \code{x} carries one
+(i.e. was read with \code{read_ivt(missing = TRUE)}). Silently skipped
+otherwise.}
 
 \item{dim_names}{How to name the data-dimension columns (passed to
 \code{\link[=ivt_tidy]{ivt_tidy()}} and the member sidecar): \code{"slug"} (default, the terse
