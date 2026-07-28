@@ -42,14 +42,16 @@
 #'   geography attribute table (slower) so geographies can be labelled by name.
 #' @param labels Passed to [ivt_write_parquet()]: write labelled columns
 #'   (`TRUE`, default) or the compact integer-id table.
-#' @param missing Passed to [read_ivt()]: also decode each page's cell-status
-#'   block, and cache it as a `<key>_<lang>_missing.parquet` sidecar giving, for
-#'   every cell the data table does not carry, whether it is a genuine zero or a
-#'   missing value and -- where the file states one -- why. Off by default
-#'   because it costs a second read per page and, on a large sparse crosstab,
-#'   far more rows than the data itself (most of them coordinates that simply do
-#'   not exist). A cached Parquet with no sidecar is re-decoded when this is
-#'   `TRUE`.
+#' @param missing Passed to [read_ivt()]: additionally cache the flagged cells
+#'   on their own as a `<key>_<lang>_missing.parquet` sidecar. Off by default
+#'   because the cached table already carries them (see `complete`); the sidecar
+#'   is only worth writing when the same cells are wanted in isolation. A cached
+#'   Parquet with no sidecar is re-decoded when this is `TRUE`.
+#' @param complete Passed to [read_ivt()]: cache the **published table** -- every
+#'   grid coordinate, published zeros included, flagged cells carrying
+#'   `symbol`/`status` and a `NA` value (`TRUE`, default). A Parquet cached in
+#'   the older store-only form is re-decoded rather than answering with fewer
+#'   rows.
 #' @param dim_names Passed to [ivt_write_parquet()]: name the data-dimension
 #'   columns by the full dimension label (`"label"`, default) or the terse
 #'   structural slug (`"slug"`).
@@ -84,7 +86,8 @@
 get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
                             missing = FALSE, dim_names = c("slug", "label"),
                             language = "en",
-                            keep_ivt = FALSE, refresh = FALSE, quiet = FALSE)
+                            keep_ivt = FALSE, refresh = FALSE, quiet = FALSE,
+                            complete = TRUE)
   ivt_offline_grace({
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to open the parsed Parquet.")
@@ -106,7 +109,8 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
   # for: a table cached without the cell-status sidecar cannot supply it, so
   # `missing = TRUE` re-decodes rather than quietly returning less.
   if (!refresh && file.exists(parquet) &&
-      (!isTRUE(missing) || file.exists(ivt_missing_path(parquet)))) {
+      (!isTRUE(missing) || file.exists(ivt_missing_path(parquet))) &&
+      (!isTRUE(complete) || ivt_parquet_is_complete(parquet))) {
     return(ivt_parquet_connection(parquet, NULL))
   }
 
@@ -137,7 +141,8 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
 
   # 3. Decode and cache the tidy table as Parquet.
   if (!quiet) cli::cli_inform("Decoding {.path {ivt_path}}")
-  tab <- read_ivt(ivt_path, geo_attributes = geo_attributes, missing = missing)
+  tab <- read_ivt(ivt_path, geo_attributes = geo_attributes, missing = missing,
+                  complete = complete)
   ivt_write_parquet(tab, path = parquet, labels = labels, dim_names = dim_names,
                     language = language)
 
@@ -406,6 +411,16 @@ ivt_parquet_connection <- function(parquet, row) {
     attr(ds, "missing") <- md
   }
   ds
+}
+
+# Does a cached Parquet hold the PUBLISHED table (every grid coordinate, flagged
+# cells carrying their symbol) or the older store-only form? A cache written
+# before completion existed answers with fewer rows and no way to tell a
+# suppressed cell from a zero, so it is re-decoded rather than reused.
+ivt_parquet_is_complete <- function(parquet) {
+  nm <- tryCatch(names(arrow::open_dataset(parquet)),
+                 error = function(e) character(0))
+  "symbol" %in% nm
 }
 
 # A filesystem-safe cache key for a catalogue number / custom id.

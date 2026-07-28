@@ -704,7 +704,7 @@ ivt_f2_tidy <- function(x, trim_labels = TRUE, dim_names = c("slug", "label"),
   if (ncol(out) == 0L && !is.null(cells[["geo"]])) out$geo <- cells$geo
   # the non-geography data columns of `cells` line up with the non-geography
   # dimensions in declaration order; label each from its dimension's member list.
-  datacols <- setdiff(names(cells), c("geo", "value"))
+  datacols <- setdiff(names(cells), c("geo", "value", "symbol", "status"))
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
   outnames <- ivt_data_colnames(datacols, meta, dim_names, language)
   for (j in seq_along(datacols)) {

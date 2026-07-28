@@ -129,7 +129,7 @@ test_that("family-2 codebook decodes DGUIDs and member labels", {
 test_that("family-2 ivt_tidy labels geography by DGUID and ages/genders", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
-  x <- read_ivt(p)
+  x <- read_ivt(p, complete = FALSE)
   # default: data columns named by the terse structural slug
   td <- ivt_tidy(x)
   expect_equal(names(td), c("geo_uid", "age", "gender", "value"))
@@ -381,7 +381,7 @@ test_that("a trailing partial chunk is not dropped (98-10-0013 ADA)", {
 test_that("family-2 ivt_tidy labels geography by name when requested", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
-  x <- read_ivt(p, geo_attributes = TRUE)
+  x <- read_ivt(p, geo_attributes = TRUE, complete = FALSE)
   expect_false(is.null(x$metadata$geographies$geo_name))
   td <- ivt_tidy(x)                                # slug data columns by default
   expect_equal(names(td),
@@ -397,7 +397,7 @@ test_that("family-2 ivt_tidy labels geography by name when requested", {
 test_that("family-2 decodes Canada and a sparse geography cell-exact", {
   p <- sample_ivt_f2()
   skip_if(p == "", "no family-2 sample (set CANIVT_SAMPLE_IVT_F2)")
-  x <- read_ivt(p)
+  x <- read_ivt(p, complete = FALSE)
   expect_equal(x$family, 2L)
   expect_equal(names(x$cells), c("geo", "age", "gender", "value"))
 
@@ -631,7 +631,7 @@ test_that("1991 cell decode is exact (int32 dense and int16 sparse pages)", {
 test_that("read_ivt() handles the legacy 1991 table end-to-end", {
   p <- sample_ivt_1991()
   skip_if(p == "", "no 1991 sample (set CANIVT_SAMPLE_IVT_1991)")
-  x <- read_ivt(p)
+  x <- read_ivt(p, complete = FALSE)
   expect_equal(x$family, 2L)
   expect_equal(x$metadata$product_id, "1003011")          # from out-of-line title
   expect_match(x$metadata$title_en, "Population by Single Years of Age")
@@ -657,7 +657,7 @@ test_that("read_ivt() handles the legacy 1991 table end-to-end", {
   expect_equal(unique(ca$geo_uid), "00")
 
   # geo_attributes = TRUE labels geography by name + GEOUID
-  x2 <- read_ivt(p, geo_attributes = TRUE)
+  x2 <- read_ivt(p, geo_attributes = TRUE, complete = FALSE)
   td2 <- ivt_tidy(x2)
   expect_true(all(c("geo_name", "geo_uid") %in% names(td2)))
   expect_equal(unique(td2$geo_name[x2$cells$geo == 1L]), "Canada")
@@ -929,7 +929,7 @@ test_that("the 1981 profile variant decodes: geography LAST, count-reconciled Va
   expect_equal(lay$window_count, 3L)              # ceiling(5989 / 2048)
   expect_true(ivt_page_preflight(raw))
   expect_true(ivt_is_supported(raw))
-  x <- read_ivt(p)
+  x <- read_ivt(p, complete = FALSE)
   expect_equal(nrow(x$cells), 418400L)
   # Canada, "Population, 1981" -- the published 1981 census total
   can <- x$cells[x$cells$geo == 1L & x$cells$profile == 2L, ]
@@ -1084,7 +1084,7 @@ test_that("the 2016 income table decodes, with suppression as ABSENT cells", {
   # inline dqf flag ends in 9 (validated vs the viewer: every blank/suppressed
   # cell belongs to such a geography; published geographies' absent cells all
   # render as 0)
-  x <- read_ivt(p)
+  x <- read_ivt(p, complete = FALSE)
   g <- x$metadata$geographies
   expect_true(all(c("dqf_code", "has_data") %in% names(g)))
   expect_equal(sum(!g$has_data), 888L)

@@ -66,10 +66,14 @@ corpus_probe <- function(row) {
   if (!isTRUE(row$supported)) return(out)
   # strict mode is per-process state; `with_options` scopes it to this read even
   # under `mc.preschedule = FALSE` (one child per job, but be explicit).
+  # `complete = FALSE`: the ledger's `n_cells` is the STORE -- the file's own
+  # stored-value count, which is what a decode regression moves. The published
+  # grid is a function of that plus the layout, and completing 4.3 billion
+  # corpus rows would be the sweep's cost rather than its subject.
   cap <- if (isTRUE(row$strict_clean)) {
-    ivt_test_capture(withr::with_options(list(canivt.strict = TRUE), read_ivt(f)))
+    ivt_test_capture(withr::with_options(list(canivt.strict = TRUE), read_ivt(f, complete = FALSE)))
   } else {
-    ivt_test_capture(read_ivt(f))
+    ivt_test_capture(read_ivt(f, complete = FALSE))
   }
   out$read_error <- cap$error
   out$warnings <- cap$warnings

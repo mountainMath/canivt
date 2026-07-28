@@ -9,6 +9,7 @@ ivt_read_table(
   dest_dir = NULL,
   lang = c("en", "fr"),
   missing = FALSE,
+  complete = TRUE,
   ...
 )
 }
@@ -22,9 +23,13 @@ i.e. option \code{canivt.ivt_cache} or \code{\link[=tempdir]{tempdir()}} when un
 
 \item{lang}{\code{"en"} (default) or \code{"fr"} endpoint.}
 
-\item{missing}{Passed to \code{\link[=read_ivt]{read_ivt()}}: when \code{TRUE}, also decode each page's
-cell-status block, adding \verb{$missing} (which absent cells are suppressed,
-not applicable, and so on, per the file's own legend).}
+\item{missing}{Passed to \code{\link[=read_ivt]{read_ivt()}}: when \code{TRUE}, also return \verb{$missing},
+the flagged cells on their own (which absent cells are suppressed, not
+applicable, and so on, per the file's own legend).}
+
+\item{complete}{Passed to \code{\link[=read_ivt]{read_ivt()}}: when \code{TRUE} (the default) \verb{$cells}
+is the published table -- every grid coordinate, zeros written out and
+flagged cells carrying their symbol.}
 
 \item{...}{Passed to \code{\link[=ivt_download]{ivt_download()}}.}
 }

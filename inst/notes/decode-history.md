@@ -915,6 +915,72 @@ sparse-slot rules — see the two entries at the foot of this file.)
 
 ## Milestones — how the architecture arrived
 
+### The published table becomes the default output (2026-07-28)
+
+The brief was blunt: *the output should resemble the StatCan CSV in terms of
+which rows are included and how the symbols and codes are handled; the user does
+not care how the data was stored.* Which meant the sparse store had to stop
+being the public shape.
+
+**What the CSV actually publishes had to be measured, not assumed.** The census
+CSV download is WIDE — `REF_DATE, GEO, DGUID, <dims>, Coordinate,
+<lastdim>:member[i], Symbol, …` — with `Coordinate` holding dotted 1-based member
+ids for every dimension but the last. Unrolled, 98-10-0040 comes to 12,528 rows
+= 174 × 9 × 8: **the entire cartesian grid**, zeros written out explicitly, a
+`Symbol` column beside every value. So "which rows are included" is not a
+question about the store at all; it is the grid, and the grid is a property of
+the layout the decoder already computes.
+
+**The completion rule is the cell-status block's job.** *An absent cell is the
+published zero unless its page's status block says otherwise.* Both halves are
+read off the file: the grid from `ivt_layout()` (enumerating `coords_of()` over
+the whole entry cartesian reproduces `prod(lay$counts)` exactly, no duplicates),
+the exceptions from the tail decoded the day before. The rule was then checked
+against StatCan's own CSVs on five tables spanning every page class — mask-only,
+array-only, no-tail, and mixed:
+
+| table | grid | values | flagged | zeros | rows only in CSV / only in grid | max\|diff\| |
+|---|---:|---:|---:|---:|---:|---:|
+| 98-10-0040 | 12,528 | 12,469 | 59 | 877 | 0 / 0 | 0 |
+| 98-10-0019 | 4,941 | 4,941 | 0 | 1 | 0 / 0 | 0 |
+| 98-10-0021 | 890,112 | 835,578 | 54,534 | 130,534 | 0 / 0 | 0 |
+| 98-10-0478 | 484,869 | 478,016 | 6,853 | 305,900 | 0 / 0 | 0 |
+| 98-10-0655 | 11,154 | 8,554 | 2,600 | 3,650 | 0 / 0 | 0 |
+
+Every symbol cross-tab is diagonal. An independent witness agrees from outside
+the file: WDS `getCubeMetadata`'s `nbDatapointsCube` equals stored + flagged on
+every sparse cube checked (98-10-0040 11,651 = 11,592 + 59; 98-10-0241
+28,599,656 = 7,489,464 + 21,110,192; 98-10-0393 259,297,429 = 27,508,287 +
+231,789,142).
+
+**The confirming half is the tables that write no tail.** 36 corpus tables carry
+no status information whatsoever (CBP2007/2008/2010DA, the Business-Register /
+UCR / older-survey lineages). Under the rule their absences complete to zeros —
+the same treatment the CSV-backed tables get for their own tail-less pages, and
+98-10-0019 is the proof in miniature: 4,941 grid cells, 4,941 published values,
+one of them a zero the store does not hold, no flags anywhere.
+
+**Two deliberate deviations from the CSV**, both stated rather than papered over:
+canivt emits `value = NA` for a flagged cell where the CSV writes `0` with a
+symbol (missing values are NA, not zero), and it reports the symbol **verbatim
+from the file's own `@698` legend**, so `X` where the published legend prints
+`x`. Mapping the casing would mean hard-coding external ground truth into the
+parse path, which this package does not do.
+
+**Two implementation traps worth remembering.** The per-entry loop had to become
+a single-pass `repeat` (every `next` → `break`) so that a directory entry with no
+page still emits its coordinates — a geography the file never wrote is still
+published, as zeros. And the "unclassified" tally cannot be computed as
+`value == 0 & code == 0`: that conflates a *stored* zero with an absence. It
+needs an explicit `known` mask over the presence rows and the flagged rows.
+
+**Scale is the real cost.** The corpus grid totals 4,297,528,389 rows against
+365,994,134 stored cells — ~11.7×, and nine tables exceed 100 M grid cells (the
+largest, `CBP2008DA`, 522.6 M, with no status information at all). Hence
+`ivt_complete_budget()` and `getOption("canivt.max_cells", 1e8)`: a clear refusal
+naming the size and both escapes, rather than dying in an allocation. StatCan's
+own zips for those tables run 279–947 MB, so they publish the full grid too.
+
 ### The cell-status block: the IVT does encode missing data (2026-07-27)
 
 The question that opened it: *if a derived CSV has missing values, they must have

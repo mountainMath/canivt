@@ -7,9 +7,12 @@
 #' [read_ivt()]s it.
 #'
 #' @inheritParams ivt_download
-#' @param missing Passed to [read_ivt()]: when `TRUE`, also decode each page's
-#'   cell-status block, adding `$missing` (which absent cells are suppressed,
-#'   not applicable, and so on, per the file's own legend).
+#' @param missing Passed to [read_ivt()]: when `TRUE`, also return `$missing`,
+#'   the flagged cells on their own (which absent cells are suppressed, not
+#'   applicable, and so on, per the file's own legend).
+#' @param complete Passed to [read_ivt()]: when `TRUE` (the default) `$cells`
+#'   is the published table -- every grid coordinate, zeros written out and
+#'   flagged cells carrying their symbol.
 #' @param ... Passed to [ivt_download()].
 #' @return An `ivt` object (see [read_ivt()]), or `NULL` (invisibly, with a
 #'   warning) if the table could not be downloaded (e.g. offline).
@@ -25,9 +28,9 @@
 #' }
 #' @export
 ivt_read_table <- function(pid, dest_dir = NULL, lang = c("en", "fr"),
-                           missing = FALSE, ...) {
+                           missing = FALSE, complete = TRUE, ...) {
   ivt_offline_grace({
     path <- ivt_download_impl(pid, dest_dir = dest_dir, lang = match.arg(lang), ...)
-    read_ivt(path, missing = missing)
+    read_ivt(path, missing = missing, complete = complete)
   })
 }

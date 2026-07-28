@@ -365,7 +365,7 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   }
   if (nvf == nv)                                   # every stored value is a cell
     return(list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals,
-                extra = 0L, extra_nz = 0L))
+                rows = which(pres), extra = 0L, extra_nz = 0L))
   # The record flags positions the grid does not model, so a value's index in the
   # run is its RANK AMONG ALL PRESENT BITS, not among the modelled ones. Take that
   # rank explicitly rather than assuming the unmodelled bits sit past the last
@@ -376,7 +376,7 @@ ivt_decode_page <- function(raw, off, lay, size = NA_integer_) {
   vi <- cumsum(full)[lay$grid$bit[pres] + 1L]
   keepv <- logical(nvf); keepv[vi] <- TRUE      # `-vi` would empty an all-extra page
   list(tuples = lay$grid$tuples[pres, , drop = FALSE], vals = vals[vi],
-       extra = nvf - nv, extra_nz = sum(vals[!keepv] != 0))
+       rows = which(pres), extra = nvf - nv, extra_nz = sum(vals[!keepv] != 0))
 }
 
 # The DENSE page variant (marker high nibble 0x0; the 1991 profile tables
@@ -413,7 +413,7 @@ ivt_decode_page_dense <- function(raw, off, lay, size, width, is_float) {
   # A dense page has no presence record, so it cannot flag an undeclared slot:
   # it stores one value per GRID position and the run past `ngrid` is padding.
   list(tuples = lay$grid$tuples[seq_len(k), , drop = FALSE][keep, , drop = FALSE],
-       vals = vals[keep], extra = 0L, extra_nz = 0L)
+       vals = vals[keep], rows = which(keep), extra = 0L, extra_nz = 0L)
 }
 
 # Cheap structural pre-flight for the decodability gate: the first few
@@ -597,10 +597,20 @@ ivt_skip_is_lost_page <- function(raw, off, size, lay, n = length(raw)) {
 #' page, and its completeness depends on the vintage (pages with no tail, with a
 #' `0xa` reason-code array, or with an unaccountable tail contribute nothing, and
 #' say so loudly).
+#'
+#' `complete = TRUE` (which implies `missing`) returns the **published table**
+#' instead of the store: one row per real grid coordinate, with `value` carrying
+#' the published zero where a cell is absent and the file says nothing about it,
+#' `NA` where the file states a reason, and `symbol` / `status` naming that
+#' reason. See `ivt_complete_cells()` (`complete.R`) for the classification.
 #' @keywords internal
 #' @noRd
-ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
+ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
   if (is.null(lay)) lay <- ivt_layout(raw)
+  if (isTRUE(complete)) {
+    missing <- TRUE                 # the tail is what separates zero from missing
+    ivt_complete_budget(lay)
+  }
   n <- length(raw); idx0 <- ivt_idx0(raw)
   m <- lay$n_dim; straddle <- lay$straddle; ipc1 <- lay$ipc[1L]
   ne <- length(lay$ent_counts)
@@ -658,6 +668,14 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
   }
 
   md_acc <- vector("list", nrow(coord)); v_acc <- vector("list", nrow(coord)); ci <- 0L
+  # complete-grid accumulators: coordinates / values / reason codes, one entry
+  # per directory coordinate whether or not a page was ever written for it.
+  ncoord <- nrow(coord)
+  full_md <- if (complete) vector("list", ncoord) else NULL
+  full_v  <- if (complete) vector("list", ncoord) else NULL
+  full_cd <- if (complete) vector("list", ncoord) else NULL
+  fi <- 0L; unclassified <- 0
+  gtup <- lay$grid$tuples; ngrid <- nrow(gtup)
   skipped_off <- integer(0); skipped_ex <- character(); hole_vals <- 0L
   extra_vals <- 0L; extra_nz <- 0L
   miss_acc <- list(); miss_st <- list(); miss_sy <- list(); mi <- 0L
@@ -674,8 +692,17 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
                                  symbol = IVT_STATUS_SYMBOLS)
   leg_txt <- leg$text_en; leg_sym <- leg$symbol
   for (r in seq_len(nrow(coord))) {
+    # Complete mode has to emit a row for every coordinate this entry covers even
+    # when the entry carries no page at all -- a geography the file never wrote
+    # is still published, as zeros. So the per-entry body runs inside a
+    # single-pass `repeat`, where the old `next` becomes `break`, and the grid
+    # rows are emitted afterwards from whatever the body managed to establish:
+    # `pg` (the values), `fr`/`fc` (the reason-coded rows), `unk` (a page whose
+    # own statement we could not read, so its absences are not classified).
+    pg <- NULL; fr <- integer(0); fc <- integer(0); undet <- FALSE
+    repeat {
     en <- ivt_dir_entry(raw, idx0 + eidx[r] * 8L, n)
-    if (is.null(en)) next
+    if (is.null(en)) break
     off <- en$off; s1 <- en$size
     if (!en$marker) {
       # A directory entry whose target is a REAL value page we cannot decode is
@@ -689,8 +716,9 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
         skipped_off <- c(skipped_off, off)
         ex <- paste(sprintf("%02x", as.integer(raw[off + 1:4])), collapse = " ")
         if (!ex %in% skipped_ex) skipped_ex <- c(skipped_ex, ex)
+        undet <- TRUE                 # a real page we cannot read says nothing
       }
-      next
+      break
     }
     # The cell-status tail, read BEFORE the value decode: a wholly-suppressed
     # page carries no values at all (`ivt_decode_page()` returns NULL) yet its
@@ -710,16 +738,25 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
         # what we think it is, so the page contributes nothing.
         if (any(mb & pr) && st$nan_words == 0L) {
           st_tally[["contradictory"]] <- st_tally[["contradictory"]] + 1L
+          undet <- TRUE
         } else {
           rows <- which(!pr & !mb)
+          # -1 is "missing, reason unstated": the mask says a cell is not a zero,
+          # never why. It is a code slot no legend can occupy, so it cannot
+          # collide with a stated reason.
+          if (complete) { fr <- rows; fc <- rep(-1L, length(rows)) }
           if (length(rows)) {
             cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
             if (any(cc$keep)) {
-              mi <- mi + 1L
-              miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
-              # The mask says a cell is missing, never WHY.
-              miss_st[[mi]] <- rep(NA_character_, sum(cc$keep))
-              miss_sy[[mi]] <- rep(NA_character_, sum(cc$keep))
+              # Complete mode carries the same cells in the grid itself, so it
+              # takes the tallies and skips the second copy.
+              if (!complete) {
+                mi <- mi + 1L
+                miss_acc[[mi]] <- cc$md[cc$keep, , drop = FALSE]
+                # The mask says a cell is missing, never WHY.
+                miss_st[[mi]] <- rep(NA_character_, sum(cc$keep))
+                miss_sy[[mi]] <- rep(NA_character_, sum(cc$keep))
+              }
               st_tally[["beyond"]] <- st_tally[["beyond"]] +
                 sum(lay$grid$bit[rows][cc$keep] >= st$covered_bits)
             }
@@ -732,12 +769,14 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
         # page contributes nothing (0 pages corpus-wide).
         if (any(st$codes[pr] != 0L)) {
           st_tally[["contradictory"]] <- st_tally[["contradictory"]] + 1L
+          undet <- TRUE
         } else {
           # Code 1 says "nothing here" and the GRID says which nothing: at a
           # padded position it is filler, at a real cell it is `..`. That is
           # exactly the test `coords_of()` already applies, so the two separate
           # themselves without the codes being read a second time.
           rows <- which(!pr & st$codes > 0L)
+          if (complete) { fr <- rows; fc <- st$codes[rows] }
           if (length(rows)) {
             cc <- coords_of(lay$grid$tuples[rows, , drop = FALSE], r)
             if (any(cc$keep)) {
@@ -752,7 +791,7 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
                 unk_tal <- unk_tal + tabulate(cd[unk] + 1L, IVT_STATUS_NCODE)
                 cd <- cd[!unk]; md <- md[!unk, , drop = FALSE]
               }
-              if (length(cd)) {
+              if (length(cd) && !complete) {
                 mi <- mi + 1L
                 miss_acc[[mi]] <- md
                 miss_st[[mi]] <- leg_txt[cd]
@@ -763,19 +802,50 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
         }
       } else if (st$kind == "status") {
         st_tally[["status_unread"]] <- st_tally[["status_unread"]] + 1L
+        undet <- TRUE
+      } else if (st$kind == "unreadable") {
+        undet <- TRUE
       }
     }
     pg <- ivt_decode_page(raw, off, lay, size = s1)
-    if (is.null(pg)) next
+    if (is.null(pg)) break
     extra_vals <- extra_vals + pg$extra; extra_nz <- extra_nz + pg$extra_nz
     # A value at a deleted slot would be a format misunderstanding -- counted
     # and reported loudly below.
     cc <- coords_of(pg$tuples, r)
-    md <- cc$md; keep <- cc$keep
-    for (bad in cc$bads) hole_vals <- hole_vals + sum(pg$vals[bad] != 0)
-    if (!all(keep)) { md <- md[keep, , drop = FALSE]; pg$vals <- pg$vals[keep] }
-    if (!nrow(md)) next
-    ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- pg$vals
+    md <- cc$md; keep <- cc$keep; vv <- pg$vals
+    for (bad in cc$bads) hole_vals <- hole_vals + sum(vv[bad] != 0)
+    # Complete mode re-derives the same rows from the whole grid below, so it
+    # keeps only the tallies from here -- accumulating both would double the
+    # peak memory of the very tables that make it expensive.
+    if (complete) break
+    if (!all(keep)) { md <- md[keep, , drop = FALSE]; vv <- vv[keep] }
+    if (!nrow(md)) break
+    ci <- ci + 1L; md_acc[[ci]] <- md; v_acc[[ci]] <- vv
+    break
+    }
+    if (complete) {
+      cf <- coords_of(gtup, r)
+      kp <- cf$keep
+      if (any(kp)) {
+        v <- numeric(ngrid)                    # absent and unremarked == zero
+        cdv <- integer(ngrid)
+        if (!is.null(pg)) v[pg$rows] <- pg$vals
+        if (length(fr)) { v[fr] <- NA_real_; cdv[fr] <- fc }
+        if (undet) {
+          # The page wrote a statement we could not read, so its absences are
+          # published as zeros without the file having said so -- counted here
+          # and reported loudly, never folded in silently.
+          known <- logical(ngrid)
+          if (!is.null(pg)) known[pg$rows] <- TRUE
+          known[fr] <- TRUE
+          unclassified <- unclassified + sum(kp & !known)
+        }
+        fi <- fi + 1L
+        full_md[[fi]] <- cf$md[kp, , drop = FALSE]
+        full_v[[fi]] <- v[kp]; full_cd[[fi]] <- cdv[kp]
+      }
+    }
   }
   skipped <- length(skipped_off)
   if (skipped > 0L) {
@@ -801,6 +871,17 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE) {
       class = "canivt_undeclared_slot")
   }
 
+  if (complete) {
+    if (unclassified > 0)
+      ivt_fallback(paste(
+        "{unclassified} absent cell{?s} sit{?s/} on pages whose own cell-status",
+        "statement could not be read; {?it is/they are} published as zeros",
+        "without the file having said so."),
+        class = "canivt_absent_unclassified")
+    return(ivt_complete_cells(full_md, full_v, full_cd, fi, lay, st_tally,
+                              unk_tal, leg_declared,
+                              if (leg_declared) leg else NULL))
+  }
   if (ci == 0L) {
     out <- tibble::tibble(.rows = 0L)
     for (j in seq_len(m)) out[[lay$slugs[j]]] <- integer(0)
@@ -840,6 +921,21 @@ ivt_missing_cells <- function(miss_acc, miss_st, miss_sy, mi, lay, tally,
     out$symbol <- unlist(miss_sy[seq_len(mi)], use.names = FALSE)
     out$status <- unlist(miss_st[seq_len(mi)], use.names = FALSE)
   }
+  ivt_status_report(tally, unk_tal, leg_declared, nrow(out))
+  attr(out, "pages") <- tally
+  attr(out, "legend") <- legend
+  out
+}
+
+# Everything the cell-status read could not account for, reported loudly. Shared
+# by the sparse (`missing = TRUE`) and complete paths so the two can never
+# disagree about what was left unsaid. `unclassified` selects the wording: the
+# sparse path leaves a tail-less page's absences UNCLASSIFIED, while the complete
+# path has already published them as zeros (validated against StatCan's own CSV:
+# a page writes no tail exactly when it has nothing to flag) and reports only the
+# pages whose written statement could not be read.
+ivt_status_report <- function(tally, unk_tal, leg_declared, n_missing,
+                              unclassified = TRUE) {
   # A `0xa` array whose meaning the file does not state. The NDM vocabulary is
   # right for the census lineage and demonstrably wrong for others (the 2016
   # `98-400-X` legend shifts every symbol by one), so naming a code from it is
@@ -853,7 +949,7 @@ ivt_missing_cells <- function(miss_acc, miss_st, miss_sy, mi, lay, tally,
       class = "canivt_status_legend")
   }
   n_un <- tally[["none"]] + tally[["unreadable"]] + tally[["contradictory"]]
-  if (n_un > 0L) {
+  if (unclassified && n_un > 0L) {
     ivt_fallback(paste(
       "{n_un} page{?s} carr{?ies/y} no readable cell-status tail",
       "({tally[['none']]} with no tail, {tally[['unreadable']]} whose index does",
@@ -892,7 +988,7 @@ ivt_missing_cells <- function(miss_acc, miss_st, miss_sy, mi, lay, tally,
   }
   if (tally[["beyond"]] > 0L) {
     ivt_fallback(paste(
-      "{tally[['beyond']]} of the {nrow(out)} missing cell{?s} sit{?s/} past the",
+      "{tally[['beyond']]} of the {n_missing} missing cell{?s} sit{?s/} past the",
       "reach of {?its/their} page's word INDEX: the file has no bit with which to",
       "classify {?it/them}, so {?it is/they are} reported missing without the file",
       "saying so -- treat {?this cell/these cells} as unconfirmed."),
@@ -909,7 +1005,5 @@ ivt_missing_cells <- function(miss_acc, miss_st, miss_sy, mi, lay, tally,
       "cell{?s} may be missing rather than zero and cannot be told apart."),
       class = "canivt_status_nan_quieted")
   }
-  attr(out, "pages") <- tally
-  attr(out, "legend") <- legend
-  out
+  invisible(NULL)
 }

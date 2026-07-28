@@ -242,6 +242,22 @@ without that rebuild is what made its addressing look lineage-specific for so
 long. The reason codes are numbered **per file**, by a legend the file declares
 in its header (`@698`), which is what finally named the codes `≥ 4`.
 
+**What the block licenses.** It is the only thing that makes the *published*
+table recoverable from the store, and `read_ivt()` returns that table by
+default. The rule:
+
+> An absent cell is the **published zero** unless its page's cell-status block
+> says otherwise.
+
+A page that writes no tail is a page with nothing to flag — the confirming half
+is the 36 corpus tables that write no tail at all, whose absences are all zeros,
+and 98-10-0019, whose 4,941 published cells include exactly one zero the store
+does not hold. A page that writes a tail this reader cannot account for has its
+absences published as zeros too, but they are counted and reported
+(`canivt_absent_unclassified`). Validated cell-for-cell against StatCan's own
+CSV downloads on five tables spanning every page class; see
+`inst/notes/coverage.md`.
+
 ### `b0` high nibble `0x8` — the bare absent mask (1 bit per cell)
 
 No descriptor.

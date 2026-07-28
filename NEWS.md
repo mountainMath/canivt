@@ -1,5 +1,28 @@
 # canivt 0.5.0
 
+* **`read_ivt()` now returns the published table, not the store.** `x$cells`
+  spans the whole grid — one row per real coordinate, the way StatCan's own CSV
+  download publishes it — with the published zeros written out, flagged cells
+  carrying `value = NA`, and two new factor columns, `symbol` and `status`,
+  naming the reason the file states for each flagged cell. The rule is read off
+  the file, never off a published CSV: *an absent cell is the published zero
+  unless its page's cell-status block says otherwise*. A page that writes no
+  tail is a page with nothing to flag; a page whose tail cannot be read has its
+  absences published as zeros **and counted**, loudly
+  (`canivt_absent_unclassified`).
+
+  Validated cell-for-cell against StatCan's published CSVs on five tables
+  covering every page class — 98-10-0040, 0019, 0021, 0478, 0655 — with every
+  row present, no extra row, `max|difference| = 0` on every value and every
+  published symbol matched. Corroborated independently by the WDS
+  `nbDatapointsCube` count, which equals stored cells plus flagged cells on
+  every sparse cube checked.
+
+  `read_ivt(complete = FALSE)` restores the previous store-only output. Because
+  completion multiplies the row count (~12× over the development corpus, far
+  more on a sparse crosstab), it is refused above
+  `getOption("canivt.max_cells", 1e8)` grid cells with a message naming the size
+  and both ways forward.
 * **`read_ivt(missing = TRUE)` decodes which absent cells are genuine zeros and
   which are MISSING**, returning them as `x$missing` — a coordinate tibble
   shaped like `x$cells` minus `value`, with a per-page-class tally in

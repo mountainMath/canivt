@@ -236,12 +236,12 @@ ivt_members_path <- function(path) {
 #' object from [read_ivt(missing = TRUE)][read_ivt], a Parquet path, or the
 #' Arrow connection [get_statcan_ivt()] returns.
 #'
-#' Only cells with a value are stored, so an absent cell is *either* a published
-#' zero or a missing value, and this table is the only thing that separates
-#' them: every row is an absent cell the file marks as **not** a zero, with the
-#' reason the file states (`symbol` / `status`), or `NA` where the page carries
-#' only the bare absent mask. Absent cells that appear in neither table are
-#' genuine zeros.
+#' Every row is a cell the file marks as **not** a zero, with the reason the
+#' file states (`symbol` / `status`), or `NA` where the page carries only the
+#' bare absent mask. On the published table ([read_ivt()]'s default
+#' `complete = TRUE`) these are simply its `is.na(value)` rows, so this is a
+#' convenience view; under `complete = FALSE` it is the only thing separating a
+#' suppressed cell from a published zero, since neither is stored.
 #'
 #' @param x An `ivt` object, a `.parquet` path, or an Arrow dataset / dplyr query
 #'   from [get_statcan_ivt()].

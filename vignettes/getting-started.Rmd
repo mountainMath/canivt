@@ -154,26 +154,33 @@ plot_data |>
 
 ## A note on cells that aren't there
 
-An IVT stores only the cells that have a value, so a coordinate missing from the
-result is **not** necessarily a zero — it may be a suppressed or not-applicable
-value. Which it is, the file does say, in a status block after each page's
-values; it is off by default because on a large sparse crosstab those cells
-outnumber the data. Turn it on when you intend to fill the grid in:
+An IVT stores only the cells that have a value: zeros are not written, and
+neither are suppressed or not-applicable cells. What you get back, though, is
+the **published table** — every coordinate of the grid, exactly the rows
+StatCan's own CSV download carries:
 
 ```r
-tab <- ivt_read_table("98100040", missing = TRUE)
-
-ivt_tidy(tab, missing = TRUE)          # missing cells as `value = NA` rows,
-                                       # with `symbol` / `status` saying why
-ivt_missing(tab)                       # just those cells
-attr(ivt_missing(tab), "legend")       # the symbols, in the file's own words
-
-get_statcan_ivt("98-10-0040", missing = TRUE)   # cached alongside the data
+tab <- read_ivt("98100040.ivt")
+ivt_tidy(tab)
+#> ... value  symbol status
+#>      24140  NA     NA               # a value
+#>          0  NA     NA               # a published zero
+#>         NA  x      Suppressed ...   # flagged, and why
 ```
 
-Without it, completing the grid with zeros turns every suppressed value into a
-`0`. See `?read_ivt` for the caveats (a few vintages write no status block at
-all, and each gap warns rather than being folded into the count).
+Three kinds of row, and the difference between the last two is the point:
+completing the grid yourself from a stored-values-only table would turn every
+suppressed cell into a `0`. The file does say which is which, in a status block
+after each page's values, and that is what separates them here. Each flagged
+cell carries `symbol` and `status` **in the file's own words** — the legend the
+table declares in its own header, so `x` means whatever this table says `x`
+means. `attr(ivt_tidy(tab), "legend")` is that legend.
+
+`read_ivt(complete = FALSE)` gives you the raw store instead — smaller and
+faster, but then absence is ambiguous again, so pair it with `missing = TRUE`
+and `ivt_missing()` if you plan to fill the grid in. See `?read_ivt` for the
+caveats: a page whose status block cannot be read has its absences published as
+zeros and warns rather than staying silent.
 
 ## Recap
 

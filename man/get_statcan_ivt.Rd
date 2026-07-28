@@ -13,7 +13,8 @@ get_statcan_ivt(
   language = "en",
   keep_ivt = FALSE,
   refresh = FALSE,
-  quiet = FALSE
+  quiet = FALSE,
+  complete = TRUE
 )
 }
 \arguments{
@@ -35,14 +36,11 @@ geography attribute table (slower) so geographies can be labelled by name.}
 \item{labels}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: write labelled columns
 (\code{TRUE}, default) or the compact integer-id table.}
 
-\item{missing}{Passed to \code{\link[=read_ivt]{read_ivt()}}: also decode each page's cell-status
-block, and cache it as a \verb{<key>_<lang>_missing.parquet} sidecar giving, for
-every cell the data table does not carry, whether it is a genuine zero or a
-missing value and -- where the file states one -- why. Off by default
-because it costs a second read per page and, on a large sparse crosstab,
-far more rows than the data itself (most of them coordinates that simply do
-not exist). A cached Parquet with no sidecar is re-decoded when this is
-\code{TRUE}.}
+\item{missing}{Passed to \code{\link[=read_ivt]{read_ivt()}}: additionally cache the flagged cells
+on their own as a \verb{<key>_<lang>_missing.parquet} sidecar. Off by default
+because the cached table already carries them (see \code{complete}); the sidecar
+is only worth writing when the same cells are wanted in isolation. A cached
+Parquet with no sidecar is re-decoded when this is \code{TRUE}.}
 
 \item{dim_names}{Passed to \code{\link[=ivt_write_parquet]{ivt_write_parquet()}}: name the data-dimension
 columns by the full dimension label (\code{"label"}, default) or the terse
@@ -60,6 +58,12 @@ persisted in the ivt cache is reused regardless of this flag.}
 \item{refresh}{Re-download and re-parse even if cached outputs exist.}
 
 \item{quiet}{Suppress progress messages.}
+
+\item{complete}{Passed to \code{\link[=read_ivt]{read_ivt()}}: cache the \strong{published table} -- every
+grid coordinate, published zeros included, flagged cells carrying
+\code{symbol}/\code{status} and a \code{NA} value (\code{TRUE}, default). A Parquet cached in
+the older store-only form is re-decoded rather than answering with fewer
+rows.}
 }
 \value{
 An \code{\link[arrow:open_dataset]{arrow::open_dataset()}} connection to the Parquet file. The Parquet

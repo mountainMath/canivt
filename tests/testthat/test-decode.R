@@ -215,7 +215,7 @@ test_that("table-level (cube) footnotes are recovered from the master-directory 
 test_that("Canada decodes to the published tenure totals", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
-  tab <- read_ivt(p)
+  tab <- read_ivt(p, complete = FALSE)
   expect_equal(nrow(tab$cells), 7489464L)
   # by default data columns are named by the terse structural slug (descriptor order)
   td <- ivt_tidy(tab)
@@ -263,7 +263,7 @@ test_that("dimensions carry French labels + a French dimension name", {
 test_that("ivt_tidy language = 'fr' emits French labels and column names", {
   p <- sample_ivt()
   skip_if(p == "", "no sample IVT (set CANIVT_SAMPLE_IVT)")
-  tab <- read_ivt(p)
+  tab <- read_ivt(p, complete = FALSE)
   # default slug columns, but French member values (mixed-case language normalises)
   fr <- ivt_tidy(tab, language = "Fra")
   expect_true(all(c("age", "tenure") %in% names(fr)))
@@ -297,7 +297,7 @@ test_that("98-10-0662 is detected as family 1 and decodes (small file, mixed int
   expect_equal(L$ent_counts, c(2L, 5L, 91L))
   expect_equal(L$estride, c(1L, 2L, 16L))     # geography stride 16 entries x 8 = 0x80/geo
   expect_false(L$geo_in_page)                 # a data dim straddles -> geography paged
-  tab <- read_ivt(p)
+  tab <- read_ivt(p, complete = FALSE)
   expect_equal(tab$family, 1L)
   expect_false(anyNA(tab$cells$value))        # the family-2 misroute produced NaNs
   expect_equal(sort(unique(tab$cells$geo)), 1:91)

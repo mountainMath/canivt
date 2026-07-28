@@ -24,12 +24,12 @@ object from \link[=read_ivt]{read_ivt(missing = TRUE)}, a Parquet path, or the
 Arrow connection \code{\link[=get_statcan_ivt]{get_statcan_ivt()}} returns.
 }
 \details{
-Only cells with a value are stored, so an absent cell is \emph{either} a published
-zero or a missing value, and this table is the only thing that separates
-them: every row is an absent cell the file marks as \strong{not} a zero, with the
-reason the file states (\code{symbol} / \code{status}), or \code{NA} where the page carries
-only the bare absent mask. Absent cells that appear in neither table are
-genuine zeros.
+Every row is a cell the file marks as \strong{not} a zero, with the reason the
+file states (\code{symbol} / \code{status}), or \code{NA} where the page carries only the
+bare absent mask. On the published table (\code{\link[=read_ivt]{read_ivt()}}'s default
+\code{complete = TRUE}) these are simply its \code{is.na(value)} rows, so this is a
+convenience view; under \code{complete = FALSE} it is the only thing separating a
+suppressed cell from a published zero, since neither is stored.
 }
 \examples{
 path <- system.file("extdata", "98100044.ivt", package = "canivt")

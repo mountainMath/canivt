@@ -61,8 +61,34 @@ decoded (see below).
   54 corpus tables report missing cells, **624,500,113** in all; the remaining
   125 report none, which is the confirming half — those tables publish no
   missings. `x$missing` carries a `status` column naming the reason where the
-  file states one. Off by default: the ledger asserts exact cell counts and
-  warning sets, and completeness is vintage-dependent (below).
+  file states one.
+- [x] **The published table** (2026-07-28; `complete.R`, `read_ivt()`'s default).
+  The status tail is what licenses the completion rule — *an absent cell is the
+  published zero unless its page's cell-status block says otherwise* — so
+  `x$cells` now spans the whole grid, published zeros written out, flagged cells
+  carrying `value = NA` + `symbol`/`status` from the file's own `@698` legend.
+  Validated cell-for-cell against StatCan's published CSVs on five tables
+  covering every page class:
+
+  | table | grid | values | flagged | zeros | rows only in CSV / only in grid | max\|diff\| |
+  |---|---:|---:|---:|---:|---:|---:|
+  | 98-10-0040 | 12,528 | 12,469 | 59 | 877 | 0 / 0 | 0 |
+  | 98-10-0019 | 4,941 | 4,941 | 0 | 1 | 0 / 0 | 0 |
+  | 98-10-0021 | 890,112 | 835,578 | 54,534 | 130,534 | 0 / 0 | 0 |
+  | 98-10-0478 | 484,869 | 478,016 | 6,853 | 305,900 | 0 / 0 | 0 |
+  | 98-10-0655 | 11,154 | 8,554 | 2,600 | 3,650 | 0 / 0 | 0 |
+
+  Every published symbol is matched (`x`/`...` cross-tabs are diagonal;
+  canivt reports the legend's own casing, so `X` where the CSV prints `x`), and
+  the CSV's `0`-with-symbol convention becomes `NA`-with-symbol here — missing
+  values are NA, deliberately. Corroborated independently by the WDS
+  `nbDatapointsCube` count = stored + flagged (98-10-0040 11,651 = 11,592 + 59;
+  98-10-0241 28,599,656 = 7,489,464 + 21,110,192; 98-10-0393 259,297,429 =
+  27,508,287 + 231,789,142). A page whose tail cannot be read publishes its
+  absences as zeros **and counts them** (`canivt_absent_unclassified`).
+  `complete = FALSE` returns the store; the corpus grid totals 4,297,528,389
+  rows against 365,994,134 stored cells (~11.7×), hence the
+  `getOption("canivt.max_cells", 1e8)` guard.
 - [x] **Geography — all 11 attributes**: name, DGUID/GEOUID, level, type +
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate (StatCan geo attribute keys 3,4,5,9,10,12–17), **on the

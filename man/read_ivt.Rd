@@ -4,7 +4,7 @@
 \alias{read_ivt}
 \title{Read a Beyond 20/20 IVT file}
 \usage{
-read_ivt(path, geo_attributes = FALSE, missing = FALSE)
+read_ivt(path, geo_attributes = FALSE, missing = FALSE, complete = TRUE)
 }
 \arguments{
 \item{path}{Path to an \code{.ivt} file.}
@@ -18,25 +18,29 @@ schema'd tables and the pre-DGUID (inline-codebook) tables already carry
 their full attribute set on the default metadata path. Ignored for
 family-1 tables.}
 
-\item{missing}{If \code{TRUE} (default \code{FALSE}) also decode each page's \strong{cell
-status tail} and return, in a \code{missing} tibble, the coordinates of the
-cells the file marks as \emph{not available} rather than zero (same member-id
-columns as \code{cells}, no \code{value}, plus \code{symbol} and \code{status} columns carrying
-the reason \strong{in the file's own words} -- the legend it declares in its
-header, e.g. \code{x} / "Suppressed to meet the confidentiality requirements of
-the Statistics Act" -- or \code{NA} where the page carries only the bare absent
-mask). The legend itself travels as \code{attr(x$missing, "legend")}. Off by
-default because it costs a second presence read per page and its
-completeness is vintage-dependent: pages with no tail at all, pages whose
-tail the word index does not account for, and cells carrying a reason code
-the file's legend does not name all contribute nothing -- each reported
-with a classed warning rather than assumed to hold no missings. See the
-"Missing values" section.}
+\item{missing}{If \code{TRUE} (default \code{FALSE}) also return the flagged cells on
+their own, as a \code{missing} tibble: the same member-id columns as \code{cells}, no
+\code{value}, plus \code{symbol} and \code{status}. On the completed table (the default)
+this is simply the \code{is.na(value)} rows, so it is a convenience view rather
+than extra work; with \code{complete = FALSE} it is decoded separately and is
+the only place the file's missing-value statement appears.}
+
+\item{complete}{If \code{TRUE} (default) return the \strong{published table}: one row
+per real grid coordinate, matching what StatCan's own CSV download
+publishes. Absent cells the file says nothing about become the published
+zero; cells the file flags carry \code{value = NA} plus the \code{symbol} and
+\code{status} it declares for them. \code{FALSE} returns the raw store instead --
+only the cells that carry a stored value, no \code{symbol}/\code{status} columns --
+which is smaller and faster but is \emph{not} a table you can complete to a full
+grid yourself without turning every suppressed cell into a zero. Completion
+is refused above \code{getOption("canivt.max_cells", 1e8)} grid cells.}
 }
 \value{
-An object of class \code{ivt}: a list with \code{cells} (a tibble of one value
+An object of class \code{ivt}: a list with \code{cells} (a tibble of one cell
 per row, keyed by 1-based member-id columns matching the StatCan metadata
-Member IDs), and \code{metadata} (table identity, \code{dimensions}, \code{geographies},
+Member IDs; under the default \code{complete = TRUE} it spans the whole grid and
+carries \code{symbol}/\code{status} factors beside \code{value}), and \code{metadata} (table
+identity, \code{dimensions}, \code{geographies},
 and \code{footnotes}). \code{metadata$geographies} carries, per member and where the
 vintage stores them: the bilingual display label (\code{geo_label},
 \code{geo_label_fr}) and name (\code{geo_name}, \code{geo_name_fr} -- on pre-DGUID tables
@@ -73,11 +77,9 @@ the same linkage is recovered from the \code{(N)} reference markers embedded in 
 member labels (a note there can be cited by many members, so \code{member_refs}
 lists them all).
 
-The value store keeps only non-zero cells, so a cell absent from \code{cells}
-is a \strong{zero} -- \emph{within a geography that carries any data}. A geography
-with no stored cells at all is either wholly suppressed or wholly empty,
-and the cell store cannot distinguish the two: \code{metadata$geographies$has_data}
-flags which geographies carry data, and on the pre-DGUID tables
+\code{metadata$geographies$has_data}
+flags which geographies carry a published non-zero value; on the pre-DGUID
+tables
 \code{metadata$geographies$dqf_code} (the per-geography data-quality flag from
 the codebook) corroborates it (e.g. on the 2016 income table
 98-400-X2016120 the flag's last digit is \code{9} exactly for the 888
@@ -107,9 +109,18 @@ separated by a block each page appends after its dense value run, in one of
 two forms selected by the page marker: a 1-bit \strong{absent mask} -- a strict
 subset of the absent cells, where masked means a genuine zero and
 \emph{unmasked} means missing -- or a self-describing \strong{reason-code array}
-carrying the \code{..} / \code{x} / \code{...} distinction itself. \code{missing = TRUE}
-decodes both, at every code width; only the array states a reason, so
-mask-derived rows carry \code{status = NA}.
+carrying the \code{..} / \code{x} / \code{...} distinction itself. Both are decoded, at
+every code width; only the array states a reason, so mask-derived rows
+carry \code{status = NA}.
+
+That block is what makes the default \code{complete = TRUE} output safe. The
+rule it licenses, read off the file rather than off any published CSV, is:
+an absent cell is the \strong{published zero} unless its page's cell-status
+block says otherwise. A page that writes no tail at all is a page with
+nothing to flag -- validated cell-for-cell against StatCan's published CSVs
+on tables covering every page class -- while a page whose tail cannot be
+read has its absences published as zeros \emph{and counted}
+(\code{canivt_absent_unclassified}), never folded in silently.
 
 The reason codes are \strong{numbered by the file, not by the format}: each
 table declares its own legend -- symbol plus bilingual wording, in code
@@ -133,10 +144,10 @@ The status travels out of the package with the data: \code{\link[=ivt_tidy_missi
 labels the missing-cell table exactly as \code{\link[=ivt_tidy]{ivt_tidy()}} labels the values,
 \code{\link[=ivt_write_parquet]{ivt_write_parquet()}} / \code{\link[=ivt_write_csv]{ivt_write_csv()}} write it beside the data table as
 a \verb{_missing} sidecar, \code{\link[=get_statcan_ivt]{get_statcan_ivt()}} caches it under \code{missing = TRUE},
-and \code{\link[=ivt_missing]{ivt_missing()}} gets it back from any of those forms. That matters
-because an exported table holds only the cells that have a value:
-reconstructing the full grid from it alone fills every suppressed cell with
-a zero, which the sidecar is what prevents.
+and \code{\link[=ivt_missing]{ivt_missing()}} gets it back from any of those forms. Under
+\code{complete = FALSE} that sidecar is essential: the exported table then holds
+only the cells that have a value, so reconstructing the full grid from it
+alone fills every suppressed cell with a zero.
 }
 
 \examples{

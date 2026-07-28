@@ -61,20 +61,21 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   schema'd tables and the pre-DGUID (inline-codebook) tables already carry
 #'   their full attribute set on the default metadata path. Ignored for
 #'   family-1 tables.
-#' @param missing If `TRUE` (default `FALSE`) also decode each page's **cell
-#'   status tail** and return, in a `missing` tibble, the coordinates of the
-#'   cells the file marks as *not available* rather than zero (same member-id
-#'   columns as `cells`, no `value`, plus `symbol` and `status` columns carrying
-#'   the reason **in the file's own words** -- the legend it declares in its
-#'   header, e.g. `x` / "Suppressed to meet the confidentiality requirements of
-#'   the Statistics Act" -- or `NA` where the page carries only the bare absent
-#'   mask). The legend itself travels as `attr(x$missing, "legend")`. Off by
-#'   default because it costs a second presence read per page and its
-#'   completeness is vintage-dependent: pages with no tail at all, pages whose
-#'   tail the word index does not account for, and cells carrying a reason code
-#'   the file's legend does not name all contribute nothing -- each reported
-#'   with a classed warning rather than assumed to hold no missings. See the
-#'   "Missing values" section.
+#' @param missing If `TRUE` (default `FALSE`) also return the flagged cells on
+#'   their own, as a `missing` tibble: the same member-id columns as `cells`, no
+#'   `value`, plus `symbol` and `status`. On the completed table (the default)
+#'   this is simply the `is.na(value)` rows, so it is a convenience view rather
+#'   than extra work; with `complete = FALSE` it is decoded separately and is
+#'   the only place the file's missing-value statement appears.
+#' @param complete If `TRUE` (default) return the **published table**: one row
+#'   per real grid coordinate, matching what StatCan's own CSV download
+#'   publishes. Absent cells the file says nothing about become the published
+#'   zero; cells the file flags carry `value = NA` plus the `symbol` and
+#'   `status` it declares for them. `FALSE` returns the raw store instead --
+#'   only the cells that carry a stored value, no `symbol`/`status` columns --
+#'   which is smaller and faster but is *not* a table you can complete to a full
+#'   grid yourself without turning every suppressed cell into a zero. Completion
+#'   is refused above `getOption("canivt.max_cells", 1e8)` grid cells.
 #' @section Missing values:
 #'   Only non-zero cells are stored, so absence covers **both** genuine zeros
 #'   and true missings (`x` suppressed, `...`/`N` not available). The two are
@@ -82,9 +83,18 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   two forms selected by the page marker: a 1-bit **absent mask** -- a strict
 #'   subset of the absent cells, where masked means a genuine zero and
 #'   *unmasked* means missing -- or a self-describing **reason-code array**
-#'   carrying the `..` / `x` / `...` distinction itself. `missing = TRUE`
-#'   decodes both, at every code width; only the array states a reason, so
-#'   mask-derived rows carry `status = NA`.
+#'   carrying the `..` / `x` / `...` distinction itself. Both are decoded, at
+#'   every code width; only the array states a reason, so mask-derived rows
+#'   carry `status = NA`.
+#'
+#'   That block is what makes the default `complete = TRUE` output safe. The
+#'   rule it licenses, read off the file rather than off any published CSV, is:
+#'   an absent cell is the **published zero** unless its page's cell-status
+#'   block says otherwise. A page that writes no tail at all is a page with
+#'   nothing to flag -- validated cell-for-cell against StatCan's published CSVs
+#'   on tables covering every page class -- while a page whose tail cannot be
+#'   read has its absences published as zeros *and counted*
+#'   (`canivt_absent_unclassified`), never folded in silently.
 #'
 #'   The reason codes are **numbered by the file, not by the format**: each
 #'   table declares its own legend -- symbol plus bilingual wording, in code
@@ -108,13 +118,15 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   labels the missing-cell table exactly as [ivt_tidy()] labels the values,
 #'   [ivt_write_parquet()] / [ivt_write_csv()] write it beside the data table as
 #'   a `_missing` sidecar, [get_statcan_ivt()] caches it under `missing = TRUE`,
-#'   and [ivt_missing()] gets it back from any of those forms. That matters
-#'   because an exported table holds only the cells that have a value:
-#'   reconstructing the full grid from it alone fills every suppressed cell with
-#'   a zero, which the sidecar is what prevents.
-#' @return An object of class `ivt`: a list with `cells` (a tibble of one value
+#'   and [ivt_missing()] gets it back from any of those forms. Under
+#'   `complete = FALSE` that sidecar is essential: the exported table then holds
+#'   only the cells that have a value, so reconstructing the full grid from it
+#'   alone fills every suppressed cell with a zero.
+#' @return An object of class `ivt`: a list with `cells` (a tibble of one cell
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
-#'   Member IDs), and `metadata` (table identity, `dimensions`, `geographies`,
+#'   Member IDs; under the default `complete = TRUE` it spans the whole grid and
+#'   carries `symbol`/`status` factors beside `value`), and `metadata` (table
+#'   identity, `dimensions`, `geographies`,
 #'   and `footnotes`). `metadata$geographies` carries, per member and where the
 #'   vintage stores them: the bilingual display label (`geo_label`,
 #'   `geo_label_fr`) and name (`geo_name`, `geo_name_fr` -- on pre-DGUID tables
@@ -151,11 +163,9 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   member labels (a note there can be cited by many members, so `member_refs`
 #'   lists them all).
 #'
-#'   The value store keeps only non-zero cells, so a cell absent from `cells`
-#'   is a **zero** -- *within a geography that carries any data*. A geography
-#'   with no stored cells at all is either wholly suppressed or wholly empty,
-#'   and the cell store cannot distinguish the two: `metadata$geographies$has_data`
-#'   flags which geographies carry data, and on the pre-DGUID tables
+#'   `metadata$geographies$has_data`
+#'   flags which geographies carry a published non-zero value; on the pre-DGUID
+#'   tables
 #'   `metadata$geographies$dqf_code` (the per-geography data-quality flag from
 #'   the codebook) corroborates it (e.g. on the 2016 income table
 #'   98-400-X2016120 the flag's last digit is `9` exactly for the 888
@@ -168,7 +178,8 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #' ivt
 #' head(ivt$cells)
 #' @export
-read_ivt <- function(path, geo_attributes = FALSE, missing = FALSE) {
+read_ivt <- function(path, geo_attributes = FALSE, missing = FALSE,
+                     complete = TRUE) {
   raw <- readBin(path, "raw", n = file.info(path)$size)
   # the per-file parse memo (memo.R) is warm for the duration of this read and
   # dropped on exit, so the file's bytes are not retained afterwards.
@@ -184,8 +195,9 @@ read_ivt <- function(path, geo_attributes = FALSE, missing = FALSE) {
   # tags provenance / the geography attribute option). The full geography attribute
   # table is only available for the large family-2 tables whose names are not in the
   # cheap single-block codebook; the family-1 tables already carry names by default.
-  cells <- ivt_decode(raw, missing = missing)
-  miss <- attr(cells, "missing", exact = TRUE)
+  cells <- ivt_decode(raw, missing = missing || complete, complete = complete)
+  miss <- if (isTRUE(complete)) ivt_flagged_cells(cells)
+          else attr(cells, "missing", exact = TRUE)
   attr(cells, "missing") <- NULL
   meta <- ivt_f2_metadata(raw)
   if (isTRUE(geo_attributes) && family == 2L)
@@ -200,8 +212,14 @@ read_ivt <- function(path, geo_attributes = FALSE, missing = FALSE) {
   # the per-geography `dqf_code` flag corroborates it (last digit 9 =
   # suppressed on the 2016 income table).
   n_geo <- length(meta$geographies$member_id)
-  if (n_geo > 0L && nrow(cells) > 0L)
-    meta$geographies$has_data <- tabulate(cells$geo, nbins = n_geo) > 0L
+  if (n_geo > 0L && nrow(cells) > 0L) {
+    # On the completed grid every geography has rows, so presence is "carries a
+    # published value that is not a zero" -- the same distinction, read off the
+    # published table instead of the store.
+    gv <- if (isTRUE(complete)) cells$geo[is.na(cells$value) | cells$value != 0]
+          else cells$geo
+    meta$geographies$has_data <- tabulate(gv, nbins = n_geo) > 0L
+  }
   out <- list(cells = cells, metadata = meta, path = path, family = family)
   if (isTRUE(missing)) out$missing <- miss
   structure(out, class = "ivt")
@@ -280,20 +298,46 @@ ivt_tidy <- function(x, labels = TRUE, trim_labels = TRUE,
   stopifnot(inherits(x, "ivt"))
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
-  if (isTRUE(missing)) {
+  # On the published table (`read_ivt(complete = TRUE)`) the missing cells are
+  # already rows of `cells`, carrying `symbol`/`status`: `missing = TRUE` asks
+  # for a shape it already has, so binding again would duplicate them.
+  if (isTRUE(missing) && is.null(x$cells[["symbol"]])) {
     return(ivt_tidy_bind_missing(x, labels = labels, trim_labels = trim_labels,
                                  dim_names = dim_names, language = language,
                                  depth = depth))
   }
   if (!labels) {
     cells <- x$cells
-    datacols <- setdiff(names(cells), c("geo", "value"))
+    datacols <- setdiff(names(cells), c("geo", "value", "symbol", "status"))
     out_names <- ivt_data_colnames(datacols, x$metadata, dim_names, language)
     names(cells)[match(datacols, names(cells))] <- out_names
     if (depth) cells <- ivt_tidy_add_depth(cells, out_names, x$metadata, language)
-    return(cells)
+    return(ivt_tidy_status(cells, x, language))
   }
-  ivt_f2_tidy(x, trim_labels, dim_names, language, depth)
+  ivt_tidy_status(ivt_f2_tidy(x, trim_labels, dim_names, language, depth),
+                  x, language)
+}
+
+# Carry the cell-status columns of a completed table onto a tidied one, in the
+# requested language. `status` is decoded in English; the file's own legend
+# carries the French wording, so it is swapped in per level (falling back to
+# English wherever the file states none, as everywhere else in the language
+# handling). Both columns stay factors -- on a completed grid they are one level
+# per declared code over tens of millions of rows.
+ivt_tidy_status <- function(out, x, language) {
+  cells <- x$cells
+  if (is.null(cells[["symbol"]])) return(out)
+  out$symbol <- cells$symbol
+  st <- cells$status
+  leg <- attr(cells, "legend", exact = TRUE)
+  if (language == "fr" && !is.null(leg$text_fr) && !anyDuplicated(leg$text_en)) {
+    fr <- leg$text_fr[match(levels(st), leg$text_en)]
+    levels(st)[!is.na(fr)] <- fr[!is.na(fr)]
+  }
+  out$status <- st
+  attr(out, "legend") <- leg
+  attr(out, "pages") <- attr(cells, "pages", exact = TRUE)
+  out
 }
 
 # The long form that carries both: values, then the cells the file says are
@@ -384,7 +428,7 @@ ivt_tidy_missing <- function(x, labels = TRUE, trim_labels = TRUE,
 # non-geography dimensions in declaration order.
 ivt_tidy_add_depth <- function(cells, out_names, meta, language) {
   data_dims <- Filter(function(d) !d$is_geography, meta$dimensions)
-  id_cols <- setdiff(names(cells), c("geo", "value"))
+  id_cols <- setdiff(names(cells), c("geo", "value", "symbol", "status"))
   for (j in seq_along(id_cols)) {
     d <- if (j <= length(data_dims)) data_dims[[j]] else NULL
     if (is.null(d)) next
@@ -418,10 +462,14 @@ print.ivt <- function(x, ...) {
     else
       "geography keyed by member id (read_ivt(geo_attributes=TRUE) for names)"
   cli::cli_text(cli::col_grey(geo_msg))
-  # An absent cell is a zero or a missing value; say which was decoded, so a
-  # table read without the status block does not look like one with no missings.
-  cli::cli_text(cli::col_grey(if (is.null(x$missing))
-      "cell status not decoded (read_ivt(missing=TRUE) to tell zeros from missings)"
+  # An absent cell is a zero or a missing value; say which form this table is
+  # in, so a store-only read does not look like a published table with no
+  # missings.
+  cli::cli_text(cli::col_grey(if (!is.null(x$cells[["symbol"]])) {
+      nf <- sum(is.na(x$cells$value))
+      "published grid: {nrow(x$cells) - nf} value{?s}, {nf} flagged as missing"
+    } else if (is.null(x$missing))
+      "stored cells only (read_ivt(complete=TRUE) for the published grid)"
     else "{nrow(x$missing)} missing cell{?s} decoded (the rest of the absences are zeros)"))
   invisible(x)
 }

@@ -21,7 +21,7 @@ test_that("ivt_mask_bits reads MSB-first and does NOT pair-swap", {
 
 test_that("the bundled table decodes its mask and reports no missing cells", {
   path <- system.file("extdata", "98100044.ivt", package = "canivt")
-  x <- read_ivt(path, missing = TRUE)
+  x <- read_ivt(path, missing = TRUE, complete = FALSE)
   expect_s3_class(x$missing, "tbl_df")
   # same coordinate columns as `cells`, minus the value, plus the reason
   expect_identical(names(x$missing),
@@ -42,8 +42,8 @@ test_that("the bundled table decodes its mask and reports no missing cells", {
 
 test_that("missing = FALSE (the default) leaves cells and the object untouched", {
   path <- system.file("extdata", "98100044.ivt", package = "canivt")
-  a <- read_ivt(path)
-  b <- read_ivt(path, missing = TRUE)
+  a <- read_ivt(path, complete = FALSE)
+  b <- read_ivt(path, missing = TRUE, complete = FALSE)
   expect_null(a$missing)
   expect_null(attr(a$cells, "missing", exact = TRUE))
   expect_null(attr(b$cells, "missing", exact = TRUE))   # moved onto x$missing
@@ -163,7 +163,7 @@ test_that("a page with no readable tail contributes nothing, loudly", {
 
 test_that("ivt_tidy_missing labels the coordinates exactly like ivt_tidy", {
   path <- system.file("extdata", "98100044.ivt", package = "canivt")
-  x <- read_ivt(path, missing = TRUE)
+  x <- read_ivt(path, missing = TRUE, complete = FALSE)
   m <- ivt_tidy_missing(x)
   # the value column is replaced by the reason; everything else lines up
   expect_identical(names(m), c(setdiff(names(ivt_tidy(x)), "value"),
@@ -184,7 +184,7 @@ test_that("the cell-status sidecar is written, found and read back", {
   skip_if_not_installed("arrow")
   path <- system.file("extdata", "98100044.ivt", package = "canivt")
   dir <- withr::local_tempdir()
-  x <- read_ivt(path, missing = TRUE)
+  x <- read_ivt(path, missing = TRUE, complete = FALSE)
   pq <- ivt_write_parquet(x, file.path(dir, "t_en.parquet"))
   side <- ivt_missing_path(pq)
   # unlike the member sidecar this keeps the language marker: it is labelled
@@ -241,7 +241,7 @@ status_probe <- function(row) {
   hit <- list.files(file.path(corpus_dir, row$key), pattern = "\\.ivt$",
                     ignore.case = TRUE, full.names = TRUE)
   if (!length(hit)) return(list(key = row$key, absent = TRUE))
-  cap <- ivt_test_capture(read_ivt(hit[[1L]], missing = TRUE))
+  cap <- ivt_test_capture(read_ivt(hit[[1L]], missing = TRUE, complete = FALSE))
   out <- list(key = row$key, absent = FALSE, error = cap$error)
   if (!is.null(cap$value)) {
     out$n_missing <- nrow(cap$value$missing)
