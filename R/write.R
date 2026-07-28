@@ -1,6 +1,10 @@
 #' Write an IVT table to Parquet
 #'
-#' @param x An `ivt` object from [read_ivt()].
+#' @param x An `ivt` object from [read_ivt()], **or the path to an `.ivt` file**
+#'   -- then the table is decoded and written a chunk at a time and the completed
+#'   grid is never held whole, so a table far larger than memory converts on a
+#'   small machine. The written file is the same one the in-memory path
+#'   produces. See `chunk_cells`.
 #' @param path Output `.parquet` path. Defaults to `<product_id>.parquet` in the
 #'   data cache ([ivt_cache_dir("data")][ivt_cache_dir], i.e. option
 #'   `canivt.data_cache` or [tempdir()] when unset).
@@ -23,7 +27,15 @@
 #' @param language Output language for labels and label-derived column names
 #'   (passed to [ivt_tidy()]): `"en"` (default) or `"fr"`. The member sidecar
 #'   carries both languages regardless.
-#' @param ... Passed to [arrow::write_parquet()].
+#' @param chunk_cells Only when `x` is a file path: how many grid rows to
+#'   decode, write and drop at a time (default `getOption("canivt.chunk_cells",
+#'   5e6)`). Chunks are cut along the outermost paged dimension -- usually
+#'   geography -- which is the axis the file itself pages on, so a chunk is a
+#'   contiguous run of output rows and no page is read twice. A table whose
+#'   layout pages on nothing but the straddle window cannot be sliced and is
+#'   held whole, subject to the usual `canivt.max_cells` guard.
+#' @param ... Passed to [arrow::write_parquet()] (or, on the streaming path, to
+#'   [arrow::ParquetFileWriter]`$create()`).
 #' @return `path`, invisibly.
 #' @examples
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")
@@ -31,16 +43,25 @@
 #' if (requireNamespace("arrow", quietly = TRUE)) {
 #'   out <- ivt_write_parquet(ivt, file.path(tempdir(), "98100044.parquet"))
 #'   file.exists(out)
+#'   # the same file, without holding the completed table in memory
+#'   ivt_write_parquet(path, file.path(tempdir(), "streamed.parquet"))
 #' }
 #' @export
 ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
                               missing = TRUE, dim_names = c("slug", "label"),
-                              language = "en", ...) {
+                              language = "en",
+                              chunk_cells = getOption("canivt.chunk_cells", 5e6),
+                              ...) {
   if (!requireNamespace("arrow", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg arrow} is required to write Parquet.")
   }
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
+  if (is.character(x))
+    return(ivt_write_stream(x, path, "parquet", labels = labels,
+                            members = members, missing = missing,
+                            dim_names = dim_names, language = language,
+                            chunk_cells = chunk_cells, ...))
   # the default cache path carries the language marker so the English and French
   # Parquets of one table coexist (`<pid>_en.parquet` / `<pid>_fr.parquet`).
   if (is.null(path)) path <- ivt_data_cache_file(x, paste0("_", language, ".parquet"))
@@ -62,37 +83,64 @@ ivt_write_parquet <- function(x, path = NULL, labels = TRUE, members = TRUE,
 
 #' Write an IVT table to CSV
 #'
+#' The output is **gzipped by default**. The published table is one row per grid
+#' coordinate with every dimension's label repeated on each of them, which is
+#' about as compressible as tabular data gets -- an order of magnitude off the
+#' plain text, for a format every reader (including `readr`, `arrow`, `pandas`
+#' and `duckdb`) opens directly. Pass `compress = FALSE` for plain `.csv`.
+#'
 #' @inheritParams ivt_write_parquet
-#' @param path Output `.csv` path. Defaults to `<product_id>.csv` in the data
-#'   cache ([ivt_cache_dir("data")][ivt_cache_dir]).
+#' @param path Output `.csv.gz` path. Defaults to `<product_id>.csv.gz` in the
+#'   data cache ([ivt_cache_dir("data")][ivt_cache_dir]). As with
+#'   [ivt_write_parquet()], passing the path of an `.ivt` file as `x` converts it
+#'   a chunk at a time rather than materialising the whole table.
+#' @param compress Gzip the output (`TRUE`, default). The extension always tells
+#'   the truth about the file: `.gz` is appended to a `path` that lacks it, and a
+#'   `path` that already ends in `.gz` is compressed whatever `compress` says.
+#'   The written path -- which may not be the one passed -- is what is returned.
 #' @param missing Also write the cell-status table ([ivt_tidy_missing()]) to a
-#'   `<name>_missing.csv` next to `path` (`TRUE`, default), when `x` carries one
-#'   (i.e. was read with `read_ivt(missing = TRUE)`). Silently skipped
+#'   `<name>_missing.csv.gz` next to `path` (`TRUE`, default), when `x` carries
+#'   one (i.e. was read with `read_ivt(missing = TRUE)`). Silently skipped
 #'   otherwise.
 #' @param ... Passed to the CSV writer ([readr::write_csv()] if available, else
-#'   [utils::write.csv()]).
-#' @return `path`, invisibly.
+#'   [utils::write.table()]).
+#' @return The path written, invisibly.
 #' @examples
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")
 #' ivt <- read_ivt(path)
 #' out <- ivt_write_csv(ivt, file.path(tempdir(), "98100044.csv"))
-#' file.exists(out)
+#' basename(out)                       # .gz appended
+#' head(readLines(out), 3)             # ... and read back transparently
+#' # the same file, decoded and written a chunk at a time, uncompressed
+#' ivt_write_csv(path, file.path(tempdir(), "streamed.csv"), compress = FALSE)
 #' @export
 ivt_write_csv <- function(x, path = NULL, labels = TRUE, missing = TRUE,
-                          dim_names = c("slug", "label"), language = "en", ...) {
+                          dim_names = c("slug", "label"), language = "en",
+                          compress = TRUE,
+                          chunk_cells = getOption("canivt.chunk_cells", 5e6),
+                          ...) {
   dim_names <- match.arg(dim_names)
   language <- ivt_norm_lang(language)
+  if (is.character(x))
+    return(ivt_write_stream(x, path, "csv", labels = labels, members = FALSE,
+                            missing = missing, dim_names = dim_names,
+                            language = language, compress = compress,
+                            chunk_cells = chunk_cells, ...))
   if (is.null(path)) path <- ivt_data_cache_file(x, paste0("_", language, ".csv"))
+  path <- ivt_csv_path(path, compress)
+  # Both the whole-table and the chunked path write through the same sink, so
+  # the two files are identical by construction rather than by agreement.
   wr <- function(df, p) {
-    if (requireNamespace("readr", quietly = TRUE)) readr::write_csv(df, p, ...)
-    else utils::write.csv(df, p, row.names = FALSE, ...)
+    s <- ivt_sink_open(p, "csv", ...)
+    on.exit(ivt_sink_close(s), add = TRUE)
+    ivt_sink_write(s, df)
   }
   wr(ivt_tidy(x, labels = labels, dim_names = dim_names, language = language),
      path)
   if (isTRUE(missing) && !is.null(x$missing)) {
     wr(ivt_tidy_missing(x, labels = labels, dim_names = dim_names,
                         language = language),
-       paste0(sub("\\.csv$", "", path, ignore.case = TRUE), "_missing.csv"))
+       ivt_csv_missing_path(path))
   }
   invisible(path)
 }

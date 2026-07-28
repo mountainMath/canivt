@@ -11,21 +11,29 @@ ivt_write_csv(
   missing = TRUE,
   dim_names = c("slug", "label"),
   language = "en",
+  compress = TRUE,
+  chunk_cells = getOption("canivt.chunk_cells", 5e+06),
   ...
 )
 }
 \arguments{
-\item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
+\item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}, \strong{or the path to an \code{.ivt} file}
+-- then the table is decoded and written a chunk at a time and the completed
+grid is never held whole, so a table far larger than memory converts on a
+small machine. The written file is the same one the in-memory path
+produces. See \code{chunk_cells}.}
 
-\item{path}{Output \code{.csv} path. Defaults to \verb{<product_id>.csv} in the data
-cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}).}
+\item{path}{Output \code{.csv.gz} path. Defaults to \verb{<product_id>.csv.gz} in the
+data cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}). As with
+\code{\link[=ivt_write_parquet]{ivt_write_parquet()}}, passing the path of an \code{.ivt} file as \code{x} converts it
+a chunk at a time rather than materialising the whole table.}
 
 \item{labels}{Passed to \code{\link[=ivt_tidy]{ivt_tidy()}}: write labelled columns (\code{TRUE},
 default) or the compact integer-id table (\code{FALSE}).}
 
 \item{missing}{Also write the cell-status table (\code{\link[=ivt_tidy_missing]{ivt_tidy_missing()}}) to a
-\verb{<name>_missing.csv} next to \code{path} (\code{TRUE}, default), when \code{x} carries one
-(i.e. was read with \code{read_ivt(missing = TRUE)}). Silently skipped
+\verb{<name>_missing.csv.gz} next to \code{path} (\code{TRUE}, default), when \code{x} carries
+one (i.e. was read with \code{read_ivt(missing = TRUE)}). Silently skipped
 otherwise.}
 
 \item{dim_names}{How to name the data-dimension columns (passed to
@@ -37,18 +45,37 @@ labelled on read with \code{\link[=label_ivt_columns]{label_ivt_columns()}}.}
 (passed to \code{\link[=ivt_tidy]{ivt_tidy()}}): \code{"en"} (default) or \code{"fr"}. The member sidecar
 carries both languages regardless.}
 
+\item{compress}{Gzip the output (\code{TRUE}, default). The extension always tells
+the truth about the file: \code{.gz} is appended to a \code{path} that lacks it, and a
+\code{path} that already ends in \code{.gz} is compressed whatever \code{compress} says.
+The written path -- which may not be the one passed -- is what is returned.}
+
+\item{chunk_cells}{Only when \code{x} is a file path: how many grid rows to
+decode, write and drop at a time (default \code{getOption("canivt.chunk_cells", 5e6)}). Chunks are cut along the outermost paged dimension -- usually
+geography -- which is the axis the file itself pages on, so a chunk is a
+contiguous run of output rows and no page is read twice. A table whose
+layout pages on nothing but the straddle window cannot be sliced and is
+held whole, subject to the usual \code{canivt.max_cells} guard.}
+
 \item{...}{Passed to the CSV writer (\code{\link[readr:write_csv]{readr::write_csv()}} if available, else
-\code{\link[utils:write.csv]{utils::write.csv()}}).}
+\code{\link[utils:write.table]{utils::write.table()}}).}
 }
 \value{
-\code{path}, invisibly.
+The path written, invisibly.
 }
 \description{
-Write an IVT table to CSV
+The output is \strong{gzipped by default}. The published table is one row per grid
+coordinate with every dimension's label repeated on each of them, which is
+about as compressible as tabular data gets -- an order of magnitude off the
+plain text, for a format every reader (including \code{readr}, \code{arrow}, \code{pandas}
+and \code{duckdb}) opens directly. Pass \code{compress = FALSE} for plain \code{.csv}.
 }
 \examples{
 path <- system.file("extdata", "98100044.ivt", package = "canivt")
 ivt <- read_ivt(path)
 out <- ivt_write_csv(ivt, file.path(tempdir(), "98100044.csv"))
-file.exists(out)
+basename(out)                       # .gz appended
+head(readLines(out), 3)             # ... and read back transparently
+# the same file, decoded and written a chunk at a time, uncompressed
+ivt_write_csv(path, file.path(tempdir(), "streamed.csv"), compress = FALSE)
 }

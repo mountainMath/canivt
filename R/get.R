@@ -141,10 +141,22 @@ get_statcan_ivt <- function(catalogue, geo_attributes = FALSE, labels = TRUE,
 
   # 3. Decode and cache the tidy table as Parquet.
   if (!quiet) cli::cli_inform("Decoding {.path {ivt_path}}")
-  tab <- read_ivt(ivt_path, geo_attributes = geo_attributes, missing = missing,
-                  complete = complete)
-  ivt_write_parquet(tab, path = parquet, labels = labels, dim_names = dim_names,
-                    language = language)
+  # The published grid of a big table is an order of magnitude larger than the
+  # store it folds out of, and this function's whole output is a file -- so hand
+  # the PATH to the writer and let it decode, write and drop a chunk at a time
+  # (`stream.R`). The result is the same file; only the peak memory differs.
+  # `geo_attributes = TRUE` still materialises: it needs the full attribute read.
+  # So does the store (`complete = FALSE`), which is small by construction.
+  if (isTRUE(complete) && !isTRUE(geo_attributes)) {
+    ivt_write_parquet(ivt_path, path = parquet, labels = labels,
+                      missing = missing, dim_names = dim_names,
+                      language = language)
+  } else {
+    tab <- read_ivt(ivt_path, geo_attributes = geo_attributes,
+                    missing = missing, complete = complete)
+    ivt_write_parquet(tab, path = parquet, labels = labels,
+                      dim_names = dim_names, language = language)
+  }
 
   ivt_parquet_connection(parquet, row)
 })

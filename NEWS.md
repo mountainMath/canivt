@@ -23,6 +23,28 @@
   more on a sparse crosstab), it is refused above
   `getOption("canivt.max_cells", 1e8)` grid cells with a message naming the size
   and both ways forward.
+* **`ivt_write_parquet()` and `ivt_write_csv()` convert a chunk at a time.**
+  Hand either of them the *path* of an `.ivt` instead of an `ivt` object and the
+  table is decoded, written and dropped one slice at a time, so the completed
+  grid is never held whole — which is what makes converting a large table
+  possible on a small machine. The fold is positional: the entry cartesian's
+  outermost paged dimension varies slowest, so a slice of it is a contiguous run
+  of output rows (`ivt_decode(outer = )`), and the chunk size is
+  `getOption("canivt.chunk_cells", 5e6)` grid rows. The result is the same file:
+  validated cell-for-cell against the whole-table decode on every sliceable
+  corpus table, at the finest slice and at a multi-member plan. Converting
+  98-10-0241 (39,154,752 published rows) to Parquet peaks at **1.1 GB instead of
+  6.3 GB** for a byte-identical output. `get_statcan_ivt()` takes this path
+  automatically.
+* **`ivt_write_csv()` gzips by default.** The published table repeats every
+  dimension's labels on every one of its grid rows, so it compresses about an
+  order of magnitude — 30.9 MB → 1.4 MB on 98-10-0066, and the 39-million-row
+  98-10-0241 lands at 185 MB — for a format `readr`, `arrow`, `pandas` and
+  `duckdb` all open directly. The extension always tells the truth about the
+  file: `.gz` is appended to a path that lacks it, a path that already ends in
+  `.gz` is compressed regardless, and the path actually written is what is
+  returned. `compress = FALSE` writes plain `.csv`. A chunked write is a single
+  gzip stream, not concatenated members.
 * **`read_ivt(missing = TRUE)` decodes which absent cells are genuine zeros and
   which are MISSING**, returning them as `x$missing` — a coordinate tibble
   shaped like `x$cells` minus `value`, with a per-page-class tally in

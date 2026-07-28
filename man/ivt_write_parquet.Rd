@@ -12,11 +12,16 @@ ivt_write_parquet(
   missing = TRUE,
   dim_names = c("slug", "label"),
   language = "en",
+  chunk_cells = getOption("canivt.chunk_cells", 5e+06),
   ...
 )
 }
 \arguments{
-\item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}.}
+\item{x}{An \code{ivt} object from \code{\link[=read_ivt]{read_ivt()}}, \strong{or the path to an \code{.ivt} file}
+-- then the table is decoded and written a chunk at a time and the completed
+grid is never held whole, so a table far larger than memory converts on a
+small machine. The written file is the same one the in-memory path
+produces. See \code{chunk_cells}.}
 
 \item{path}{Output \code{.parquet} path. Defaults to \verb{<product_id>.parquet} in the
 data cache (\link[=ivt_cache_dir]{ivt_cache_dir("data")}, i.e. option
@@ -46,7 +51,15 @@ labelled on read with \code{\link[=label_ivt_columns]{label_ivt_columns()}}.}
 (passed to \code{\link[=ivt_tidy]{ivt_tidy()}}): \code{"en"} (default) or \code{"fr"}. The member sidecar
 carries both languages regardless.}
 
-\item{...}{Passed to \code{\link[arrow:write_parquet]{arrow::write_parquet()}}.}
+\item{chunk_cells}{Only when \code{x} is a file path: how many grid rows to
+decode, write and drop at a time (default \code{getOption("canivt.chunk_cells", 5e6)}). Chunks are cut along the outermost paged dimension -- usually
+geography -- which is the axis the file itself pages on, so a chunk is a
+contiguous run of output rows and no page is read twice. A table whose
+layout pages on nothing but the straddle window cannot be sliced and is
+held whole, subject to the usual \code{canivt.max_cells} guard.}
+
+\item{...}{Passed to \code{\link[arrow:write_parquet]{arrow::write_parquet()}} (or, on the streaming path, to
+\link[arrow:ParquetFileWriter]{arrow::ParquetFileWriter}\verb{$create()}).}
 }
 \value{
 \code{path}, invisibly.
@@ -60,5 +73,7 @@ ivt <- read_ivt(path)
 if (requireNamespace("arrow", quietly = TRUE)) {
   out <- ivt_write_parquet(ivt, file.path(tempdir(), "98100044.parquet"))
   file.exists(out)
+  # the same file, without holding the completed table in memory
+  ivt_write_parquet(path, file.path(tempdir(), "streamed.parquet"))
 }
 }

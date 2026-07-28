@@ -608,13 +608,22 @@ ivt_skip_is_lost_page <- function(raw, off, size, lay, n = length(raw)) {
 #' the published zero where a cell is absent and the file says nothing about it,
 #' `NA` where the file states a reason, and `symbol` / `status` naming that
 #' reason. See `ivt_complete_cells()` (`complete.R`) for the classification.
+#'
+#' `outer` decodes a SLICE: the 0-based member indices of the outermost paged
+#' dimension to walk, everything else unchanged. The entry cartesian's last
+#' column is the slowest-varying one, so a slice of it is a contiguous run of
+#' output rows -- which is what lets a whole table be converted to Parquet/CSV a
+#' chunk at a time (`ivt_chunk_plan()`, `stream.R`) without the completed grid
+#' ever being held whole. It also takes the cell budget out of `read_ivt()`'s
+#' hands: the caller has already chosen how much to materialise.
 #' @keywords internal
 #' @noRd
-ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
+ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE,
+                       outer = NULL) {
   if (is.null(lay)) lay <- ivt_layout(raw)
   if (isTRUE(complete)) {
     missing <- TRUE                 # the tail is what separates zero from missing
-    ivt_complete_budget(lay)
+    if (is.null(outer)) ivt_complete_budget(lay)
   }
   n <- length(raw); idx0 <- ivt_idx0(raw)
   m <- lay$n_dim; straddle <- lay$straddle; ipc1 <- lay$ipc[1L]
@@ -631,9 +640,23 @@ ivt_decode <- function(raw, lay = NULL, missing = FALSE, complete = FALSE) {
 
   # Every directory-entry coordinate (cartesian over the paged dimensions,
   # innermost-first): its entry index (-> byte offset) and the member id it
-  # contributes to each non-window paged dimension.
-  coord <- as.matrix(expand.grid(lapply(lay$ent_counts, function(c) 0:(c - 1L)),
-                                 KEEP.OUT.ATTRS = FALSE))
+  # contributes to each non-window paged dimension. A `outer` slice narrows the
+  # LAST column -- the outermost paged dimension -- and nothing downstream needs
+  # to know: every derived quantity (the entry indices, the window column, the
+  # paged members, the output offsets and the emitted coordinate columns) is
+  # computed from `coord` itself.
+  lst <- lapply(lay$ent_counts, function(c) 0:(c - 1L))
+  if (!is.null(outer)) {
+    if (ne < 2L)
+      cli::cli_abort(paste(
+        "This table has no paged dimension outside the straddle window, so",
+        "there is nothing to slice on: decode it in one piece."))
+    ov <- as.integer(outer)
+    if (!length(ov) || anyNA(ov) || any(ov < 0L) || any(ov >= lay$ent_counts[ne]))
+      cli::cli_abort("{.arg outer} must be 0-based indices below {lay$ent_counts[ne]}.")
+    lst[[ne]] <- ov
+  }
+  coord <- as.matrix(expand.grid(lst, KEEP.OUT.ATTRS = FALSE))
   eidx <- as.integer(coord %*% lay$estride)
   win_col <- coord[, 1L]                              # straddle window per entry
   paged_member <- if (ne > 1L) coord[, -1L, drop = FALSE] else NULL

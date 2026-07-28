@@ -100,6 +100,22 @@ decoded (see below).
   completed rows (25,924,121 stored · 29,476,599 zeros · 1,603,683 flagged, of
   which 1,597,318 carry a symbol the file's own legend names). It is what an
   optimisation that quietly mislays a page's zeros has to get past.
+
+  **The grid never has to be held whole to be written out** (2026-07-28,
+  `R/stream.R`). The fold is positional, so the entry cartesian's last column —
+  the outermost paged dimension — varies slowest and a slice of it is a
+  contiguous run of output rows: `ivt_decode(outer = )` decodes one, and
+  `ivt_write_parquet()` / `ivt_write_csv()` handed a *path* instead of an `ivt`
+  decode, write and drop a chunk at a time (`getOption("canivt.chunk_cells",
+  5e6)` grid rows), aborting if the streamed row count is not the grid.
+  Cell-for-cell identical to the whole-table decode on every sliceable corpus
+  table, at the finest slice and at a multi-member plan (`test-stream.R`).
+  98-10-0241's 39,154,752 published rows convert to Parquet at a peak of 1.1 GB
+  instead of 6.3 GB, byte-identical output; to gzipped CSV in 82 s at 1.5 GB
+  peak, 185 MB written, 39,154,753 lines read back = grid + header. CSV is
+  gzipped by default — the published grid repeats every label on every row, so
+  it compresses ~20× (98-10-0066: 30.9 MB plain → 1.4 MB) — and a chunked write
+  is one gzip stream, not concatenated members.
 - [x] **Geography — all 11 attributes**: name, DGUID/GEOUID, level, type +
   abbreviation, province abbreviation, two geocodes, data-quality flag + note,
   non-response rate (StatCan geo attribute keys 3,4,5,9,10,12–17), **on the
