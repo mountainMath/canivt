@@ -53,6 +53,26 @@ signatures — the decoder reads a structure at each rather than scanning for it
 crosstabs) point it at the title/identity block, Business Patterns at a zero slot;
 the descriptor is then relocated via the master directory or a signature scan (§D).
 
+### B.1 `@32` is a block DIRECTORY, not three unrelated pointers
+
+`@32`/`@40`/`@48` are entries 0/1/2 of one array of the container's standard
+8-byte directory record — `[u32 off][u16 len][u16 len]`, the same shape as §I and
+as every dimension block directory — running from `@32` to about `@280`. The
+lengths are real: on `1003011` entry 1 is 77 bytes of `01 01 49 00 " 1003011  E9101
+- Population selon l'annee d'age (110), par sexe (3)"` and entry 2 the 83-byte
+English twin. That is why the "modern inline format" leaves `@40`/`@48` zero — it
+writes fewer directory entries, not different fields.
+
+Populated-entry census over the 170-table corpus (2026-07-27): **122** tables
+write 1 entry (the descriptor alone), 9 write 2, 15 write 3 (descriptor + both
+titles), and 17 write more, up to 31. Every block those extra entries point at
+opens with an **already-catalogued** head — `84 01 00 08`, `81 02 02 00`,
+`81 01 20 00`, `81 01 04 03`, `81 02 05 00`, `82 01 00 08`, `81 02 08 00` and
+`01 01 <u16> 00` text — so entries ≥ 3 are additional instances of known block
+types that the parser already reaches by other routes, not an undescribed
+structure. Nothing needs to change; the point is that the header's opening 250
+bytes are one table, and its unwritten entries are absences in the ordinary way.
+
 ## C. Page markers (cell decode) — `[b0] 01 [b2] [b3]`
 
 The 4-byte header opening every data page. **Byte 1 is always `0x01`.**
@@ -401,6 +421,14 @@ layout.
 
 ## Change log
 
+- **2026-07-28** — **`@32` is a block directory** (§B.1), not three unrelated
+  pointer slots: `@32`/`@40`/`@48` are entries 0/1/2 of one array of the standard
+  8-byte `[u32 off][u16 len][u16 len]` record, and the "modern inline format"
+  simply writes fewer entries. 122 corpus tables populate one entry, 15 all
+  three, 17 more (up to 31) — all of the extras opening with already-catalogued
+  head markers. Censused the header's remaining unnamed scalars at the same time
+  (`@548`, `@576`/`@580`, `@702`/`@706`, `@716`/`@720`, `@560`–`@570`); they are
+  the only unnamed scalars below `@824` and nothing reads them (coverage.md `[?]`).
 - **2026-07-27** — **The cell-status legend is decoded** (§H.1, header slot
   `@698`). The `0xa` array's reason codes are numbered **by the file**, so the
   codes `≥ 4` that had no published ground truth to crack them against are named

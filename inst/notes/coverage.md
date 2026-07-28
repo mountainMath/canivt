@@ -114,11 +114,28 @@ decoded (see below).
 - [~] The doubled directory size field (second copy ignored).
 - [~] The geography chunks' running ordinal delimiters (1..256, 2049.., …) —
   anchors only.
+- [~] Entries **≥ 3** of the `@32` header block directory (markers.md §B.1). The
+  header's opening ~250 bytes are one array of standard 8-byte directory records,
+  of which `@32`/`@40`/`@48` are entries 0/1/2 (descriptor, FR title, EN title).
+  17 corpus tables populate further entries, up to 31 — and every block they
+  point at carries an already-catalogued head marker, so they are more instances
+  of known block types that the parser reaches by other routes, not a new
+  structure. Reading the directory instead of the three named slots would be a
+  simplification, not a capability.
 
 ## [?] Read structurally but semantics unproven
 
 - [?] Fixed header fields `@4,@8,@12,@16,@20` (constants `32`, `64/8`, `544`,
   `32/14`, `4096`) — `@20` is the family-1 `0x1000` stride; the rest unexplained.
+- [?] **The unnamed header scalars in the 544–720 band.** Censused over all 170
+  corpus tables (2026-07-27): once the named slots of markers.md §B are excluded,
+  what is left is a short list of small u16/u32 fields, written broadly but read
+  by nothing — `@548` (all 170 tables), `@576`/`@580` (137), `@702`/`@706` (135),
+  `@716`/`@720` (131), `@560`–`@567` (63–71), `@570` (49), `@564`/`@568` (28).
+  Nothing decoded depends on any of them, which is why they have never been
+  pursued; they sit beside `@552` (geography field count) and `@572` (codebook
+  region start) and are most likely more of the same bookkeeping. Recorded so
+  the count is not re-derived: they are the *only* unnamed scalars below `@824`.
 - [?] Descriptor sub-header bytes (`f0 20 00 80`, `8f c8 0f f8`, per-dimension
   display masks `f3 ff f0 ff` / `c0 ff c0 ff`).
 - [x] What the `b2` trailer / `b3` head bytes *contain* — **answered**
