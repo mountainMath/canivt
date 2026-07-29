@@ -149,7 +149,9 @@ misindexed cells.</p>
 <strong>value pages</strong> (which dominate — typically ~85–90 % of the
 file), then the <strong>codebook</strong> (geography identifiers/labels
 and the data dimension members), with <strong>footnotes</strong> near
-the tail.</p>
+the tail. The bitmaps that make the format work all live <em>inside</em>
+the value pages, so they do not appear as regions at this scale — the
+next figure opens one page up.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://ggplot2.tidyverse.org" class="external-link">ggplot2</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://dplyr.tidyverse.org" class="external-link">dplyr</a></span><span class="op">)</span></span>
@@ -202,11 +204,15 @@ the tail.</p>
 <span>                                      <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">b</span>, <span class="st">" B"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">labels</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">regions</span><span class="op">$</span><span class="va">region</span>, <span class="st">" — "</span>, <span class="fu">human</span><span class="op">(</span><span class="va">regions</span><span class="op">$</span><span class="va">size</span><span class="op">)</span><span class="op">)</span></span>
 <span></span>
+<span><span class="co"># One colourblind-safe categorical order (Okabe-Ito), shared with the page</span></span>
+<span><span class="co"># figure below so the two read as one system.</span></span>
+<span><span class="va">ivt_pal</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"#0072B2"</span>, <span class="st">"#D55E00"</span>, <span class="st">"#009E73"</span>, <span class="st">"#E69F00"</span>, <span class="st">"#CC79A7"</span>, <span class="st">"#56B4E9"</span><span class="op">)</span></span>
+<span></span>
 <span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggplot.html" class="external-link">ggplot</a></span><span class="op">(</span><span class="va">tiles</span>, <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html" class="external-link">aes</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">col</span>, y <span class="op">=</span> <span class="va">row</span>, fill <span class="op">=</span> <span class="va">region</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/geom_tile.html" class="external-link">geom_tile</a></span><span class="op">(</span>colour <span class="op">=</span> <span class="st">"white"</span>, linewidth <span class="op">=</span> <span class="fl">0.8</span>, width <span class="op">=</span> <span class="fl">0.95</span>, height <span class="op">=</span> <span class="fl">0.95</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_continuous.html" class="external-link">scale_y_reverse</a></span><span class="op">(</span><span class="cn">NULL</span>, breaks <span class="op">=</span> <span class="cn">NULL</span>, expand <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">0</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_continuous.html" class="external-link">scale_x_continuous</a></span><span class="op">(</span><span class="cn">NULL</span>, breaks <span class="op">=</span> <span class="cn">NULL</span>, expand <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">0</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_brewer.html" class="external-link">scale_fill_brewer</a></span><span class="op">(</span>palette <span class="op">=</span> <span class="st">"Set2"</span>, name <span class="op">=</span> <span class="cn">NULL</span>, labels <span class="op">=</span> <span class="va">labels</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_manual.html" class="external-link">scale_fill_manual</a></span><span class="op">(</span>values <span class="op">=</span> <span class="va">ivt_pal</span>, name <span class="op">=</span> <span class="cn">NULL</span>, labels <span class="op">=</span> <span class="va">labels</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/coord_fixed.html" class="external-link">coord_equal</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">labs</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"IVT file layout — Table 98-10-0023 (142 MB)"</span>,</span>
 <span>       subtitle <span class="op">=</span> <span class="st">"One tile ≈ 0.5 % of the file; regions fill in file order (≥1 tile each)"</span><span class="op">)</span> <span class="op">+</span></span>
@@ -221,6 +227,153 @@ per-dimension member blocks are slivers. All multi-byte integers are
 <strong>odd (unaligned) byte offsets</strong> — a property that defeats
 naive aligned scans. Byte offsets in the parser are 0-based to match the
 layout.</p>
+<div class="section level3">
+<h3 id="inside-a-value-page-where-the-bitmaps-are">Inside a value page: where the bitmaps are<a class="anchor" aria-label="anchor" href="#inside-a-value-page-where-the-bitmaps-are"></a>
+</h3>
+<p>A page is not just values. It has five regions in a fixed order, and
+three of them are bitmaps or bitmap-addressed:</p>
+<pre><code>[4-byte marker][presence bitmap][index bitmap][value run][cell-status tail]</code></pre>
+<p>The marker’s bytes give the widths of everything after it, so the
+whole page can be walked from its first four bytes. Two real pages,
+byte-exact:</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Measured directly from the page directory of two corpus tables:</span></span>
+<span><span class="co"># 98-10-0023 entry 1 (marker 88 01 20 08, float64, absent-mask tail) and</span></span>
+<span><span class="co"># 98-10-0128 entry 3 (marker a2 01 03 09, int16, status-array tail).</span></span>
+<span><span class="va">parts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Page marker"</span>, <span class="st">"Presence bitmap"</span>, <span class="st">"Index bitmap"</span>,</span>
+<span>           <span class="st">"Value run"</span>, <span class="st">"Cell-status tail"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">page_parts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  page  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"98-10-0023, entry 1\n3,296 B · mask tail"</span>,</span>
+<span>                <span class="st">"98-10-0128, entry 3\n800 B · status array"</span><span class="op">)</span>, each <span class="op">=</span> <span class="fl">5</span><span class="op">)</span>,</span>
+<span>  part  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html" class="external-link">factor</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="va">parts</span>, <span class="fl">2</span><span class="op">)</span>, levels <span class="op">=</span> <span class="va">parts</span><span class="op">)</span>,</span>
+<span>  bytes <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">4</span>, <span class="fl">256</span>,  <span class="fl">4</span>, <span class="fl">2776</span>, <span class="fl">256</span>,</span>
+<span>            <span class="fl">4</span>, <span class="fl">256</span>, <span class="fl">34</span>,  <span class="fl">138</span>, <span class="fl">368</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">page_parts</span> <span class="op">&lt;-</span> <span class="va">page_parts</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/group_by.html" class="external-link">group_by</a></span><span class="op">(</span><span class="va">page</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html" class="external-link">mutate</a></span><span class="op">(</span>share <span class="op">=</span> <span class="va">bytes</span> <span class="op">/</span> <span class="fu"><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum</a></span><span class="op">(</span><span class="va">bytes</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/group_by.html" class="external-link">ungroup</a></span><span class="op">(</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># The value run keeps the colour the waffle gives "Value pages (data)": this</span></span>
+<span><span class="co"># figure is a zoom into that region, so the region keeps its identity.</span></span>
+<span><span class="va">page_pal</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Page marker"</span> <span class="op">=</span> <span class="va">ivt_pal</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span>, <span class="st">"Presence bitmap"</span> <span class="op">=</span> <span class="va">ivt_pal</span><span class="op">[</span><span class="fl">2</span><span class="op">]</span>,</span>
+<span>              <span class="st">"Index bitmap"</span> <span class="op">=</span> <span class="va">ivt_pal</span><span class="op">[</span><span class="fl">4</span><span class="op">]</span>, <span class="st">"Value run"</span> <span class="op">=</span> <span class="va">ivt_pal</span><span class="op">[</span><span class="fl">3</span><span class="op">]</span>,</span>
+<span>              <span class="st">"Cell-status tail"</span> <span class="op">=</span> <span class="va">ivt_pal</span><span class="op">[</span><span class="fl">5</span><span class="op">]</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Label ink is chosen per fill, not per series, so the text stays legible.</span></span>
+<span><span class="va">ink</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Page marker"</span> <span class="op">=</span> <span class="st">"white"</span>, <span class="st">"Presence bitmap"</span> <span class="op">=</span> <span class="st">"white"</span>,</span>
+<span>         <span class="st">"Index bitmap"</span> <span class="op">=</span> <span class="st">"grey15"</span>, <span class="st">"Value run"</span> <span class="op">=</span> <span class="st">"white"</span>,</span>
+<span>         <span class="st">"Cell-status tail"</span> <span class="op">=</span> <span class="st">"white"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggplot.html" class="external-link">ggplot</a></span><span class="op">(</span><span class="va">page_parts</span>, <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html" class="external-link">aes</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">share</span>, y <span class="op">=</span> <span class="va">page</span>, fill <span class="op">=</span> <span class="va">part</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="co"># reverse = TRUE lays the segments left-to-right in FILE order;</span></span>
+<span>  <span class="co"># the 1.5pt surface gap keeps adjacent segments separable without a border hue</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/geom_bar.html" class="external-link">geom_col</a></span><span class="op">(</span>width <span class="op">=</span> <span class="fl">0.55</span>, colour <span class="op">=</span> <span class="st">"white"</span>, linewidth <span class="op">=</span> <span class="fl">1.5</span>,</span>
+<span>           position <span class="op">=</span> <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/position_stack.html" class="external-link">position_stack</a></span><span class="op">(</span>reverse <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/geom_text.html" class="external-link">geom_text</a></span><span class="op">(</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html" class="external-link">aes</a></span><span class="op">(</span>label <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/ifelse.html" class="external-link">ifelse</a></span><span class="op">(</span><span class="va">share</span> <span class="op">&gt;</span> <span class="fl">0.07</span>, <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">bytes</span>, <span class="st">" B"</span><span class="op">)</span>, <span class="st">""</span><span class="op">)</span>,</span>
+<span>                colour <span class="op">=</span> <span class="va">part</span><span class="op">)</span>,</span>
+<span>            position <span class="op">=</span> <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/position_stack.html" class="external-link">position_stack</a></span><span class="op">(</span>vjust <span class="op">=</span> <span class="fl">0.5</span>, reverse <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,</span>
+<span>            size <span class="op">=</span> <span class="fl">3.1</span>, fontface <span class="op">=</span> <span class="st">"bold"</span>, show.legend <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_continuous.html" class="external-link">scale_x_continuous</a></span><span class="op">(</span><span class="cn">NULL</span>, expand <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">0</span><span class="op">)</span>,</span>
+<span>                     labels <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">x</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">x</span> <span class="op">*</span> <span class="fl">100</span>, <span class="st">"%"</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_discrete.html" class="external-link">scale_y_discrete</a></span><span class="op">(</span><span class="cn">NULL</span>, limits <span class="op">=</span> <span class="va">rev</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_manual.html" class="external-link">scale_fill_manual</a></span><span class="op">(</span>values <span class="op">=</span> <span class="va">page_pal</span>, name <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_manual.html" class="external-link">scale_colour_manual</a></span><span class="op">(</span>values <span class="op">=</span> <span class="va">ink</span>, guide <span class="op">=</span> <span class="st">"none"</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">labs</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"Anatomy of one value page"</span>,</span>
+<span>       subtitle <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="st">"Regions in file order, as a share of the page."</span>,</span>
+<span>                        <span class="st">"The 4-byte marker is too small to see here."</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_minimal</a></span><span class="op">(</span>base_size <span class="op">=</span> <span class="fl">11</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/theme.html" class="external-link">theme</a></span><span class="op">(</span>legend.position <span class="op">=</span> <span class="st">"bottom"</span>, panel.grid <span class="op">=</span> <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/element.html" class="external-link">element_blank</a></span><span class="op">(</span><span class="op">)</span>,</span>
+<span>        axis.text.y <span class="op">=</span> <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/element.html" class="external-link">element_text</a></span><span class="op">(</span>hjust <span class="op">=</span> <span class="fl">0</span>, lineheight <span class="op">=</span> <span class="fl">1.1</span><span class="op">)</span>,</span>
+<span>        plot.title.position <span class="op">=</span> <span class="st">"plot"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="ivt-format_files/figure-html/page-anatomy-1.png" class="r-plt" alt="Two horizontal stacked bars, each showing one value page's byte regions as shares of the page: page marker, presence bitmap, index bitmap, value run and cell-status tail. On the 98-10-0023 page the value run dominates at 2,776 of 3,296 bytes; on the 98-10-0128 page the value run is only 138 bytes and the index bitmap plus cell-status tail together take 402 of 800 bytes." width="672"></p>
+<p>The two pages are the same structure with the weights redistributed.
+On the 98-10-0023 page the values dominate, as one would expect. On the
+98-10-0128 page they do not: 138 bytes hold the 69 stored values while
+402 bytes — <strong>half the page</strong> — describe what is
+<em>absent</em>, because that page’s grid is mostly “not applicable” and
+the file says so cell by cell.</p>
+</div>
+<div class="section level3">
+<h3 id="the-bitmap-arrays-and-what-each-one-addresses">The bitmap arrays, and what each one addresses<a class="anchor" aria-label="anchor" href="#the-bitmap-arrays-and-what-each-one-addresses"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="25%">
+<col width="25%">
+<col width="25%">
+<col width="25%">
+</colgroup>
+<thead><tr class="header">
+<th>bitmap</th>
+<th>where</th>
+<th>one bit / word per</th>
+<th>read as</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><strong>Presence bitmap</strong></td>
+<td>every page, right after the marker</td>
+<td>grid cell in the page — 1 = a value is stored</td>
+<td>pair-swapped bytes, MSB-first</td>
+</tr>
+<tr class="even">
+<td><strong>Index bitmap</strong></td>
+<td>every page, between presence and values (the marker’s trailer + head
+span)</td>
+<td>
+<code>width</code>-byte <em>word</em> of the cell-status tail — 1 =
+that word was written</td>
+<td>pair-swapped, MSB-first</td>
+</tr>
+<tr class="odd">
+<td>
+<strong>Cell-status mask</strong> (<code>0x8</code> pages)</td>
+<td>the page tail, once the index is undone</td>
+<td>grid cell — 1 = absent <em>and a genuine zero</em>
+</td>
+<td>MSB-first, <strong>not</strong> pair-swapped</td>
+</tr>
+<tr class="even">
+<td>
+<strong>Cell-status codes</strong> (<code>0xa</code> pages)</td>
+<td>the page tail, once the index is undone</td>
+<td>grid cell, <code>W</code> bits each — a reason code, <code>0</code>
+= value or zero</td>
+<td>MSB-first, not pair-swapped</td>
+</tr>
+<tr class="odd">
+<td><strong>Slot table</strong></td>
+<td>each dimension’s codebook block
+(<code>81 02 &lt;alloc&gt; 16 00</code>)</td>
+<td>allocated member slot, 22 bits each — live / deleted, code
+length</td>
+<td>pair-swapped, MSB-first</td>
+</tr>
+<tr class="even">
+<td><strong>Footnote member bitmap</strong></td>
+<td>each dimension’s footnote region (<code>84 01</code>)</td>
+<td>member — 1 = this member carries a note</td>
+<td>member order</td>
+</tr>
+</tbody>
+</table>
+<p>The presence and index bitmaps are read on every page of every read;
+the tail bitmaps only under <code>read_ivt(complete = TRUE)</code> (the
+default) or <code>missing = TRUE</code>. The two page-level bitmaps are
+nested, which is the part that is easy to miss: <strong>the index bitmap
+is a bitmap over a bitmap.</strong> The tail is stored sparsely —
+all-zero words are simply not written — so the index says which words
+are present, and the gate
+<code>popcount(index) · width == tail length</code> is what proves the
+page was read correctly. On the 98-10-0023 page above the index is 4
+bytes = 32 bits, all set, addressing 32 float64 words = the 256-byte
+tail. On the 98-10-0128 page it is 34 bytes = 272 bits with 184 set,
+addressing 184 int16 words = the 368-byte tail; the other 88 words were
+all zero and never written.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="reading-the-layout-from-the-header">Reading the layout from the header<a class="anchor" aria-label="anchor" href="#reading-the-layout-from-the-header"></a>
@@ -297,7 +450,7 @@ lineage</strong> (a few 1981/1991 profile tables store a one-member
 handles that with no special case, because it is purely positional.
 Exactly one dimension straddles the 2048-bit page boundary (§ below),
 which is what the historical “family” label really named.</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/ivt_metadata.html">ivt_metadata</a></span><span class="op">(</span><span class="fu"><a href="../reference/ivt_download.html">ivt_download</a></span><span class="op">(</span><span class="st">"98100023"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>dimension <span class="op">=</span> <span class="va">meta</span><span class="op">$</span><span class="va">dimension_names</span>,</span>
 <span>           members   <span class="op">=</span> <span class="va">meta</span><span class="op">$</span><span class="va">dimension_counts</span><span class="op">)</span></span>
@@ -339,16 +492,16 @@ geography is the dimension that straddles the page boundary, so several
 geographies share each page and the directory is one flat list. Here
 each directory record is a page that packs <strong>4
 geographies</strong>:</p>
-<pre><code>[4-byte marker][4 × 64-byte presence records][0xFF trailer][head block][dense value run]</code></pre>
+<pre><code>[4-byte marker][4 × 64-byte presence records][index bitmap][dense value run][cell-status tail]</code></pre>
 <ul>
 <li>the <strong>marker</strong>’s low nibble is the value width:
 <code>0x8</code> → float64, <code>0x4</code> → int32, <code>0x2</code> →
 int16 (so age counts are int16 but the average/median-age statistics are
-float64); its third byte encodes the trailer length and its fourth a
-head block of <code>32·(b3 − 8)</code> bytes (0 on most pages). Trailer
-and head together are not padding: they are the <strong>index
-bitmap</strong> for the page’s trailing cell-status block (below), which
-is why the head grows exactly on the vintages that write a big one;</li>
+float64); its third byte encodes a trailer length and its fourth a head
+block of <code>32·(b3 − 8)</code> bytes. Trailer and head together are
+not padding — they are the <strong>index bitmap</strong> described
+above, which is why the head grows exactly on the vintages that write a
+big cell-status tail;</li>
 <li>each geography’s <strong>presence</strong> is a 64-byte record
 stored <strong>byte-pair-swapped</strong> — swap adjacent bytes, then
 read a positional nibble per member, with the three genders
@@ -360,92 +513,9 @@ Total/Men/Women at bits 3/2/1 (the all-present marker is
 non-zero cells are stored — the StatCan CSV publishes the zeros, so an
 absent cell is <em>either</em> a zero or a missing value.</li>
 </ul>
-<p>Which of the two it is is written down. Every page carries a
-<em>cell-status block</em> after the value run, and it is what
-distinguishes an absent-but-zero cell from an absent-and-missing one —
-so the familiar “absent means 0” rule is a simplification, in every
-vintage, not just the modern ones.</p>
-<p>On pages whose marker byte has high nibble <code>0xa</code> the block
-is a self-describing array of <code>W</code>-bit codes, one per cell.
-<code>W</code> is a storage choice, not a dialect — one file may mix
-widths — and code <code>0</code> always means a value or a genuine zero.
-What the <em>other</em> codes mean is declared by the table itself: a
-header slot holds its own status legend, one record per code, giving the
-symbol and its bilingual wording. That matters because the numbering is
-not universal — the modern NDM tables start at <code>1 = ..</code>,
-<code>2 = x</code>, <code>3 = ...</code>, while the 2016
-<code>98-400-X</code> crosstabs and the older profiles start one symbol
-earlier, and the survey lineages have vocabularies of their own. Code
-<code>1</code> is each file’s own <em>nothing here</em>: filler at a
-padded grid position, the published symbol at a real cell. Validated
-cell-exact against StatCan’s published tables on ten of them, in both
-directions — every published symbol matched by a code count and no code
-without a symbol — including 98-10-0128’s 1.86 M flagged cells.</p>
-<p>On high-nibble <code>0x8</code> pages — which is every pre-2016
-vintage — the block is a bare one-bit-per-cell mask, and it says the
-same thing more crudely: it flags a <strong>subset</strong> of the
-absent cells, and that subset is the genuine zeros. The unflagged
-remainder is the missing data (the Beyond 20/20 viewer prints
-<code>N</code>). Where a table has no missing values the mask coincides
-with the complement of the presence bitmap, which is the usual case and
-the reason it long looked redundant. Verified against the viewer on the
-2001 census profile <code>97F0020XCB2001070</code>.</p>
-<p><strong>Both forms are decoded</strong>, and together they are what
-lets the package hand back the <em>published</em> table rather than the
-store:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>     <span class="co"># the published grid, the default</span></span>
-<span><span class="va">x</span><span class="op">$</span><span class="va">cells</span>                 <span class="co"># every real coordinate: values, published zeros, and</span></span>
-<span>                        <span class="co"># flagged cells as `value = NA` + `symbol` / `status`</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">x</span><span class="op">$</span><span class="va">cells</span>, <span class="st">"legend"</span><span class="op">)</span> <span class="co"># the file's own legend: code, symbol, EN and FR text</span></span></code></pre></div>
-<p>The completion rule is one sentence, and it is the block that
-licenses it: <em>an absent cell is the published zero unless its page’s
-cell-status block says otherwise.</em> Nothing in it comes from a
-published CSV — the grid is the layout’s, the exceptions are the tail’s
-— which is why it also applies to the tables that have no published CSV
-at all. Checked cell-for-cell against StatCan’s downloads on five tables
-covering every page class: every row present, none extra, no value
-differing, and every published symbol matched.</p>
-<p>The two deviations are deliberate. A flagged cell gets
-<code>value = NA</code> where the CSV writes <code>0</code> beside the
-symbol, because a suppressed value is not a zero. And the symbol is
-reported <strong>verbatim from the file’s legend</strong>, so a table
-that stores <code>X</code> reports <code>X</code> even where the
-published legend prints <code>x</code>; mapping it would mean writing
-external ground truth into the parse path.</p>
-<p><code>read_ivt(complete = FALSE)</code> returns the store instead —
-smaller, and then the old caveat is back in force, so pair it with
-<code>missing = TRUE</code>. <code><a href="../reference/ivt_tidy_missing.html">ivt_tidy_missing()</a></code> labels
-those coordinates exactly as <code><a href="../reference/ivt_tidy.html">ivt_tidy()</a></code> labels the values,
-and <code><a href="../reference/ivt_write_parquet.html">ivt_write_parquet()</a></code> / <code><a href="../reference/ivt_write_csv.html">ivt_write_csv()</a></code>
-write them beside the data table as a <code>_missing</code> sidecar
-(<code><a href="../reference/ivt_missing.html">ivt_missing()</a></code> reads it back from any of these).</p>
-<p>Both are stored the same way: a sparse array of value-width words,
-addressed by the index bitmap in the trailer + head region, with
-all-zero words simply not written. The gate is the length identity
-<code>popcount(index) · width == tail length</code>, which holds on all
-1,810,626 mask and 1,273,173 status-array pages of the development
-corpus. Rebuilding the block from that index is also what makes the
-<code>0xa</code> array’s addressing general — it looked lineage-specific
-for years because each table’s dropped words shifted its codes by a
-different amount.</p>
-<p>Completeness is vintage-dependent, and every gap is reported rather
-than folded in: a file may use a code its own legend does not name, and
-a page whose index cannot reach the whole grid leaves the cells past it
-unclassifiable — published as zeros, and counted
-(<code>canivt_absent_unclassified</code>). (A mask that merely <em>stops
-short</em> is not one of those cases: all-zero words go unwritten, and
-since the index can address every word the grid spans on every corpus
-page, an unwritten one is the file stating that the cells it covers hold
-no zeros.) Each of those raises its own classed warning
-(<code>canivt_status_unreadable</code>,
-<code>canivt_status_code_unknown</code>,
-<code>canivt_status_beyond_mask</code>, …), so a missing count always
-comes with the caveats attached rather than hidden.</p>
-<p>Whole-geography suppression is surfaced regardless, via
-<code>metadata$geographies$has_data</code>. See
-<code>inst/notes/ivt-format.md</code> for the byte layout, the legend’s
-own encoding, and the second (undecoded) tail block.</p>
+<p>Which of the two it is is written down, in the page’s cell-status
+tail — see “Zeros, missing values, and the cell-status block” below,
+after the second straddle case.</p>
 <p>The full per-geography codebook — name, DGUID, geographic level and
 type (+ abbreviation), two geocodes, the data-quality flag and note, and
 the non-response rate — decodes exactly for all 63,404 geographies; it
@@ -479,7 +549,7 @@ each adjacent housing pair are <strong>byte-swapped</strong>, so housing
 <code>h</code> is read at <code>stat*8 + bitwXor(h, 1)</code>); and each
 presence byte’s bits 7..1 flag the 7 Tenure members (bit 0 padding).
 <code>0xFE</code> therefore means “all 7 tenure values present”.</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># bits 7..1 of 0xFE flag the 7 tenure members; bit 0 is padding</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/bitwise.html" class="external-link">bitwAnd</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/bitwise.html" class="external-link">bitwShiftR</a></span><span class="op">(</span><span class="fl">0xFE</span>, <span class="fl">7</span><span class="op">:</span><span class="fl">1</span><span class="op">)</span>, <span class="fl">1L</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 1 1 1 1 1 1 1</span></span>
@@ -520,6 +590,134 @@ interior hole otherwise defeats a trailing-NA trim and silently shifts
 every label past it.</p>
 </div>
 <div class="section level2">
+<h2 id="zeros-missing-values-and-the-cell-status-block">Zeros, missing values, and the cell-status block<a class="anchor" aria-label="anchor" href="#zeros-missing-values-and-the-cell-status-block"></a>
+</h2>
+<p>Only non-zero cells are stored. The published table has zeros in it,
+so an absent cell is <em>either</em> a zero or a missing value — and the
+two are not the same number. Which one it is <strong>is written down in
+the file</strong>: every page can carry a <em>cell-status block</em>
+after its value run, and that block is what separates an absent-but-zero
+cell from an absent-and-missing one. So the familiar “absent means 0”
+shortcut is a simplification in <strong>every</strong> vintage, not just
+the modern ones; it merely looks true on tables that happen to publish
+no missing values.</p>
+<div class="section level3">
+<h3 id="two-forms-one-storage-rule">Two forms, one storage rule<a class="anchor" aria-label="anchor" href="#two-forms-one-storage-rule"></a>
+</h3>
+<p>Which form a page uses is the marker’s high nibble.</p>
+<ul>
+<li>
+<strong><code>0x8</code> — a bare one-bit-per-cell mask.</strong> It
+flags a <em>subset</em> of the absent cells, and that subset is the
+genuine zeros; the unflagged remainder is the missing data (the Beyond
+20/20 viewer prints <code>N</code>). Where a table has no missing values
+the mask is exactly the complement of the presence bitmap, which is the
+common case and the reason it long looked redundant. Verified against
+the viewer on the 2001 census profile
+<code>97F0020XCB2001070</code>.</li>
+<li>
+<strong><code>0xa</code> — a self-describing array of
+<code>W</code>-bit codes</strong>, one per cell, which says not just
+<em>that</em> a cell is missing but <em>why</em>. <code>W</code> is a
+storage choice, not a dialect — one file may mix widths — and code
+<code>0</code> always means a value or a genuine zero.</li>
+</ul>
+<p>Both are stored the same way, and it is the storage rule that makes
+them one mechanism rather than two: a <strong>sparse array of
+value-width words, addressed by the page’s index bitmap</strong>, with
+all-zero words simply not written. The gate is the length identity
+<code>popcount(index) · width == tail length</code>, which holds on all
+1,810,626 mask and 1,273,173 status-array pages of the development
+corpus. Rebuilding the block from that index is also what makes the
+<code>0xa</code> array’s addressing general — it looked lineage-specific
+for years because each table’s dropped words shifted its codes by a
+different amount.</p>
+</div>
+<div class="section level3">
+<h3 id="what-the-codes-mean-is-declared-by-the-file">What the codes mean is declared by the file<a class="anchor" aria-label="anchor" href="#what-the-codes-mean-is-declared-by-the-file"></a>
+</h3>
+<p>The <code>0xa</code> codes are numbered <strong>per table</strong>. A
+header slot holds the file’s own status legend — one record per code,
+with the symbol and its bilingual wording — and reading it is not
+optional, because the numbering is not universal: the modern NDM tables
+start at <code>1 = ..</code>, <code>2 = X</code>, <code>3 = ...</code>,
+while the 2016 <code>98-400-X</code> crosstabs and the older profiles
+start one symbol earlier, and the survey lineages have vocabularies of
+their own. Seven distinct legends appear across the corpus. Code
+<code>1</code> is each file’s own <em>nothing here</em>: filler at a
+padded grid position, the published symbol at a real cell — the grid
+decides which.</p>
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># the file's own legend, as read from its header</span></span>
+<span><span class="fu">canivt</span><span class="fu">:::</span><span class="fu">ivt_f2_status_legend</span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/readBin.html" class="external-link">readBin</a></span><span class="op">(</span><span class="va">path</span>, <span class="st">"raw"</span>, <span class="fu"><a href="https://rdrr.io/r/base/file.info.html" class="external-link">file.size</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt;    code symbol text_en</span></span>
+<span><span class="co">#&gt; 1     1 ..     Not available for a specific reference period</span></span>
+<span><span class="co">#&gt; 2     2 X      Suppressed to meet the confidentiality requirements …</span></span>
+<span><span class="co">#&gt; 3     3 ...    Not applicable</span></span>
+<span><span class="co">#&gt; 4     4 F      Too unreliable to be published</span></span>
+<span><span class="co">#&gt; 5     5 0 s    value rounded to 0 (zero) where there is a meaningful …</span></span></code></pre></div>
+<p>Validated cell-exact against StatCan’s published tables on ten of
+them, in both directions — every published symbol matched by a code
+count and no code without a symbol — including 98-10-0128’s 1.86 M
+flagged cells.</p>
+</div>
+<div class="section level3">
+<h3 id="this-is-what-makes-the-published-table-possible">This is what makes the published table possible<a class="anchor" aria-label="anchor" href="#this-is-what-makes-the-published-table-possible"></a>
+</h3>
+<p><strong>Both forms are decoded</strong>, and together they are what
+lets the package hand back the <em>published</em> table rather than the
+store:</p>
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>     <span class="co"># the published grid, the default</span></span>
+<span><span class="va">x</span><span class="op">$</span><span class="va">cells</span>                 <span class="co"># every real coordinate: values, published zeros, and</span></span>
+<span>                        <span class="co"># flagged cells as `value = NA` + `symbol` / `status`</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">x</span><span class="op">$</span><span class="va">cells</span>, <span class="st">"legend"</span><span class="op">)</span> <span class="co"># the file's own legend: code, symbol, EN and FR text</span></span></code></pre></div>
+<p>The completion rule is one sentence, and it is the block that
+licenses it: <em>an absent cell is the published zero unless its page’s
+cell-status block says otherwise.</em> Nothing in it comes from a
+published CSV — the grid is the layout’s, the exceptions are the tail’s
+— which is why it also applies to the tables that have no published CSV
+at all. Checked cell-for-cell against StatCan’s downloads on five tables
+covering every page class: every row present, none extra, no value
+differing, and every published symbol matched.</p>
+<p>The two deviations are deliberate. A flagged cell gets
+<code>value = NA</code> where the CSV writes <code>0</code> beside the
+symbol, because a suppressed value is not a zero. And the symbol is
+reported <strong>verbatim from the file’s legend</strong>, so a table
+that stores <code>X</code> reports <code>X</code> even where the
+published legend prints <code>x</code>; mapping it would mean writing
+external ground truth into the parse path.</p>
+<p><code>read_ivt(complete = FALSE)</code> returns the store instead —
+smaller, and then the old caveat is back in force, so pair it with
+<code>missing = TRUE</code>. <code><a href="../reference/ivt_tidy_missing.html">ivt_tidy_missing()</a></code> labels
+those coordinates exactly as <code><a href="../reference/ivt_tidy.html">ivt_tidy()</a></code> labels the values,
+and <code><a href="../reference/ivt_write_parquet.html">ivt_write_parquet()</a></code> / <code><a href="../reference/ivt_write_csv.html">ivt_write_csv()</a></code>
+write them beside the data table as a <code>_missing</code> sidecar
+(<code><a href="../reference/ivt_missing.html">ivt_missing()</a></code> reads it back from any of these).</p>
+</div>
+<div class="section level3">
+<h3 id="what-is-reported-rather-than-hidden">What is reported rather than hidden<a class="anchor" aria-label="anchor" href="#what-is-reported-rather-than-hidden"></a>
+</h3>
+<p>Completeness is vintage-dependent, and every gap is counted rather
+than folded in: a file may use a code its own legend does not name, and
+a page whose index cannot reach the whole grid leaves the cells past it
+unclassifiable — published as zeros, and counted
+(<code>canivt_absent_unclassified</code>). (A mask that merely <em>stops
+short</em> is not one of those cases: all-zero words go unwritten, and
+since the index can address every word the grid spans on every corpus
+page, an unwritten one is the file stating that the cells it covers hold
+no zeros.) Each of those raises its own classed warning
+(<code>canivt_status_unreadable</code>,
+<code>canivt_status_code_unknown</code>,
+<code>canivt_status_beyond_mask</code>, …), so a missing count always
+comes with the caveats attached rather than hidden.</p>
+<p>Whole-geography suppression is surfaced regardless, via
+<code>metadata$geographies$has_data</code>. See
+<code>inst/notes/ivt-format.md</code> for the byte layout, the legend’s
+own encoding, and the second (undecoded) tail block.</p>
+</div>
+</div>
+<div class="section level2">
 <h2 id="the-codebook-labels-geographic-ids-footnotes">The codebook: labels, geographic ids, footnotes<a class="anchor" aria-label="anchor" href="#the-codebook-labels-geographic-ids-footnotes"></a>
 </h2>
 <p>The tail of the file holds the codebook: for each dimension, several
@@ -533,7 +731,7 @@ real punctuation (e.g. <code>0x92</code> = the curly apostrophe in
 <code>Tla'amin Lands</code>), so the byte-class test that frames Pascal
 records must accept it — otherwise such a label aborts a record and
 splits the array mid-stream.</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># labelled long table; read_ivt(geo_attributes = TRUE) attaches the full</span></span>
 <span><span class="co"># geography attribute table so tidy can label by name + level.</span></span>
 <span><span class="va">tab</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="../reference/ivt_download.html">ivt_download</a></span><span class="op">(</span><span class="st">"98100023"</span><span class="op">)</span>, geo_attributes <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -572,7 +770,7 @@ arrays by their NUL-free payload so they are not miscounted as
 attributes; see <code>markers.md</code> §F.) The legacy pre-DGUID files
 instead cite notes as <code>(N)</code> markers embedded in the member
 labels, linked back to the members that carry them.</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">meta</span><span class="op">$</span><span class="va">footnotes</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="co">#&gt; List of 7</span></span>
 <span><span class="co">#&gt;  $ language   : chr "en"</span></span>
@@ -617,7 +815,7 @@ endpoint that <code><a href="../reference/ivt_download.html">ivt_download()</a><
 (<code><a href="../reference/statcan_ivt_download.html">statcan_ivt_download()</a></code> resolves the
 <code>Download.cfm?PID=</code> link and returns the local path), then
 read it the same way:</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">row</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="fu"><a href="../reference/statcan_ivt_catalogue.html">statcan_ivt_catalogue</a></span><span class="op">(</span><span class="op">)</span>, <span class="va">catalogue</span> <span class="op">==</span> <span class="st">"1003011"</span><span class="op">)</span></span>
 <span><span class="va">leg</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="../reference/statcan_ivt_download.html">statcan_ivt_download</a></span><span class="op">(</span><span class="va">row</span><span class="op">)</span><span class="op">)</span>   <span class="co"># 41,859 geographies, Age(110) × Sex(3)</span></span>
 <span><span class="fu"><a href="../reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">leg</span><span class="op">)</span></span>
@@ -670,7 +868,7 @@ addressing is the same one described above — this table
 carries no <code>16 00</code> member-code block. A dimension carries one
 or the other, never both.</li>
 </ul>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Health Statistics at a Glance 1999 is Borealis-hosted (see vignette("borealis")</span></span>
 <span><span class="co"># for browsing/downloading): Quantifier x Geography x Period, no geography</span></span>
 <span><span class="co"># dimension, year labels generated from the on-disk dates.</span></span>
@@ -774,6 +972,17 @@ warnings to errors with <code>options(canivt.strict = TRUE)</code>.</li>
 </td>
 </tr>
 <tr class="even">
+<td>Index bitmap + cell-status tail (zeros vs missing)</td>
+<td>
+<code>read_ivt(missing = TRUE)</code>, <code><a href="../reference/ivt_missing.html">ivt_missing()</a></code>,
+<code><a href="../reference/ivt_tidy_missing.html">ivt_tidy_missing()</a></code>; (internal)
+<code>ivt_page_status()</code>, <code>ivt_f2_status_legend()</code>
+</td>
+<td>
+<code>R/status.R</code>, <code>R/complete.R</code>
+</td>
+</tr>
+<tr class="odd">
 <td>Codebook labels, DGUIDs/GEOUIDs, geography attributes,
 footnotes</td>
 <td>
@@ -786,7 +995,7 @@ footnotes</td>
 <code>R/read-f2.R</code>
 </td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>Tidy / write outputs</td>
 <td>
 <code><a href="../reference/ivt_tidy.html">ivt_tidy()</a></code>, <code>ivt_write_*()</code>
@@ -812,10 +1021,18 @@ two former decoders on six reference tables, and viewer/CSV-validated
 across the wider corpus — 1996–2021 census tables, 1981/1991 profiles,
 2001/2006 F-series, large 2016 <code>98-400-X</code> crosstabs,
 commuting-flow tables, custom extracts, the Business Register lineage,
-and the older <code>02 00 20 00</code> survey generation. An opt-in
-regression ledger runs the whole local corpus through
-<code><a href="../reference/read_ivt.html">read_ivt()</a></code> and asserts the exact cell count per table. For
-older vintages the package scrapes the Beyond 20/20 web viewer for
+and the older <code>02 00 20 00</code> survey generation. The
+<em>published</em> table — the completion of the store with its zeros
+and flagged cells — is validated separately, cell-for-cell against
+StatCan’s own CSVs on five tables covering every page class, and
+corroborated by the WDS <code>nbDatapointsCube</code> count equalling
+stored + flagged.</p>
+<p>Three opt-in regression ledgers run the whole local corpus through
+<code><a href="../reference/read_ivt.html">read_ivt()</a></code>: the stored cell count per table, the
+cell-status tail per table (<code>unreadable</code> and
+<code>contradictory</code> must stay at zero), and the fold
+(<code>stored + zeros + flagged == rows == grid</code>). For older
+vintages the package scrapes the Beyond 20/20 web viewer for
 ground-truth data to validate against. See the <code>tests/</code>
 directory and the notes file (<code>inst/notes/coverage.md</code>,
 <code>decode-history.md</code>) for the exact figures.</p>

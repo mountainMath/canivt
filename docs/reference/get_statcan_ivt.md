@@ -155,9 +155,6 @@ used as-is, then decoded.
 # (no error), so no try() is needed.
 # \donttest{
 ds <- get_statcan_ivt("98-10-0241-01")
-#> Downloading <https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip>
-#> Decoding
-#> /var/folders/z4/gcjq2cd93p3bs5bgp8j2vv240000gp/T//RtmpWcdupN/canivt_tmp_ivt/98-10-0241-01/98100241.ivt
 # `ds` is an Arrow connection; query it lazily and then collect:
 if (!is.null(ds) && requireNamespace("dplyr", quietly = TRUE)) {
   print(dplyr::collect(head(ds)))

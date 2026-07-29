@@ -132,9 +132,11 @@ onto it;
 is the same text offline. The authoritative byte-level spec and the
 byte-marker catalog ship with the package as
 `system.file("notes/ivt-format.md", package = "canivt")` and
-`system.file("notes/markers.md", package = "canivt")`. See
+`system.file("notes/markers.md", package = "canivt")`, alongside the
+per-file code map (`notes/code-map.md`) and the dev workflow
+(`notes/testing.md`). See
 [`CLAUDE.md`](https://mountainmath.github.io/canivt/CLAUDE.md) for the
-code map and dev workflow.
+key invariants and an index of those notes.
 
 ## Related packages
 
