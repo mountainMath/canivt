@@ -8,7 +8,9 @@ but semantics unproven · `[ ]` not parsed / unknown.
 This file is the **status tracker**. The story of how each table/vintage was
 cracked lives in [`decode-history.md`](decode-history.md); the byte-marker catalog
 in [`markers.md`](markers.md); the format spec in [`ivt-format.md`](ivt-format.md);
-the current refusals in [`unsupported-formats.md`](unsupported-formats.md).
+the current refusals in [`unsupported-formats.md`](unsupported-formats.md); what
+each file in `R/` does in [`code-map.md`](code-map.md); the sweeps that keep this
+file honest in [`testing.md`](testing.md).
 
 ## Byte coverage (every region is identified)
 

@@ -72,7 +72,9 @@ tab
 The high-level region order is the same for every IVT: a small **header**, the
 **page directory**, the **value pages** (which dominate — typically ~85–90 % of
 the file), then the **codebook** (geography identifiers/labels and the data
-dimension members), with **footnotes** near the tail.
+dimension members), with **footnotes** near the tail. The bitmaps that make the
+format work all live *inside* the value pages, so they do not appear as regions
+at this scale — the next figure opens one page up.
 
 ```{r layout-plot, eval = TRUE, fig.width = 7, fig.height = 3.6, message = FALSE, fig.alt = "Waffle chart of the IVT byte layout on a 20-by-10 grid of 200 tiles filled in file order: header, page directory, the dominant value-pages region (~175 tiles), the geography codebook (~24 tiles), footnotes and dimension blocks. Each region's tile count is proportional to its byte size, with a one-tile minimum so the slivers stay visible."}
 library(ggplot2)
@@ -126,11 +128,15 @@ human <- function(b) ifelse(b >= 1e6, paste0(round(b / 1e6, 1), " MB"),
                                       paste0(b, " B")))
 labels <- paste0(regions$region, " — ", human(regions$size))
 
+# One colourblind-safe categorical order (Okabe-Ito), shared with the page
+# figure below so the two read as one system.
+ivt_pal <- c("#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9")
+
 ggplot(tiles, aes(x = col, y = row, fill = region)) +
   geom_tile(colour = "white", linewidth = 0.8, width = 0.95, height = 0.95) +
   scale_y_reverse(NULL, breaks = NULL, expand = c(0, 0)) +
   scale_x_continuous(NULL, breaks = NULL, expand = c(0, 0)) +
-  scale_fill_brewer(palette = "Set2", name = NULL, labels = labels) +
+  scale_fill_manual(values = ivt_pal, name = NULL, labels = labels) +
   coord_equal() +
   labs(title = "IVT file layout — Table 98-10-0023 (142 MB)",
        subtitle = "One tile ≈ 0.5 % of the file; regions fill in file order (≥1 tile each)") +
@@ -144,6 +150,101 @@ region (~12 %), and the header, directory, footnotes and per-dimension member
 blocks are slivers. All multi-byte integers are **little-endian**, and value runs
 frequently begin on **odd (unaligned) byte offsets** — a property that defeats
 naive aligned scans. Byte offsets in the parser are 0-based to match the layout.
+
+### Inside a value page: where the bitmaps are
+
+A page is not just values. It has five regions in a fixed order, and three of
+them are bitmaps or bitmap-addressed:
+
+```
+[4-byte marker][presence bitmap][index bitmap][value run][cell-status tail]
+```
+
+The marker's bytes give the widths of everything after it, so the whole page can
+be walked from its first four bytes. Two real pages, byte-exact:
+
+```{r page-anatomy, eval = TRUE, fig.width = 7, fig.height = 2.6, message = FALSE, fig.alt = "Two horizontal stacked bars, each showing one value page's byte regions as shares of the page: page marker, presence bitmap, index bitmap, value run and cell-status tail. On the 98-10-0023 page the value run dominates at 2,776 of 3,296 bytes; on the 98-10-0128 page the value run is only 138 bytes and the index bitmap plus cell-status tail together take 402 of 800 bytes."}
+# Measured directly from the page directory of two corpus tables:
+# 98-10-0023 entry 1 (marker 88 01 20 08, float64, absent-mask tail) and
+# 98-10-0128 entry 3 (marker a2 01 03 09, int16, status-array tail).
+parts <- c("Page marker", "Presence bitmap", "Index bitmap",
+           "Value run", "Cell-status tail")
+
+page_parts <- data.frame(
+  page  = rep(c("98-10-0023, entry 1\n3,296 B · mask tail",
+                "98-10-0128, entry 3\n800 B · status array"), each = 5),
+  part  = factor(rep(parts, 2), levels = parts),
+  bytes = c(4, 256,  4, 2776, 256,
+            4, 256, 34,  138, 368)
+)
+
+page_parts <- page_parts |>
+  group_by(page) |>
+  mutate(share = bytes / sum(bytes)) |>
+  ungroup()
+
+# The value run keeps the colour the waffle gives "Value pages (data)": this
+# figure is a zoom into that region, so the region keeps its identity.
+page_pal <- c("Page marker" = ivt_pal[1], "Presence bitmap" = ivt_pal[2],
+              "Index bitmap" = ivt_pal[4], "Value run" = ivt_pal[3],
+              "Cell-status tail" = ivt_pal[5])
+
+# Label ink is chosen per fill, not per series, so the text stays legible.
+ink <- c("Page marker" = "white", "Presence bitmap" = "white",
+         "Index bitmap" = "grey15", "Value run" = "white",
+         "Cell-status tail" = "white")
+
+ggplot(page_parts, aes(x = share, y = page, fill = part)) +
+  # reverse = TRUE lays the segments left-to-right in FILE order;
+  # the 1.5pt surface gap keeps adjacent segments separable without a border hue
+  geom_col(width = 0.55, colour = "white", linewidth = 1.5,
+           position = position_stack(reverse = TRUE)) +
+  geom_text(aes(label = ifelse(share > 0.07, paste0(bytes, " B"), ""),
+                colour = part),
+            position = position_stack(vjust = 0.5, reverse = TRUE),
+            size = 3.1, fontface = "bold", show.legend = FALSE) +
+  scale_x_continuous(NULL, expand = c(0, 0),
+                     labels = function(x) paste0(x * 100, "%")) +
+  scale_y_discrete(NULL, limits = rev) +
+  scale_fill_manual(values = page_pal, name = NULL) +
+  scale_colour_manual(values = ink, guide = "none") +
+  labs(title = "Anatomy of one value page",
+       subtitle = paste("Regions in file order, as a share of the page.",
+                        "The 4-byte marker is too small to see here.")) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom", panel.grid = element_blank(),
+        axis.text.y = element_text(hjust = 0, lineheight = 1.1),
+        plot.title.position = "plot")
+```
+
+The two pages are the same structure with the weights redistributed. On the
+98-10-0023 page the values dominate, as one would expect. On the 98-10-0128 page
+they do not: 138 bytes hold the 69 stored values while 402 bytes — **half the
+page** — describe what is *absent*, because that page's grid is mostly "not
+applicable" and the file says so cell by cell.
+
+### The bitmap arrays, and what each one addresses
+
+| bitmap | where | one bit / word per | read as |
+|---|---|---|---|
+| **Presence bitmap** | every page, right after the marker | grid cell in the page — 1 = a value is stored | pair-swapped bytes, MSB-first |
+| **Index bitmap** | every page, between presence and values (the marker's trailer + head span) | `width`-byte *word* of the cell-status tail — 1 = that word was written | pair-swapped, MSB-first |
+| **Cell-status mask** (`0x8` pages) | the page tail, once the index is undone | grid cell — 1 = absent *and a genuine zero* | MSB-first, **not** pair-swapped |
+| **Cell-status codes** (`0xa` pages) | the page tail, once the index is undone | grid cell, `W` bits each — a reason code, `0` = value or zero | MSB-first, not pair-swapped |
+| **Slot table** | each dimension's codebook block (`81 02 <alloc> 16 00`) | allocated member slot, 22 bits each — live / deleted, code length | pair-swapped, MSB-first |
+| **Footnote member bitmap** | each dimension's footnote region (`84 01`) | member — 1 = this member carries a note | member order |
+
+The presence and index bitmaps are read on every page of every read; the tail
+bitmaps only under `read_ivt(complete = TRUE)` (the default) or
+`missing = TRUE`. The two page-level bitmaps are nested, which is the part that
+is easy to miss: **the index bitmap is a bitmap over a bitmap.** The tail is
+stored sparsely — all-zero words are simply not written — so the index says
+which words are present, and the gate `popcount(index) · width == tail length`
+is what proves the page was read correctly. On the 98-10-0023 page above the
+index is 4 bytes = 32 bits, all set, addressing 32 float64 words = the 256-byte
+tail. On the 98-10-0128 page it is 34 bytes = 272 bits with 184 set, addressing
+184 int16 words = the 368-byte tail; the other 88 words were all zero and never
+written.
 
 ## Reading the layout from the header
 
@@ -218,16 +319,15 @@ page and the directory is one flat list. Here each directory record is a page
 that packs **4 geographies**:
 
 ```
-[4-byte marker][4 × 64-byte presence records][0xFF trailer][head block][dense value run]
+[4-byte marker][4 × 64-byte presence records][index bitmap][dense value run][cell-status tail]
 ```
 
 * the **marker**'s low nibble is the value width: `0x8` → float64, `0x4` →
   int32, `0x2` → int16 (so age counts are int16 but the average/median-age
-  statistics are float64); its third byte encodes the trailer length and its
-  fourth a head block of `32·(b3 − 8)` bytes (0 on most pages). Trailer and head
-  together are not padding: they are the **index bitmap** for the page's trailing
-  cell-status block (below), which is why the head grows exactly on the vintages
-  that write a big one;
+  statistics are float64); its third byte encodes a trailer length and its
+  fourth a head block of `32·(b3 − 8)` bytes. Trailer and head together are not
+  padding — they are the **index bitmap** described above, which is why the head
+  grows exactly on the vintages that write a big cell-status tail;
 * each geography's **presence** is a 64-byte record stored **byte-pair-swapped**
   — swap adjacent bytes, then read a positional nibble per member, with the three
   genders Total/Men/Women at bits 3/2/1 (the all-present marker is `0xE`);
@@ -235,87 +335,9 @@ that packs **4 geographies**:
   member-major / gender-inner. Only non-zero cells are stored — the StatCan CSV
   publishes the zeros, so an absent cell is *either* a zero or a missing value.
 
-Which of the two it is is written down. Every page carries a *cell-status block*
-after the value run, and it is what distinguishes an absent-but-zero cell from an
-absent-and-missing one — so the familiar "absent means 0" rule is a
-simplification, in every vintage, not just the modern ones.
-
-On pages whose marker byte has high nibble `0xa` the block is a self-describing
-array of `W`-bit codes, one per cell. `W` is a storage choice, not a dialect —
-one file may mix widths — and code `0` always means a value or a genuine zero.
-What the *other* codes mean is declared by the table itself: a header slot holds
-its own status legend, one record per code, giving the symbol and its bilingual
-wording. That matters because the numbering is not universal — the modern NDM
-tables start at `1 = ..`, `2 = x`, `3 = ...`, while the 2016 `98-400-X`
-crosstabs and the older profiles start one symbol earlier, and the survey
-lineages have vocabularies of their own. Code `1` is each file's own *nothing
-here*: filler at a padded grid position, the published symbol at a real cell.
-Validated cell-exact against StatCan's published tables on ten of them, in both
-directions — every published symbol matched by a code count and no code without
-a symbol — including 98-10-0128's 1.86 M flagged cells.
-
-On high-nibble `0x8` pages — which is every pre-2016 vintage — the block is a
-bare one-bit-per-cell mask, and it says the same thing more crudely: it flags a
-**subset** of the absent cells, and that subset is the genuine zeros. The
-unflagged remainder is the missing data (the Beyond 20/20 viewer prints `N`).
-Where a table has no missing values the mask coincides with the complement of the
-presence bitmap, which is the usual case and the reason it long looked
-redundant. Verified against the viewer on the 2001 census profile
-`97F0020XCB2001070`.
-
-**Both forms are decoded**, and together they are what lets the package hand
-back the *published* table rather than the store:
-
-```r
-x <- read_ivt(path)     # the published grid, the default
-x$cells                 # every real coordinate: values, published zeros, and
-                        # flagged cells as `value = NA` + `symbol` / `status`
-attr(x$cells, "legend") # the file's own legend: code, symbol, EN and FR text
-```
-
-The completion rule is one sentence, and it is the block that licenses it: *an
-absent cell is the published zero unless its page's cell-status block says
-otherwise.* Nothing in it comes from a published CSV — the grid is the layout's,
-the exceptions are the tail's — which is why it also applies to the tables that
-have no published CSV at all. Checked cell-for-cell against StatCan's downloads
-on five tables covering every page class: every row present, none extra, no
-value differing, and every published symbol matched.
-
-The two deviations are deliberate. A flagged cell gets `value = NA` where the
-CSV writes `0` beside the symbol, because a suppressed value is not a zero. And
-the symbol is reported **verbatim from the file's legend**, so a table that
-stores `X` reports `X` even where the published legend prints `x`; mapping it
-would mean writing external ground truth into the parse path.
-
-`read_ivt(complete = FALSE)` returns the store instead — smaller, and then the
-old caveat is back in force, so pair it with `missing = TRUE`.
-`ivt_tidy_missing()` labels those coordinates exactly as `ivt_tidy()` labels the
-values, and `ivt_write_parquet()` / `ivt_write_csv()` write them beside the data
-table as a `_missing` sidecar (`ivt_missing()` reads it back from any of these).
-
-Both are stored the same way: a sparse array of value-width words, addressed by
-the index bitmap in the trailer + head region, with all-zero words simply not
-written. The gate is the length identity `popcount(index) · width == tail
-length`, which holds on all 1,810,626 mask and 1,273,173 status-array pages of
-the development corpus. Rebuilding the block from that index is also what makes
-the `0xa` array's addressing general — it looked lineage-specific for years
-because each table's dropped words shifted its codes by a different amount.
-
-Completeness is vintage-dependent, and every gap is reported rather than folded
-in: a file may use a code its own legend does not name, and a
-page whose index cannot reach the whole grid leaves the cells
-past it unclassifiable — published as zeros, and counted
-(`canivt_absent_unclassified`). (A mask that merely *stops short* is not one of those cases:
-all-zero words go unwritten, and since the index can address every word the grid
-spans on every corpus page, an unwritten one is the file stating that the cells
-it covers hold no zeros.) Each of those
-raises its own classed warning (`canivt_status_unreadable`,
-`canivt_status_code_unknown`, `canivt_status_beyond_mask`, …), so a missing
-count always comes with the caveats attached rather than hidden.
-
-Whole-geography suppression is surfaced regardless, via
-`metadata$geographies$has_data`. See `inst/notes/ivt-format.md` for the byte
-layout, the legend's own encoding, and the second (undecoded) tail block.
+Which of the two it is is written down, in the page's cell-status tail — see
+"Zeros, missing values, and the cell-status block" below, after the second
+straddle case.
 
 The full per-geography codebook — name, DGUID, geographic level and type
 (+ abbreviation), two geocodes, the data-quality flag and note, and the
@@ -382,6 +404,115 @@ array byte-exactly; where it does, the count and slot positions are read rather
 than guessed. The same slot map also addresses the **codebook** arrays, which may
 be written one record per allocated slot and left empty at the rest — an interior
 hole otherwise defeats a trailing-NA trim and silently shifts every label past it.
+
+## Zeros, missing values, and the cell-status block
+
+Only non-zero cells are stored. The published table has zeros in it, so an
+absent cell is *either* a zero or a missing value — and the two are not the same
+number. Which one it is **is written down in the file**: every page can carry a
+*cell-status block* after its value run, and that block is what separates an
+absent-but-zero cell from an absent-and-missing one. So the familiar "absent
+means 0" shortcut is a simplification in **every** vintage, not just the modern
+ones; it merely looks true on tables that happen to publish no missing values.
+
+### Two forms, one storage rule
+
+Which form a page uses is the marker's high nibble.
+
+* **`0x8` — a bare one-bit-per-cell mask.** It flags a *subset* of the absent
+  cells, and that subset is the genuine zeros; the unflagged remainder is the
+  missing data (the Beyond 20/20 viewer prints `N`). Where a table has no missing
+  values the mask is exactly the complement of the presence bitmap, which is the
+  common case and the reason it long looked redundant. Verified against the
+  viewer on the 2001 census profile `97F0020XCB2001070`.
+* **`0xa` — a self-describing array of `W`-bit codes**, one per cell, which says
+  not just *that* a cell is missing but *why*. `W` is a storage choice, not a
+  dialect — one file may mix widths — and code `0` always means a value or a
+  genuine zero.
+
+Both are stored the same way, and it is the storage rule that makes them one
+mechanism rather than two: a **sparse array of value-width words, addressed by
+the page's index bitmap**, with all-zero words simply not written. The gate is
+the length identity `popcount(index) · width == tail length`, which holds on all
+1,810,626 mask and 1,273,173 status-array pages of the development corpus.
+Rebuilding the block from that index is also what makes the `0xa` array's
+addressing general — it looked lineage-specific for years because each table's
+dropped words shifted its codes by a different amount.
+
+### What the codes mean is declared by the file
+
+The `0xa` codes are numbered **per table**. A header slot holds the file's own
+status legend — one record per code, with the symbol and its bilingual wording —
+and reading it is not optional, because the numbering is not universal: the
+modern NDM tables start at `1 = ..`, `2 = X`, `3 = ...`, while the 2016
+`98-400-X` crosstabs and the older profiles start one symbol earlier, and the
+survey lineages have vocabularies of their own. Seven distinct legends appear
+across the corpus. Code `1` is each file's own *nothing here*: filler at a padded
+grid position, the published symbol at a real cell — the grid decides which.
+
+```{r, eval = FALSE}
+# the file's own legend, as read from its header
+canivt:::ivt_f2_status_legend(readBin(path, "raw", file.size(path)))
+#>    code symbol text_en
+#> 1     1 ..     Not available for a specific reference period
+#> 2     2 X      Suppressed to meet the confidentiality requirements …
+#> 3     3 ...    Not applicable
+#> 4     4 F      Too unreliable to be published
+#> 5     5 0 s    value rounded to 0 (zero) where there is a meaningful …
+```
+
+Validated cell-exact against StatCan's published tables on ten of them, in both
+directions — every published symbol matched by a code count and no code without
+a symbol — including 98-10-0128's 1.86 M flagged cells.
+
+### This is what makes the published table possible
+
+**Both forms are decoded**, and together they are what lets the package hand back
+the *published* table rather than the store:
+
+```r
+x <- read_ivt(path)     # the published grid, the default
+x$cells                 # every real coordinate: values, published zeros, and
+                        # flagged cells as `value = NA` + `symbol` / `status`
+attr(x$cells, "legend") # the file's own legend: code, symbol, EN and FR text
+```
+
+The completion rule is one sentence, and it is the block that licenses it: *an
+absent cell is the published zero unless its page's cell-status block says
+otherwise.* Nothing in it comes from a published CSV — the grid is the layout's,
+the exceptions are the tail's — which is why it also applies to the tables that
+have no published CSV at all. Checked cell-for-cell against StatCan's downloads
+on five tables covering every page class: every row present, none extra, no
+value differing, and every published symbol matched.
+
+The two deviations are deliberate. A flagged cell gets `value = NA` where the
+CSV writes `0` beside the symbol, because a suppressed value is not a zero. And
+the symbol is reported **verbatim from the file's legend**, so a table that
+stores `X` reports `X` even where the published legend prints `x`; mapping it
+would mean writing external ground truth into the parse path.
+
+`read_ivt(complete = FALSE)` returns the store instead — smaller, and then the
+old caveat is back in force, so pair it with `missing = TRUE`.
+`ivt_tidy_missing()` labels those coordinates exactly as `ivt_tidy()` labels the
+values, and `ivt_write_parquet()` / `ivt_write_csv()` write them beside the data
+table as a `_missing` sidecar (`ivt_missing()` reads it back from any of these).
+
+### What is reported rather than hidden
+
+Completeness is vintage-dependent, and every gap is counted rather than folded
+in: a file may use a code its own legend does not name, and a page whose index
+cannot reach the whole grid leaves the cells past it unclassifiable — published
+as zeros, and counted (`canivt_absent_unclassified`). (A mask that merely *stops
+short* is not one of those cases: all-zero words go unwritten, and since the
+index can address every word the grid spans on every corpus page, an unwritten
+one is the file stating that the cells it covers hold no zeros.) Each of those
+raises its own classed warning (`canivt_status_unreadable`,
+`canivt_status_code_unknown`, `canivt_status_beyond_mask`, …), so a missing count
+always comes with the caveats attached rather than hidden.
+
+Whole-geography suppression is surfaced regardless, via
+`metadata$geographies$has_data`. See `inst/notes/ivt-format.md` for the byte
+layout, the legend's own encoding, and the second (undecoded) tail block.
 
 ## The codebook: labels, geographic ids, footnotes
 
@@ -537,6 +668,7 @@ sub-A sections of `inst/notes/unsupported-formats.md` and
 | Header identity, dimension descriptor, layout | `ivt_metadata()`; (internal) `ivt_f2_header_layout()`, `ivt_f2_descriptor()` | `R/codebook-f2.R`, `R/dimdir.R` |
 | Page directory / geography index | (internal) `ivt_layout()` | `R/decode.R`, `R/container*.R` |
 | Presence bitmap + value codec (both straddle cases) | (internal) `ivt_decode()` | `R/decode.R`, `R/decode-f2.R` |
+| Index bitmap + cell-status tail (zeros vs missing) | `read_ivt(missing = TRUE)`, `ivt_missing()`, `ivt_tidy_missing()`; (internal) `ivt_page_status()`, `ivt_f2_status_legend()` | `R/status.R`, `R/complete.R` |
 | Codebook labels, DGUIDs/GEOUIDs, geography attributes, footnotes | `ivt_metadata()`, `read_ivt(geo_attributes = TRUE)`; (internal) `ivt_f2_geo_attributes()` | `R/codebook-f2.R`, `R/dimdir.R`, `R/read-f2.R` |
 | Tidy / write outputs | `ivt_tidy()`, `ivt_write_*()` | `R/read.R`, `R/write.R` |
 
@@ -551,9 +683,16 @@ The unified decoder is additionally **byte-identical** to the two former decoder
 on six reference tables, and viewer/CSV-validated across the wider corpus —
 1996–2021 census tables, 1981/1991 profiles, 2001/2006 F-series, large 2016
 `98-400-X` crosstabs, commuting-flow tables, custom extracts, the Business
-Register lineage, and the older `02 00 20 00` survey generation. An opt-in
-regression ledger runs the whole local corpus through `read_ivt()` and asserts
-the exact cell count per table. For older vintages the package scrapes the
+Register lineage, and the older `02 00 20 00` survey generation. The *published*
+table — the completion of the store with its zeros and flagged cells — is
+validated separately, cell-for-cell against StatCan's own CSVs on five tables
+covering every page class, and corroborated by the WDS `nbDatapointsCube` count
+equalling stored + flagged.
+
+Three opt-in regression ledgers run the whole local corpus through `read_ivt()`:
+the stored cell count per table, the cell-status tail per table (`unreadable` and
+`contradictory` must stay at zero), and the fold (`stored + zeros + flagged ==
+rows == grid`). For older vintages the package scrapes the
 Beyond 20/20 web viewer for ground-truth data to validate against. See the
 `tests/` directory and the notes file
 (`inst/notes/coverage.md`, `decode-history.md`) for the exact figures.

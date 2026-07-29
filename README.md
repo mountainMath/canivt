@@ -116,8 +116,9 @@ walks through the reverse-engineered format and how the package maps onto it;
 `vignette("ivt-format", package = "canivt")` is the same text offline. The
 authoritative byte-level spec and the byte-marker catalog ship with the package as
 `system.file("notes/ivt-format.md", package = "canivt")` and
-`system.file("notes/markers.md", package = "canivt")`. See
-[`CLAUDE.md`](CLAUDE.md) for the code map and dev workflow.
+`system.file("notes/markers.md", package = "canivt")`, alongside the per-file
+code map (`notes/code-map.md`) and the dev workflow (`notes/testing.md`). See
+[`CLAUDE.md`](CLAUDE.md) for the key invariants and an index of those notes.
 
 ## Related packages
 
