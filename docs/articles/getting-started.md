@@ -88,13 +88,17 @@ second call skips the download and decode.
 ds <- get_statcan_ivt("97-570-X1981004")
 ds
 #> FileSystemDataset with 1 Parquet file
-#> 6 columns
+#> 8 columns
 #> geo_label: string
 #> geo_name: string
 #> geo_uid: string
 #> values: string
 #> profile: string
 #> value: double
+#> symbol: dictionary<values=string, indices=int8>
+#> status: dictionary<values=string, indices=int8>
+#> 
+#> See $metadata for additional Schema metadata
 ```
 
 The table is a classic profile: one row per **geography × profile
@@ -177,6 +181,41 @@ plot_data |>
 English, French and Other shares, ordered by French share. Quebec is
 overwhelmingly French, New Brunswick roughly one-third French, the rest
 predominantly English.](getting-started_files/figure-html/plot-1.png)
+
+## A note on cells that aren’t there
+
+An IVT stores only the cells that have a value: zeros are not written,
+and neither are suppressed or not-applicable cells. What you get back,
+though, is the **published table** — every coordinate of the grid,
+exactly the rows StatCan’s own CSV download carries:
+
+``` r
+
+tab <- read_ivt("98100040.ivt")
+ivt_tidy(tab)
+#> ... value  symbol status
+#>      24140  NA     NA               # a value
+#>          0  NA     NA               # a published zero
+#>         NA  x      Suppressed ...   # flagged, and why
+```
+
+Three kinds of row, and the difference between the last two is the
+point: completing the grid yourself from a stored-values-only table
+would turn every suppressed cell into a `0`. The file does say which is
+which, in a status block after each page’s values, and that is what
+separates them here. Each flagged cell carries `symbol` and `status`
+**in the file’s own words** — the legend the table declares in its own
+header, so `x` means whatever this table says `x` means.
+`attr(ivt_tidy(tab), "legend")` is that legend.
+
+`read_ivt(complete = FALSE)` gives you the raw store instead — smaller
+and faster, but then absence is ambiguous again, so pair it with
+`missing = TRUE` and
+[`ivt_missing()`](https://mountainmath.github.io/canivt/reference/ivt_missing.md)
+if you plan to fill the grid in. See
+[`?read_ivt`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+for the caveats: a page whose status block cannot be read has its
+absences published as zeros and warns rather than staying silent.
 
 ## Recap
 

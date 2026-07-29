@@ -3,13 +3,13 @@
 (in the data cache), one row per file, enriched with catalogue metadata
 (matched product number, title, census year, topic) when the file's cache key
 matches a product in the statcan_ivt_catalogue(). The member sidecars
-(_members.parquet) and the catalogue cache itself are infrastructure and are
-not listed."><meta property="og:description" content="Lists the raw .ivt inputs (in the ivt cache) and the parsed data Parquets
+(_members.parquet), the cell-status sidecars (_missing.parquet) and the
+catalogue cache itself are infrastructure and are not listed."><meta property="og:description" content="Lists the raw .ivt inputs (in the ivt cache) and the parsed data Parquets
 (in the data cache), one row per file, enriched with catalogue metadata
 (matched product number, title, census year, topic) when the file's cache key
 matches a product in the statcan_ivt_catalogue(). The member sidecars
-(_members.parquet) and the catalogue cache itself are infrastructure and are
-not listed."><meta property="og:image" content="https://mountainmath.github.io/canivt/logo.png"></head><body>
+(_members.parquet), the cell-status sidecars (_missing.parquet) and the
+catalogue cache itself are infrastructure and are not listed."><meta property="og:image" content="https://mountainmath.github.io/canivt/logo.png"></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -17,7 +17,7 @@ not listed."><meta property="og:image" content="https://mountainmath.github.io/c
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -54,8 +54,8 @@ not listed."><meta property="og:image" content="https://mountainmath.github.io/c
 (in the data cache), one row per file, enriched with catalogue metadata
 (matched product number, title, census year, topic) when the file's cache key
 matches a product in the <code><a href="statcan_ivt_catalogue.html">statcan_ivt_catalogue()</a></code>. The member sidecars
-(<code>_members.parquet</code>) and the catalogue cache itself are infrastructure and are
-not listed.</p>
+(<code>_members.parquet</code>), the cell-status sidecars (<code>_missing.parquet</code>) and the
+catalogue cache itself are infrastructure and are not listed.</p>
     </div>
 
     <div class="section level2">
@@ -92,11 +92,11 @@ language-marked Parquet, <code>NA</code> for <code>.ivt</code> files and old unm
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="co"># Lists whatever is in the configured cache directories (empty when unset):</span></span></span>
 <span class="r-in"><span><span class="fu">list_ivt_cache</span><span class="op">(</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 180 × 10</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 181 × 10</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    kind    key             language catalogue     title census_year topic  bytes</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>           <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span> ivt     1003011         <span style="color: #BB0000;">NA</span>       1003011       E910…        <span style="text-decoration: underline;">1</span>991 Age,… 2.67<span style="color: #949494;">e</span>7</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span> parquet 1003011         en       1003011       E910…        <span style="text-decoration: underline;">1</span>991 Age,… 1.31<span style="color: #949494;">e</span>7</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span> parquet 1003011         en       1003011       E910…        <span style="text-decoration: underline;">1</span>991 Age,… 1.22<span style="color: #949494;">e</span>7</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span> parquet 1003011         <span style="color: #BB0000;">NA</span>       1003011       E910…        <span style="text-decoration: underline;">1</span>991 Age,… 1.27<span style="color: #949494;">e</span>7</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span> ivt     1006454         <span style="color: #BB0000;">NA</span>       1006454       N910…        <span style="text-decoration: underline;">1</span>991 Labo… 8.36<span style="color: #949494;">e</span>7</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span> ivt     94F0009XDB96078 <span style="color: #BB0000;">NA</span>       94F0009XDB96… Cens…        <span style="text-decoration: underline;">1</span>996 Sour… 1.17<span style="color: #949494;">e</span>5</span>
@@ -105,7 +105,7 @@ language-marked Parquet, <code>NA</code> for <code>.ivt</code> files and old unm
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span> ivt     95F0223XDB96001 <span style="color: #BB0000;">NA</span>       95F0223XDB96… Tota…        <span style="text-decoration: underline;">1</span>996 Immi… 3.26<span style="color: #949494;">e</span>6</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span> ivt     95F0250XDB96001 <span style="color: #BB0000;">NA</span>       95F0250XDB96… Priv…        <span style="text-decoration: underline;">1</span>996 Sour… 7.82<span style="color: #949494;">e</span>5</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span> ivt     95f0437xcb01001 <span style="color: #BB0000;">NA</span>       SP3/P0GGAN/9… Cens…          <span style="color: #BB0000;">NA</span> <span style="color: #BB0000;">NA</span>    7.10<span style="color: #949494;">e</span>6</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 170 more rows</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 171 more rows</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 2 more variables: modified &lt;dttm&gt;, path &lt;chr&gt;</span></span>
 </code></pre></div>
     </div>

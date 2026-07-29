@@ -18,11 +18,13 @@ get_statcan_ivt(
   catalogue,
   geo_attributes = FALSE,
   labels = TRUE,
+  missing = FALSE,
   dim_names = c("slug", "label"),
   language = "en",
   keep_ivt = FALSE,
   refresh = FALSE,
-  quiet = FALSE
+  quiet = FALSE,
+  complete = TRUE
 )
 ```
 
@@ -59,6 +61,16 @@ get_statcan_ivt(
   write labelled columns (`TRUE`, default) or the compact integer-id
   table.
 
+- missing:
+
+  Passed to
+  [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md):
+  additionally cache the flagged cells on their own as a
+  `<key>_<lang>_missing.parquet` sidecar. Off by default because the
+  cached table already carries them (see `complete`); the sidecar is
+  only worth writing when the same cells are wanted in isolation. A
+  cached Parquet with no sidecar is re-decoded when this is `TRUE`.
+
 - dim_names:
 
   Passed to
@@ -90,6 +102,15 @@ get_statcan_ivt(
 
   Suppress progress messages.
 
+- complete:
+
+  Passed to
+  [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md):
+  cache the **published table** – every grid coordinate, published zeros
+  included, flagged cells carrying `symbol`/`status` and a `NA` value
+  (`TRUE`, default). A Parquet cached in the older store-only form is
+  re-decoded rather than answering with fewer rows.
+
 ## Value
 
 An
@@ -101,7 +122,9 @@ connection to the Parquet file. The Parquet path is attached as
 read from the `_members.parquet` sidecar when present) as
 `attr(., "members")` –
 [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md)
-uses it to convert dimension columns into full-level factors.
+uses it to convert dimension columns into full-level factors – and, when
+`missing = TRUE`, a lazy connection to the cell-status sidecar as
+`attr(., "missing")`.
 
 ## Details
 
@@ -132,19 +155,22 @@ used as-is, then decoded.
 # (no error), so no try() is needed.
 # \donttest{
 ds <- get_statcan_ivt("98-10-0241-01")
+#> Downloading <https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip>
+#> Decoding
+#> /var/folders/z4/gcjq2cd93p3bs5bgp8j2vv240000gp/T//RtmpWcdupN/canivt_tmp_ivt/98-10-0241-01/98100241.ivt
 # `ds` is an Arrow connection; query it lazily and then collect:
 if (!is.null(ds) && requireNamespace("dplyr", quietly = TRUE)) {
   print(dplyr::collect(head(ds)))
 }
-#> # A tibble: 6 × 11
+#> # A tibble: 6 × 13
 #>   geo_label geo_name geo_uid geo_level age   household period statistics housing
-#>   <chr>     <chr>    <chr>   <chr>     <chr> <chr>     <chr>  <chr>      <chr>  
+#> * <chr>     <chr>    <chr>   <chr>     <chr> <chr>     <chr>  <chr>      <chr>  
 #> 1 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
 #> 2 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
 #> 3 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
 #> 4 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
 #> 5 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
 #> 6 Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …
-#> # ℹ 2 more variables: tenure <chr>, value <dbl>
+#> # ℹ 4 more variables: tenure <chr>, value <dbl>, symbol <fct>, status <fct>
 # }
 ```

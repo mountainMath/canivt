@@ -9,7 +9,14 @@ it.
 ## Usage
 
 ``` r
-ivt_read_table(pid, dest_dir = NULL, lang = c("en", "fr"), ...)
+ivt_read_table(
+  pid,
+  dest_dir = NULL,
+  lang = c("en", "fr"),
+  missing = FALSE,
+  complete = TRUE,
+  ...
+)
 ```
 
 ## Arguments
@@ -30,6 +37,21 @@ ivt_read_table(pid, dest_dir = NULL, lang = c("en", "fr"), ...)
 - lang:
 
   `"en"` (default) or `"fr"` endpoint.
+
+- missing:
+
+  Passed to
+  [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md):
+  when `TRUE`, also return `$missing`, the flagged cells on their own
+  (which absent cells are suppressed, not applicable, and so on, per the
+  file's own legend).
+
+- complete:
+
+  Passed to
+  [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md):
+  when `TRUE` (the default) `$cells` is the published table – every grid
+  coordinate, zeros written out and flagged cells carrying their symbol.
 
 - ...:
 

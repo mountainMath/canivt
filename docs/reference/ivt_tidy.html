@@ -11,7 +11,7 @@ analogous to the StatCan CSV download."><meta property="og:image" content="https
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,8 @@ analogous to the StatCan CSV download.</p>
 <span>  trim_labels <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  dim_names <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"slug"</span>, <span class="st">"label"</span><span class="op">)</span>,</span>
 <span>  language <span class="op">=</span> <span class="st">"en"</span>,</span>
-<span>  depth <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  depth <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  missing <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -103,6 +104,19 @@ from the label indentation, the same measure carried by <code><a href="ivt_membe
 Opt-in, so the default output – and hence the Parquet written by
 <code><a href="ivt_write_parquet.html">ivt_write_parquet()</a></code> – is unchanged.</p></dd>
 
+
+<dt id="arg-missing">missing<a class="anchor" aria-label="anchor" href="#arg-missing"></a></dt>
+<dd><p>If <code>TRUE</code> (default <code>FALSE</code>) append the table's <strong>missing</strong>
+cells – the ones the file marks as not available rather than zero – as
+rows with <code>value = NA</code>, and add <code>symbol</code> and <code>status</code> columns giving the
+reason the file states (<code>NA</code> on every cell that has a value, and on a
+missing cell whose page carries only the bare absent mask). Requires
+<code>read_ivt(path, missing = TRUE)</code>. This is the form to use when the result
+will be completed to a full grid, since an absent row is otherwise
+indistinguishable from a published zero; <code><a href="ivt_tidy_missing.html">ivt_tidy_missing()</a></code> returns the
+same cells on their own, which is what <code><a href="ivt_write_parquet.html">ivt_write_parquet()</a></code> writes as a
+sidecar rather than doubling the exported table.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -114,22 +128,22 @@ Opt-in, so the default output – and hence the Parquet written by
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"98100044.ivt"</span>, package <span class="op">=</span> <span class="st">"canivt"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">ivt</span> <span class="op">&lt;-</span> <span class="fu"><a href="read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu">ivt_tidy</span><span class="op">(</span><span class="va">ivt</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 399 × 7</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>    geo_label geo_name geo_uid        geo_level type            collective  value</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>           <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A000011124 Country   Total - Type o… Collectiv…  <span style="text-decoration: underline;">24</span>140</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span> Canada    Canada   2021A000011124 Country   Total - Type o… Populatio… <span style="text-decoration: underline;">657</span>920</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span> Canada    Canada   2021A000011124 Country   Health care an… Collectiv…  <span style="text-decoration: underline;">13</span>020</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span> Canada    Canada   2021A000011124 Country   Health care an… Populatio… <span style="text-decoration: underline;">485</span>320</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span> Canada    Canada   2021A000011124 Country   Hospitals       Collectiv…    300</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span> Canada    Canada   2021A000011124 Country   Hospitals       Populatio…  <span style="text-decoration: underline;">11</span>125</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span> Canada    Canada   2021A000011124 Country   Nursing homes   Collectiv…   <span style="text-decoration: underline;">2</span>435</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A000011124 Country   Nursing homes   Populatio… <span style="text-decoration: underline;">184</span>890</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   Residences for… Collectiv…   <span style="text-decoration: underline;">2</span>505</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Residences for… Populatio… <span style="text-decoration: underline;">159</span>750</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 389 more rows</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 448 × 9</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    geo_label geo_name geo_uid    geo_level type  collective  value symbol status</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A0000… Country   Tota… Collectiv…  <span style="text-decoration: underline;">24</span>140 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span> Canada    Canada   2021A0000… Country   Tota… Populatio… <span style="text-decoration: underline;">657</span>920 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span> Canada    Canada   2021A0000… Country   Heal… Collectiv…  <span style="text-decoration: underline;">13</span>020 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span> Canada    Canada   2021A0000… Country   Heal… Populatio… <span style="text-decoration: underline;">485</span>320 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span> Canada    Canada   2021A0000… Country   Hosp… Collectiv…    300 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span> Canada    Canada   2021A0000… Country   Hosp… Populatio…  <span style="text-decoration: underline;">11</span>125 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span> Canada    Canada   2021A0000… Country   Nurs… Collectiv…   <span style="text-decoration: underline;">2</span>435 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A0000… Country   Nurs… Populatio… <span style="text-decoration: underline;">184</span>890 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A0000… Country   Resi… Collectiv…   <span style="text-decoration: underline;">2</span>505 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A0000… Country   Resi… Populatio… <span style="text-decoration: underline;">159</span>750 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 438 more rows</span></span>
 <span class="r-in"><span><span class="fu">ivt_tidy</span><span class="op">(</span><span class="va">ivt</span>, dim_names <span class="op">=</span> <span class="st">"label"</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 399 × 7</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 448 × 9</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    geo_label geo_name geo_uid        geo_level `Type of collective dwelling`    </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                            </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A000011124 Country   Total - Type of collective dwell…</span>
@@ -142,10 +156,10 @@ Opt-in, so the default output – and hence the Parquet written by
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A000011124 Country   Nursing homes                    </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   Residences for senior citizens   </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Residences for senior citizens   </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 389 more rows</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 2 more variables:</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 438 more rows</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 4 more variables:</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;">#   `Collective dwellings occupied by usual residents and population in collective dwellings` &lt;chr&gt;,</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;">#   value &lt;dbl&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;">#   value &lt;dbl&gt;, symbol &lt;fct&gt;, status &lt;fct&gt;</span></span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

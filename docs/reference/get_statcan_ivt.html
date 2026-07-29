@@ -17,7 +17,7 @@ returns an Arrow connection to that Parquet so the data can be queried lazily
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -64,11 +64,13 @@ returns an Arrow connection to that Parquet so the data can be queried lazily
 <span>  <span class="va">catalogue</span>,</span>
 <span>  geo_attributes <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  labels <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  missing <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  dim_names <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"slug"</span>, <span class="st">"label"</span><span class="op">)</span>,</span>
 <span>  language <span class="op">=</span> <span class="st">"en"</span>,</span>
 <span>  keep_ivt <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  refresh <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  complete <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -100,6 +102,14 @@ geography attribute table (slower) so geographies can be labelled by name.</p></
 (<code>TRUE</code>, default) or the compact integer-id table.</p></dd>
 
 
+<dt id="arg-missing">missing<a class="anchor" aria-label="anchor" href="#arg-missing"></a></dt>
+<dd><p>Passed to <code><a href="read_ivt.html">read_ivt()</a></code>: additionally cache the flagged cells
+on their own as a <code>&lt;key&gt;_&lt;lang&gt;_missing.parquet</code> sidecar. Off by default
+because the cached table already carries them (see <code>complete</code>); the sidecar
+is only worth writing when the same cells are wanted in isolation. A cached
+Parquet with no sidecar is re-decoded when this is <code>TRUE</code>.</p></dd>
+
+
 <dt id="arg-dim-names">dim_names<a class="anchor" aria-label="anchor" href="#arg-dim-names"></a></dt>
 <dd><p>Passed to <code><a href="ivt_write_parquet.html">ivt_write_parquet()</a></code>: name the data-dimension
 columns by the full dimension label (<code>"label"</code>, default) or the terse
@@ -126,6 +136,14 @@ persisted in the ivt cache is reused regardless of this flag.</p></dd>
 <dt id="arg-quiet">quiet<a class="anchor" aria-label="anchor" href="#arg-quiet"></a></dt>
 <dd><p>Suppress progress messages.</p></dd>
 
+
+<dt id="arg-complete">complete<a class="anchor" aria-label="anchor" href="#arg-complete"></a></dt>
+<dd><p>Passed to <code><a href="read_ivt.html">read_ivt()</a></code>: cache the <strong>published table</strong> – every
+grid coordinate, published zeros included, flagged cells carrying
+<code>symbol</code>/<code>status</code> and a <code>NA</code> value (<code>TRUE</code>, default). A Parquet cached in
+the older store-only form is re-decoded rather than answering with fewer
+rows.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -134,7 +152,8 @@ path is attached as <code>attr(., "path")</code>; the resolved catalogue row (if
 as <code>attr(., "catalogue_row")</code>; the member-level table (<code><a href="ivt_members.html">ivt_members()</a></code>,
 read from the <code>_members.parquet</code> sidecar when present) as
 <code>attr(., "members")</code> – <code><a href="collect_ivt.html">collect_ivt()</a></code> uses it to convert dimension
-columns into full-level factors.</p>
+columns into full-level factors – and, when <code>missing = TRUE</code>, a lazy
+connection to the cell-status sidecar as <code>attr(., "missing")</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -163,20 +182,23 @@ then decoded.</p>
 <span class="r-in"><span><span class="co"># (no error), so no try() is needed.</span></span></span>
 <span class="r-in"><span><span class="co"># \donttest{</span></span></span>
 <span class="r-in"><span><span class="va">ds</span> <span class="op">&lt;-</span> <span class="fu">get_statcan_ivt</span><span class="op">(</span><span class="st">"98-10-0241-01"</span><span class="op">)</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> Downloading <span style="color: #0000BB; font-style: italic;">&lt;https://www150.statcan.gc.ca/n1/en/tbl/b2020/98100241.zip&gt;</span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> Decoding</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #0000BB;">/var/folders/z4/gcjq2cd93p3bs5bgp8j2vv240000gp/T//RtmpWcdupN/canivt_tmp_ivt/98-10-0241-01/98100241.ivt</span></span>
 <span class="r-in"><span><span class="co"># `ds` is an Arrow connection; query it lazily and then collect:</span></span></span>
 <span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NULL.html" class="external-link">is.null</a></span><span class="op">(</span><span class="va">ds</span><span class="op">)</span> <span class="op">&amp;&amp;</span> <span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"dplyr"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">ds</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 6 × 11</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 6 × 13</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   geo_label geo_name geo_uid geo_level age   household period statistics housing</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">*</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">2</span> Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">3</span> Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">4</span> Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">5</span> Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">6</span> Canada    Canada   2021A0… Country   Tota… Total - … Total… Number of… Total …</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 2 more variables: tenure &lt;chr&gt;, value &lt;dbl&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 4 more variables: tenure &lt;chr&gt;, value &lt;dbl&gt;, symbol &lt;fct&gt;, status &lt;fct&gt;</span></span>
 <span class="r-in"><span><span class="co"># }</span></span></span>
 </code></pre></div>
     </div>

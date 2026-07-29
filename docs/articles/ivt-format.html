@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -137,8 +137,9 @@ misindexed cells.</p>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">──</span> <span style="font-weight: bold;">IVT table 98100023</span> <span style="color: #00BBBB;">──────────────────────────────────────────────────────────</span></span></span>
 <span><span class="co">#&gt; Age (in single years), average age and median age and gender: Canada, provinces</span></span>
 <span><span class="co">#&gt; and territories, census divisions, census subdivisions and dissemination areas</span></span>
-<span><span class="co">#&gt; 14492239 cells | 63404 geographies | 3 dimensions | 8 footnotes</span></span>
-<span><span class="co">#&gt; <span style="color: #555555;">geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)</span></span></span></code></pre></div>
+<span><span class="co">#&gt; 24347136 cells | 63404 geographies | 3 dimensions | 8 footnotes</span></span>
+<span><span class="co">#&gt; <span style="color: #555555;">geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #555555;">published grid: 23433112 values, 914024 flagged as missing</span></span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="file-layout-at-a-glance">File layout at a glance<a class="anchor" aria-label="anchor" href="#file-layout-at-a-glance"></a>
@@ -343,10 +344,11 @@ geographies</strong>:</p>
 <li>the <strong>marker</strong>’s low nibble is the value width:
 <code>0x8</code> → float64, <code>0x4</code> → int32, <code>0x2</code> →
 int16 (so age counts are int16 but the average/median-age statistics are
-float64); its third byte encodes the trailer length and its fourth an
-auxiliary head block of <code>32·(b3 − 8)</code> bytes (0 on most pages;
-the 2006 census vintage uses 64/128-byte heads and appends absent-cell
-mask records after the value run);</li>
+float64); its third byte encodes the trailer length and its fourth a
+head block of <code>32·(b3 − 8)</code> bytes (0 on most pages). Trailer
+and head together are not padding: they are the <strong>index
+bitmap</strong> for the page’s trailing cell-status block (below), which
+is why the head grows exactly on the vintages that write a big one;</li>
 <li>each geography’s <strong>presence</strong> is a 64-byte record
 stored <strong>byte-pair-swapped</strong> — swap adjacent bytes, then
 read a positional nibble per member, with the three genders
@@ -355,9 +357,95 @@ Total/Men/Women at bits 3/2/1 (the all-present marker is
 <li>
 <strong>values</strong> are dense little-endian over the present
 <code>(member, gender)</code> cells, member-major / gender-inner. Only
-non-zero cells are stored — the StatCan CSV publishes the zeros, so a
-missing cell means 0.</li>
+non-zero cells are stored — the StatCan CSV publishes the zeros, so an
+absent cell is <em>either</em> a zero or a missing value.</li>
 </ul>
+<p>Which of the two it is is written down. Every page carries a
+<em>cell-status block</em> after the value run, and it is what
+distinguishes an absent-but-zero cell from an absent-and-missing one —
+so the familiar “absent means 0” rule is a simplification, in every
+vintage, not just the modern ones.</p>
+<p>On pages whose marker byte has high nibble <code>0xa</code> the block
+is a self-describing array of <code>W</code>-bit codes, one per cell.
+<code>W</code> is a storage choice, not a dialect — one file may mix
+widths — and code <code>0</code> always means a value or a genuine zero.
+What the <em>other</em> codes mean is declared by the table itself: a
+header slot holds its own status legend, one record per code, giving the
+symbol and its bilingual wording. That matters because the numbering is
+not universal — the modern NDM tables start at <code>1 = ..</code>,
+<code>2 = x</code>, <code>3 = ...</code>, while the 2016
+<code>98-400-X</code> crosstabs and the older profiles start one symbol
+earlier, and the survey lineages have vocabularies of their own. Code
+<code>1</code> is each file’s own <em>nothing here</em>: filler at a
+padded grid position, the published symbol at a real cell. Validated
+cell-exact against StatCan’s published tables on ten of them, in both
+directions — every published symbol matched by a code count and no code
+without a symbol — including 98-10-0128’s 1.86 M flagged cells.</p>
+<p>On high-nibble <code>0x8</code> pages — which is every pre-2016
+vintage — the block is a bare one-bit-per-cell mask, and it says the
+same thing more crudely: it flags a <strong>subset</strong> of the
+absent cells, and that subset is the genuine zeros. The unflagged
+remainder is the missing data (the Beyond 20/20 viewer prints
+<code>N</code>). Where a table has no missing values the mask coincides
+with the complement of the presence bitmap, which is the usual case and
+the reason it long looked redundant. Verified against the viewer on the
+2001 census profile <code>97F0020XCB2001070</code>.</p>
+<p><strong>Both forms are decoded</strong>, and together they are what
+lets the package hand back the <em>published</em> table rather than the
+store:</p>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>     <span class="co"># the published grid, the default</span></span>
+<span><span class="va">x</span><span class="op">$</span><span class="va">cells</span>                 <span class="co"># every real coordinate: values, published zeros, and</span></span>
+<span>                        <span class="co"># flagged cells as `value = NA` + `symbol` / `status`</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">x</span><span class="op">$</span><span class="va">cells</span>, <span class="st">"legend"</span><span class="op">)</span> <span class="co"># the file's own legend: code, symbol, EN and FR text</span></span></code></pre></div>
+<p>The completion rule is one sentence, and it is the block that
+licenses it: <em>an absent cell is the published zero unless its page’s
+cell-status block says otherwise.</em> Nothing in it comes from a
+published CSV — the grid is the layout’s, the exceptions are the tail’s
+— which is why it also applies to the tables that have no published CSV
+at all. Checked cell-for-cell against StatCan’s downloads on five tables
+covering every page class: every row present, none extra, no value
+differing, and every published symbol matched.</p>
+<p>The two deviations are deliberate. A flagged cell gets
+<code>value = NA</code> where the CSV writes <code>0</code> beside the
+symbol, because a suppressed value is not a zero. And the symbol is
+reported <strong>verbatim from the file’s legend</strong>, so a table
+that stores <code>X</code> reports <code>X</code> even where the
+published legend prints <code>x</code>; mapping it would mean writing
+external ground truth into the parse path.</p>
+<p><code>read_ivt(complete = FALSE)</code> returns the store instead —
+smaller, and then the old caveat is back in force, so pair it with
+<code>missing = TRUE</code>. <code><a href="../reference/ivt_tidy_missing.html">ivt_tidy_missing()</a></code> labels
+those coordinates exactly as <code><a href="../reference/ivt_tidy.html">ivt_tidy()</a></code> labels the values,
+and <code><a href="../reference/ivt_write_parquet.html">ivt_write_parquet()</a></code> / <code><a href="../reference/ivt_write_csv.html">ivt_write_csv()</a></code>
+write them beside the data table as a <code>_missing</code> sidecar
+(<code><a href="../reference/ivt_missing.html">ivt_missing()</a></code> reads it back from any of these).</p>
+<p>Both are stored the same way: a sparse array of value-width words,
+addressed by the index bitmap in the trailer + head region, with
+all-zero words simply not written. The gate is the length identity
+<code>popcount(index) · width == tail length</code>, which holds on all
+1,810,626 mask and 1,273,173 status-array pages of the development
+corpus. Rebuilding the block from that index is also what makes the
+<code>0xa</code> array’s addressing general — it looked lineage-specific
+for years because each table’s dropped words shifted its codes by a
+different amount.</p>
+<p>Completeness is vintage-dependent, and every gap is reported rather
+than folded in: a file may use a code its own legend does not name, and
+a page whose index cannot reach the whole grid leaves the cells past it
+unclassifiable — published as zeros, and counted
+(<code>canivt_absent_unclassified</code>). (A mask that merely <em>stops
+short</em> is not one of those cases: all-zero words go unwritten, and
+since the index can address every word the grid spans on every corpus
+page, an unwritten one is the file stating that the cells it covers hold
+no zeros.) Each of those raises its own classed warning
+(<code>canivt_status_unreadable</code>,
+<code>canivt_status_code_unknown</code>,
+<code>canivt_status_beyond_mask</code>, …), so a missing count always
+comes with the caveats attached rather than hidden.</p>
+<p>Whole-geography suppression is surfaced regardless, via
+<code>metadata$geographies$has_data</code>. See
+<code>inst/notes/ivt-format.md</code> for the byte layout, the legend’s
+own encoding, and the second (undecoded) tail block.</p>
 <p>The full per-geography codebook — name, DGUID, geographic level and
 type (+ abbreviation), two geocodes, the data-quality flag and note, and
 the non-response rate — decodes exactly for all 63,404 geographies; it
@@ -391,7 +479,7 @@ each adjacent housing pair are <strong>byte-swapped</strong>, so housing
 <code>h</code> is read at <code>stat*8 + bitwXor(h, 1)</code>); and each
 presence byte’s bits 7..1 flag the 7 Tenure members (bit 0 padding).
 <code>0xFE</code> therefore means “all 7 tenure values present”.</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># bits 7..1 of 0xFE flag the 7 tenure members; bit 0 is padding</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/bitwise.html" class="external-link">bitwAnd</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/bitwise.html" class="external-link">bitwShiftR</a></span><span class="op">(</span><span class="fl">0xFE</span>, <span class="fl">7</span><span class="op">:</span><span class="fl">1</span><span class="op">)</span>, <span class="fl">1L</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 1 1 1 1 1 1 1</span></span>
@@ -445,25 +533,25 @@ real punctuation (e.g. <code>0x92</code> = the curly apostrophe in
 <code>Tla'amin Lands</code>), so the byte-class test that frames Pascal
 records must accept it — otherwise such a label aborts a record and
 splits the array mid-stream.</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># labelled long table; read_ivt(geo_attributes = TRUE) attaches the full</span></span>
 <span><span class="co"># geography attribute table so tidy can label by name + level.</span></span>
 <span><span class="va">tab</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="../reference/ivt_download.html">ivt_download</a></span><span class="op">(</span><span class="st">"98100023"</span><span class="op">)</span>, geo_attributes <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">tab</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 14,492,239 × 7</span></span></span>
-<span><span class="co">#&gt;    geo_label geo_name geo_uid        geo_level age           gender        value</span></span>
-<span><span class="co">#&gt;    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A000011124 Country   Total - Age   Total - Gen… 3.70<span style="color: #949494;">e</span>7</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 2</span> Canada    Canada   2021A000011124 Country   Total - Age   Men+         1.82<span style="color: #949494;">e</span>7</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 3</span> Canada    Canada   2021A000011124 Country   Total - Age   Women+       1.88<span style="color: #949494;">e</span>7</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 4</span> Canada    Canada   2021A000011124 Country   0 to 14 years Total - Gen… 6.01<span style="color: #949494;">e</span>6</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 5</span> Canada    Canada   2021A000011124 Country   0 to 14 years Men+         3.09<span style="color: #949494;">e</span>6</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 6</span> Canada    Canada   2021A000011124 Country   0 to 14 years Women+       2.93<span style="color: #949494;">e</span>6</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 7</span> Canada    Canada   2021A000011124 Country   0 to 4 years  Total - Gen… 1.83<span style="color: #949494;">e</span>6</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A000011124 Country   0 to 4 years  Men+         9.39<span style="color: #949494;">e</span>5</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   0 to 4 years  Women+       8.92<span style="color: #949494;">e</span>5</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Under 1 year  Total - Gen… 3.43<span style="color: #949494;">e</span>5</span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 14,492,229 more rows</span></span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 24,347,136 × 9</span></span></span>
+<span><span class="co">#&gt;    geo_label geo_name geo_uid        geo_level age   gender  value symbol status</span></span>
+<span><span class="co">#&gt;    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span> </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 1</span> Canada    Canada   2021A000011124 Country   Tota… Total… 3.70<span style="color: #949494;">e</span>7 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 2</span> Canada    Canada   2021A000011124 Country   Tota… Men+   1.82<span style="color: #949494;">e</span>7 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 3</span> Canada    Canada   2021A000011124 Country   Tota… Women+ 1.88<span style="color: #949494;">e</span>7 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 4</span> Canada    Canada   2021A000011124 Country   0 to… Total… 6.01<span style="color: #949494;">e</span>6 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 5</span> Canada    Canada   2021A000011124 Country   0 to… Men+   3.09<span style="color: #949494;">e</span>6 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 6</span> Canada    Canada   2021A000011124 Country   0 to… Women+ 2.93<span style="color: #949494;">e</span>6 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 7</span> Canada    Canada   2021A000011124 Country   0 to… Total… 1.83<span style="color: #949494;">e</span>6 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 8</span> Canada    Canada   2021A000011124 Country   0 to… Men+   9.39<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span> Canada    Canada   2021A000011124 Country   0 to… Women+ 8.92<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span> Canada    Canada   2021A000011124 Country   Unde… Total… 3.43<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 24,347,126 more rows</span></span></span></code></pre></div>
 <p>Footnotes are read <strong>from the header</strong>, not by scanning.
 Table-level (cube) notes come from the master directory; each
 dimension’s notes come from its per-dimension slot directory (the
@@ -484,7 +572,7 @@ arrays by their NUL-free payload so they are not miscounted as
 attributes; see <code>markers.md</code> §F.) The legacy pre-DGUID files
 instead cite notes as <code>(N)</code> markers embedded in the member
 labels, linked back to the members that carry them.</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">meta</span><span class="op">$</span><span class="va">footnotes</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="co">#&gt; List of 7</span></span>
 <span><span class="co">#&gt;  $ language   : chr "en"</span></span>
@@ -529,24 +617,24 @@ endpoint that <code><a href="../reference/ivt_download.html">ivt_download()</a><
 (<code><a href="../reference/statcan_ivt_download.html">statcan_ivt_download()</a></code> resolves the
 <code>Download.cfm?PID=</code> link and returns the local path), then
 read it the same way:</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">row</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="fu"><a href="../reference/statcan_ivt_catalogue.html">statcan_ivt_catalogue</a></span><span class="op">(</span><span class="op">)</span>, <span class="va">catalogue</span> <span class="op">==</span> <span class="st">"1003011"</span><span class="op">)</span></span>
 <span><span class="va">leg</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="../reference/statcan_ivt_download.html">statcan_ivt_download</a></span><span class="op">(</span><span class="va">row</span><span class="op">)</span><span class="op">)</span>   <span class="co"># 41,859 geographies, Age(110) × Sex(3)</span></span>
 <span><span class="fu"><a href="../reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">leg</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 8,671,244 × 6</span></span></span>
-<span><span class="co">#&gt;    geo_label geo_name geo_uid single             sex            value</span></span>
-<span><span class="co">#&gt;    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>              <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>          <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 1</span> Canada    Canada   00      Total - Age Groups Total - Sex 27<span style="text-decoration: underline;">296</span>860</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 2</span> Canada    Canada   00      Total - Age Groups Male        13<span style="text-decoration: underline;">454</span>580</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 3</span> Canada    Canada   00      Total - Age Groups Female      13<span style="text-decoration: underline;">842</span>280</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 4</span> Canada    Canada   00      0-4 years          Total - Sex  1<span style="text-decoration: underline;">906</span>500</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 5</span> Canada    Canada   00      0-4 years          Male          <span style="text-decoration: underline;">975</span>765</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 6</span> Canada    Canada   00      0-4 years          Female        <span style="text-decoration: underline;">930</span>740</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 7</span> Canada    Canada   00      Under 1            Total - Sex   <span style="text-decoration: underline;">393</span>500</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 8</span> Canada    Canada   00      Under 1            Male          <span style="text-decoration: underline;">201</span>600</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span> Canada    Canada   00      Under 1            Female        <span style="text-decoration: underline;">191</span>900</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span> Canada    Canada   00      1                  Total - Sex   <span style="text-decoration: underline;">394</span>990</span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 8,671,234 more rows</span></span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 13,813,470 × 8</span></span></span>
+<span><span class="co">#&gt;    geo_label geo_name geo_uid single             sex         value symbol status</span></span>
+<span><span class="co">#&gt;    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>              <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span> </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 1</span> Canada    Canada   00      Total - Age Groups Total - S… 2.73<span style="color: #949494;">e</span>7 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 2</span> Canada    Canada   00      Total - Age Groups Male       1.35<span style="color: #949494;">e</span>7 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 3</span> Canada    Canada   00      Total - Age Groups Female     1.38<span style="color: #949494;">e</span>7 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 4</span> Canada    Canada   00      0-4 years          Total - S… 1.91<span style="color: #949494;">e</span>6 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 5</span> Canada    Canada   00      0-4 years          Male       9.76<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 6</span> Canada    Canada   00      0-4 years          Female     9.31<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 7</span> Canada    Canada   00      Under 1            Total - S… 3.94<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 8</span> Canada    Canada   00      Under 1            Male       2.02<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span> Canada    Canada   00      Under 1            Female     1.92<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span> Canada    Canada   00      1                  Total - S… 3.95<span style="color: #949494;">e</span>5 <span style="color: #BB0000;">NA</span>     <span style="color: #BB0000;">NA</span>    </span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 13,813,460 more rows</span></span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="an-older-survey-generation-container-02-00-20-00">An older survey-generation container (<code>02 00 20 00</code>)<a class="anchor" aria-label="anchor" href="#an-older-survey-generation-container-02-00-20-00"></a>
@@ -582,7 +670,7 @@ addressing is the same one described above — this table
 carries no <code>16 00</code> member-code block. A dimension carries one
 or the other, never both.</li>
 </ul>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Health Statistics at a Glance 1999 is Borealis-hosted (see vignette("borealis")</span></span>
 <span><span class="co"># for browsing/downloading): Quantifier x Geography x Period, no geography</span></span>
 <span><span class="co"># dimension, year labels generated from the on-disk dates.</span></span>

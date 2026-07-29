@@ -21,9 +21,11 @@
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_download.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_members.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_metadata.html</loc></url>
+<url><loc>https://mountainmath.github.io/canivt/reference/ivt_missing.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_parquet_language.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_read_table.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_tidy.html</loc></url>
+<url><loc>https://mountainmath.github.io/canivt/reference/ivt_tidy_missing.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_write_csv.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_write_metadata.html</loc></url>
 <url><loc>https://mountainmath.github.io/canivt/reference/ivt_write_parquet.html</loc></url>

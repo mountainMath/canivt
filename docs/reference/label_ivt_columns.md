@@ -78,4 +78,6 @@ if (requireNamespace("dplyr", quietly = TRUE)) {
 #> [2] "Type of collective dwelling"                                                            
 #> [3] "Collective dwellings occupied by usual residents and population in collective dwellings"
 #> [4] "value"                                                                                  
+#> [5] "symbol"                                                                                 
+#> [6] "status"                                                                                 
 ```

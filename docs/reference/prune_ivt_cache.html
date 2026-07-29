@@ -9,7 +9,7 @@ target files can be given three ways (combinable):"><meta property="og:image" co
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -77,8 +77,9 @@ files (language <code>NA</code>) are excluded when <code>language</code> is set.
 
 
 <dt id="arg-sidecars">sidecars<a class="anchor" aria-label="anchor" href="#arg-sidecars"></a></dt>
-<dd><p>Also delete a <code>&lt;key&gt;_members.parquet</code> sidecar once no Parquet
-references it (default <code>TRUE</code>).</p></dd>
+<dd><p>Also delete a <code>&lt;key&gt;_members.parquet</code> /
+<code>&lt;key&gt;_&lt;lang&gt;_missing.parquet</code> sidecar once no Parquet references it
+(default <code>TRUE</code>).</p></dd>
 
 
 <dt id="arg-dry-run">dry_run<a class="anchor" aria-label="anchor" href="#arg-dry-run"></a></dt>
@@ -115,7 +116,7 @@ Parquet is removed and no remaining Parquet references its shared
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="co"># Preview what a prune would remove without deleting anything:</span></span></span>
 <span class="r-in"><span><span class="fu">prune_ivt_cache</span><span class="op">(</span>dry_run <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> Would remove 188 files (3.8 Gb).</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> Would remove 191 files (3.8 Gb).</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -36,8 +36,8 @@ prune_ivt_cache(
 
 - sidecars:
 
-  Also delete a `<key>_members.parquet` sidecar once no Parquet
-  references it (default `TRUE`).
+  Also delete a `<key>_members.parquet` / `<key>_<lang>_missing.parquet`
+  sidecar once no Parquet references it (default `TRUE`).
 
 - dry_run:
 
@@ -78,5 +78,5 @@ When a Parquet is removed and no remaining Parquet references its shared
 ``` r
 # Preview what a prune would remove without deleting anything:
 prune_ivt_cache(dry_run = TRUE)
-#> Would remove 188 files (3.8 Gb).
+#> Would remove 191 files (3.8 Gb).
 ```

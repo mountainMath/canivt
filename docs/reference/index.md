@@ -26,6 +26,9 @@
 - [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md)
   : Read only the metadata of an IVT file (no value decoding)
 
+- [`ivt_missing()`](https://mountainmath.github.io/canivt/reference/ivt_missing.md)
+  : Get the cell-status (missing-cell) table
+
 - [`ivt_parquet_language()`](https://mountainmath.github.io/canivt/reference/ivt_parquet_language.md)
   : Detect the language of an IVT Parquet
 
@@ -36,6 +39,9 @@
   :
 
   Tidy an `ivt` object into a labelled data frame
+
+- [`ivt_tidy_missing()`](https://mountainmath.github.io/canivt/reference/ivt_tidy_missing.md)
+  : Tidy the cell-status (missing-cell) table
 
 - [`ivt_write_csv()`](https://mountainmath.github.io/canivt/reference/ivt_write_csv.md)
   : Write an IVT table to CSV

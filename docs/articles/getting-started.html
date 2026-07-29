@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -151,13 +151,17 @@ connection. The second call skips the download and decode.</p>
 <code class="sourceCode R"><span><span class="va">ds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/get_statcan_ivt.html">get_statcan_ivt</a></span><span class="op">(</span><span class="st">"97-570-X1981004"</span><span class="op">)</span></span>
 <span><span class="va">ds</span></span>
 <span><span class="co">#&gt; FileSystemDataset with 1 Parquet file</span></span>
-<span><span class="co">#&gt; 6 columns</span></span>
+<span><span class="co">#&gt; 8 columns</span></span>
 <span><span class="co">#&gt; geo_label: string</span></span>
 <span><span class="co">#&gt; geo_name: string</span></span>
 <span><span class="co">#&gt; geo_uid: string</span></span>
 <span><span class="co">#&gt; values: string</span></span>
 <span><span class="co">#&gt; profile: string</span></span>
-<span><span class="co">#&gt; value: double</span></span></code></pre></div>
+<span><span class="co">#&gt; value: double</span></span>
+<span><span class="co">#&gt; symbol: dictionary&lt;values=string, indices=int8&gt;</span></span>
+<span><span class="co">#&gt; status: dictionary&lt;values=string, indices=int8&gt;</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; See $metadata for additional Schema metadata</span></span></code></pre></div>
 <p>The table is a classic profile: one row per <strong>geography ×
 profile characteristic</strong>, with the count in <code>value</code>.
 The <code>profile</code> column holds the ~80 characteristics
@@ -228,9 +232,40 @@ clearly bilingual province:</p>
 <p><img src="getting-started_files/figure-html/plot-1.png" class="r-plt" alt="Stacked bar chart of 1981 mother-tongue composition by province: English, French and Other shares, ordered by French share. Quebec is overwhelmingly French, New Brunswick roughly one-third French, the rest predominantly English." width="672"></p>
 </div>
 <div class="section level2">
+<h2 id="a-note-on-cells-that-arent-there">A note on cells that aren’t there<a class="anchor" aria-label="anchor" href="#a-note-on-cells-that-arent-there"></a>
+</h2>
+<p>An IVT stores only the cells that have a value: zeros are not
+written, and neither are suppressed or not-applicable cells. What you
+get back, though, is the <strong>published table</strong> — every
+coordinate of the grid, exactly the rows StatCan’s own CSV download
+carries:</p>
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">tab</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="st">"98100040.ivt"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">tab</span><span class="op">)</span></span>
+<span><span class="co">#&gt; ... value  symbol status</span></span>
+<span><span class="co">#&gt;      24140  NA     NA               # a value</span></span>
+<span><span class="co">#&gt;          0  NA     NA               # a published zero</span></span>
+<span><span class="co">#&gt;         NA  x      Suppressed ...   # flagged, and why</span></span></code></pre></div>
+<p>Three kinds of row, and the difference between the last two is the
+point: completing the grid yourself from a stored-values-only table
+would turn every suppressed cell into a <code>0</code>. The file does
+say which is which, in a status block after each page’s values, and that
+is what separates them here. Each flagged cell carries
+<code>symbol</code> and <code>status</code> <strong>in the file’s own
+words</strong> — the legend the table declares in its own header, so
+<code>x</code> means whatever this table says <code>x</code> means.
+<code>attr(ivt_tidy(tab), "legend")</code> is that legend.</p>
+<p><code>read_ivt(complete = FALSE)</code> gives you the raw store
+instead — smaller and faster, but then absence is ambiguous again, so
+pair it with <code>missing = TRUE</code> and <code><a href="../reference/ivt_missing.html">ivt_missing()</a></code>
+if you plan to fill the grid in. See <code><a href="../reference/read_ivt.html">?read_ivt</a></code> for the
+caveats: a page whose status block cannot be read has its absences
+published as zeros and warns rather than staying silent.</p>
+</div>
+<div class="section level2">
 <h2 id="recap">Recap<a class="anchor" aria-label="anchor" href="#recap"></a>
 </h2>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/mountainMath/canivt" class="external-link">canivt</a></span><span class="op">)</span>; <span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://dplyr.tidyverse.org" class="external-link">dplyr</a></span><span class="op">)</span>; <span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://ggplot2.tidyverse.org" class="external-link">ggplot2</a></span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="../reference/statcan_ivt_catalogue.html">statcan_ivt_catalogue</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span>                       <span class="co"># 1. find the table</span></span>

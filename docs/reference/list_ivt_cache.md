@@ -5,8 +5,9 @@ Parquets (in the data cache), one row per file, enriched with catalogue
 metadata (matched product number, title, census year, topic) when the
 file's cache key matches a product in the
 [`statcan_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_catalogue.md).
-The member sidecars (`_members.parquet`) and the catalogue cache itself
-are infrastructure and are not listed.
+The member sidecars (`_members.parquet`), the cell-status sidecars
+(`_missing.parquet`) and the catalogue cache itself are infrastructure
+and are not listed.
 
 ## Usage
 
@@ -44,11 +45,11 @@ no product).
 ``` r
 # Lists whatever is in the configured cache directories (empty when unset):
 list_ivt_cache()
-#> # A tibble: 180 × 10
+#> # A tibble: 181 × 10
 #>    kind    key             language catalogue     title census_year topic  bytes
 #>    <chr>   <chr>           <chr>    <chr>         <chr>       <int> <chr>  <dbl>
 #>  1 ivt     1003011         NA       1003011       E910…        1991 Age,… 2.67e7
-#>  2 parquet 1003011         en       1003011       E910…        1991 Age,… 1.31e7
+#>  2 parquet 1003011         en       1003011       E910…        1991 Age,… 1.22e7
 #>  3 parquet 1003011         NA       1003011       E910…        1991 Age,… 1.27e7
 #>  4 ivt     1006454         NA       1006454       N910…        1991 Labo… 8.36e7
 #>  5 ivt     94F0009XDB96078 NA       94F0009XDB96… Cens…        1996 Sour… 1.17e5
@@ -57,6 +58,6 @@ list_ivt_cache()
 #>  8 ivt     95F0223XDB96001 NA       95F0223XDB96… Tota…        1996 Immi… 3.26e6
 #>  9 ivt     95F0250XDB96001 NA       95F0250XDB96… Priv…        1996 Sour… 7.82e5
 #> 10 ivt     95f0437xcb01001 NA       SP3/P0GGAN/9… Cens…          NA NA    7.10e6
-#> # ℹ 170 more rows
+#> # ℹ 171 more rows
 #> # ℹ 2 more variables: modified <dttm>, path <chr>
 ```

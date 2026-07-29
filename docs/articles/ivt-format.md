@@ -63,8 +63,9 @@ tab
 #> ── IVT table 98100023 ──────────────────────────────────────────────────────────
 #> Age (in single years), average age and median age and gender: Canada, provinces
 #> and territories, census divisions, census subdivisions and dissemination areas
-#> 14492239 cells | 63404 geographies | 3 dimensions | 8 footnotes
+#> 24347136 cells | 63404 geographies | 3 dimensions | 8 footnotes
 #> geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)
+#> published grid: 23433112 values, 914024 flagged as missing
 ```
 
 ## File layout at a glance
@@ -245,16 +246,117 @@ each directory record is a page that packs **4 geographies**:
 - the **marker**’s low nibble is the value width: `0x8` → float64, `0x4`
   → int32, `0x2` → int16 (so age counts are int16 but the
   average/median-age statistics are float64); its third byte encodes the
-  trailer length and its fourth an auxiliary head block of `32·(b3 − 8)`
-  bytes (0 on most pages; the 2006 census vintage uses 64/128-byte heads
-  and appends absent-cell mask records after the value run);
+  trailer length and its fourth a head block of `32·(b3 − 8)` bytes (0
+  on most pages). Trailer and head together are not padding: they are
+  the **index bitmap** for the page’s trailing cell-status block
+  (below), which is why the head grows exactly on the vintages that
+  write a big one;
 - each geography’s **presence** is a 64-byte record stored
   **byte-pair-swapped** — swap adjacent bytes, then read a positional
   nibble per member, with the three genders Total/Men/Women at bits
   3/2/1 (the all-present marker is `0xE`);
 - **values** are dense little-endian over the present `(member, gender)`
   cells, member-major / gender-inner. Only non-zero cells are stored —
-  the StatCan CSV publishes the zeros, so a missing cell means 0.
+  the StatCan CSV publishes the zeros, so an absent cell is *either* a
+  zero or a missing value.
+
+Which of the two it is is written down. Every page carries a
+*cell-status block* after the value run, and it is what distinguishes an
+absent-but-zero cell from an absent-and-missing one — so the familiar
+“absent means 0” rule is a simplification, in every vintage, not just
+the modern ones.
+
+On pages whose marker byte has high nibble `0xa` the block is a
+self-describing array of `W`-bit codes, one per cell. `W` is a storage
+choice, not a dialect — one file may mix widths — and code `0` always
+means a value or a genuine zero. What the *other* codes mean is declared
+by the table itself: a header slot holds its own status legend, one
+record per code, giving the symbol and its bilingual wording. That
+matters because the numbering is not universal — the modern NDM tables
+start at `1 = ..`, `2 = x`, `3 = ...`, while the 2016 `98-400-X`
+crosstabs and the older profiles start one symbol earlier, and the
+survey lineages have vocabularies of their own. Code `1` is each file’s
+own *nothing here*: filler at a padded grid position, the published
+symbol at a real cell. Validated cell-exact against StatCan’s published
+tables on ten of them, in both directions — every published symbol
+matched by a code count and no code without a symbol — including
+98-10-0128’s 1.86 M flagged cells.
+
+On high-nibble `0x8` pages — which is every pre-2016 vintage — the block
+is a bare one-bit-per-cell mask, and it says the same thing more
+crudely: it flags a **subset** of the absent cells, and that subset is
+the genuine zeros. The unflagged remainder is the missing data (the
+Beyond 20/20 viewer prints `N`). Where a table has no missing values the
+mask coincides with the complement of the presence bitmap, which is the
+usual case and the reason it long looked redundant. Verified against the
+viewer on the 2001 census profile `97F0020XCB2001070`.
+
+**Both forms are decoded**, and together they are what lets the package
+hand back the *published* table rather than the store:
+
+``` r
+
+x <- read_ivt(path)     # the published grid, the default
+x$cells                 # every real coordinate: values, published zeros, and
+                        # flagged cells as `value = NA` + `symbol` / `status`
+attr(x$cells, "legend") # the file's own legend: code, symbol, EN and FR text
+```
+
+The completion rule is one sentence, and it is the block that licenses
+it: *an absent cell is the published zero unless its page’s cell-status
+block says otherwise.* Nothing in it comes from a published CSV — the
+grid is the layout’s, the exceptions are the tail’s — which is why it
+also applies to the tables that have no published CSV at all. Checked
+cell-for-cell against StatCan’s downloads on five tables covering every
+page class: every row present, none extra, no value differing, and every
+published symbol matched.
+
+The two deviations are deliberate. A flagged cell gets `value = NA`
+where the CSV writes `0` beside the symbol, because a suppressed value
+is not a zero. And the symbol is reported **verbatim from the file’s
+legend**, so a table that stores `X` reports `X` even where the
+published legend prints `x`; mapping it would mean writing external
+ground truth into the parse path.
+
+`read_ivt(complete = FALSE)` returns the store instead — smaller, and
+then the old caveat is back in force, so pair it with `missing = TRUE`.
+[`ivt_tidy_missing()`](https://mountainmath.github.io/canivt/reference/ivt_tidy_missing.md)
+labels those coordinates exactly as
+[`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md)
+labels the values, and
+[`ivt_write_parquet()`](https://mountainmath.github.io/canivt/reference/ivt_write_parquet.md)
+/
+[`ivt_write_csv()`](https://mountainmath.github.io/canivt/reference/ivt_write_csv.md)
+write them beside the data table as a `_missing` sidecar
+([`ivt_missing()`](https://mountainmath.github.io/canivt/reference/ivt_missing.md)
+reads it back from any of these).
+
+Both are stored the same way: a sparse array of value-width words,
+addressed by the index bitmap in the trailer + head region, with
+all-zero words simply not written. The gate is the length identity
+`popcount(index) · width == tail length`, which holds on all 1,810,626
+mask and 1,273,173 status-array pages of the development corpus.
+Rebuilding the block from that index is also what makes the `0xa`
+array’s addressing general — it looked lineage-specific for years
+because each table’s dropped words shifted its codes by a different
+amount.
+
+Completeness is vintage-dependent, and every gap is reported rather than
+folded in: a file may use a code its own legend does not name, and a
+page whose index cannot reach the whole grid leaves the cells past it
+unclassifiable — published as zeros, and counted
+(`canivt_absent_unclassified`). (A mask that merely *stops short* is not
+one of those cases: all-zero words go unwritten, and since the index can
+address every word the grid spans on every corpus page, an unwritten one
+is the file stating that the cells it covers hold no zeros.) Each of
+those raises its own classed warning (`canivt_status_unreadable`,
+`canivt_status_code_unknown`, `canivt_status_beyond_mask`, …), so a
+missing count always comes with the caveats attached rather than hidden.
+
+Whole-geography suppression is surfaced regardless, via
+`metadata$geographies$has_data`. See `inst/notes/ivt-format.md` for the
+byte layout, the legend’s own encoding, and the second (undecoded) tail
+block.
 
 The full per-geography codebook — name, DGUID, geographic level and type
 (+ abbreviation), two geocodes, the data-quality flag and note, and the
@@ -348,20 +450,20 @@ array mid-stream.
 # geography attribute table so tidy can label by name + level.
 tab <- read_ivt(ivt_download("98100023"), geo_attributes = TRUE)
 ivt_tidy(tab)
-#> # A tibble: 14,492,239 × 7
-#>    geo_label geo_name geo_uid        geo_level age           gender        value
-#>    <chr>     <chr>    <chr>          <chr>     <chr>         <chr>         <dbl>
-#>  1 Canada    Canada   2021A000011124 Country   Total - Age   Total - Gen… 3.70e7
-#>  2 Canada    Canada   2021A000011124 Country   Total - Age   Men+         1.82e7
-#>  3 Canada    Canada   2021A000011124 Country   Total - Age   Women+       1.88e7
-#>  4 Canada    Canada   2021A000011124 Country   0 to 14 years Total - Gen… 6.01e6
-#>  5 Canada    Canada   2021A000011124 Country   0 to 14 years Men+         3.09e6
-#>  6 Canada    Canada   2021A000011124 Country   0 to 14 years Women+       2.93e6
-#>  7 Canada    Canada   2021A000011124 Country   0 to 4 years  Total - Gen… 1.83e6
-#>  8 Canada    Canada   2021A000011124 Country   0 to 4 years  Men+         9.39e5
-#>  9 Canada    Canada   2021A000011124 Country   0 to 4 years  Women+       8.92e5
-#> 10 Canada    Canada   2021A000011124 Country   Under 1 year  Total - Gen… 3.43e5
-#> # ℹ 14,492,229 more rows
+#> # A tibble: 24,347,136 × 9
+#>    geo_label geo_name geo_uid        geo_level age   gender  value symbol status
+#>    <chr>     <chr>    <chr>          <chr>     <chr> <chr>   <dbl> <fct>  <fct> 
+#>  1 Canada    Canada   2021A000011124 Country   Tota… Total… 3.70e7 NA     NA    
+#>  2 Canada    Canada   2021A000011124 Country   Tota… Men+   1.82e7 NA     NA    
+#>  3 Canada    Canada   2021A000011124 Country   Tota… Women+ 1.88e7 NA     NA    
+#>  4 Canada    Canada   2021A000011124 Country   0 to… Total… 6.01e6 NA     NA    
+#>  5 Canada    Canada   2021A000011124 Country   0 to… Men+   3.09e6 NA     NA    
+#>  6 Canada    Canada   2021A000011124 Country   0 to… Women+ 2.93e6 NA     NA    
+#>  7 Canada    Canada   2021A000011124 Country   0 to… Total… 1.83e6 NA     NA    
+#>  8 Canada    Canada   2021A000011124 Country   0 to… Men+   9.39e5 NA     NA    
+#>  9 Canada    Canada   2021A000011124 Country   0 to… Women+ 8.92e5 NA     NA    
+#> 10 Canada    Canada   2021A000011124 Country   Unde… Total… 3.43e5 NA     NA    
+#> # ℹ 24,347,126 more rows
 ```
 
 Footnotes are read **from the header**, not by scanning. Table-level
@@ -432,20 +534,20 @@ read it the same way:
 row <- subset(statcan_ivt_catalogue(), catalogue == "1003011")
 leg <- read_ivt(statcan_ivt_download(row))   # 41,859 geographies, Age(110) × Sex(3)
 ivt_tidy(leg)
-#> # A tibble: 8,671,244 × 6
-#>    geo_label geo_name geo_uid single             sex            value
-#>    <chr>     <chr>    <chr>   <chr>              <chr>          <dbl>
-#>  1 Canada    Canada   00      Total - Age Groups Total - Sex 27296860
-#>  2 Canada    Canada   00      Total - Age Groups Male        13454580
-#>  3 Canada    Canada   00      Total - Age Groups Female      13842280
-#>  4 Canada    Canada   00      0-4 years          Total - Sex  1906500
-#>  5 Canada    Canada   00      0-4 years          Male          975765
-#>  6 Canada    Canada   00      0-4 years          Female        930740
-#>  7 Canada    Canada   00      Under 1            Total - Sex   393500
-#>  8 Canada    Canada   00      Under 1            Male          201600
-#>  9 Canada    Canada   00      Under 1            Female        191900
-#> 10 Canada    Canada   00      1                  Total - Sex   394990
-#> # ℹ 8,671,234 more rows
+#> # A tibble: 13,813,470 × 8
+#>    geo_label geo_name geo_uid single             sex         value symbol status
+#>    <chr>     <chr>    <chr>   <chr>              <chr>       <dbl> <fct>  <fct> 
+#>  1 Canada    Canada   00      Total - Age Groups Total - S… 2.73e7 NA     NA    
+#>  2 Canada    Canada   00      Total - Age Groups Male       1.35e7 NA     NA    
+#>  3 Canada    Canada   00      Total - Age Groups Female     1.38e7 NA     NA    
+#>  4 Canada    Canada   00      0-4 years          Total - S… 1.91e6 NA     NA    
+#>  5 Canada    Canada   00      0-4 years          Male       9.76e5 NA     NA    
+#>  6 Canada    Canada   00      0-4 years          Female     9.31e5 NA     NA    
+#>  7 Canada    Canada   00      Under 1            Total - S… 3.94e5 NA     NA    
+#>  8 Canada    Canada   00      Under 1            Male       2.02e5 NA     NA    
+#>  9 Canada    Canada   00      Under 1            Female     1.92e5 NA     NA    
+#> 10 Canada    Canada   00      1                  Total - S… 3.95e5 NA     NA    
+#> # ℹ 13,813,460 more rows
 ```
 
 ## An older survey-generation container (`02 00 20 00`)

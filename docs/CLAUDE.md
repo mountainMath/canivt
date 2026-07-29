@@ -30,7 +30,8 @@ plus one shared metadata path (`ivt_f2_metadata()`) handle every
 vintage. The historical “family 1 / family 2” split is **not two
 formats** — it is one power-of-two-nested positional layout differing
 only in *which* dimension straddles the 2048-bit page boundary.
-Whole-file pure-R decode of the 7.5M-cell reference table: ~4–5 s.
+Whole-file pure-R decode of the 7.5M-cell reference table: ~3 s (~6.5 s
+completed to its 39.2M published rows).
 
 Validated cell-exact on six reference tables (0241/0077/0662 data-dim
 straddle; 0023/0129/1991 geography straddle) and viewer/CSV-validated
@@ -40,7 +41,7 @@ Business Patterns, and the `02 00 20 00` survey generation (byte 0 ==
 `0x02`; these have **no geography dimension** — `ivt_f2_geo_dim_index()`
 returns 0, no `geo` column).
 
-**The refusal ledger is empty** (2026-07-26): all 133 corpus rows are
+**The refusal ledger is empty** (2026-07-26): all 170 corpus rows are
 `supported = TRUE`, with no gate relaxed to get there.
 `unsupported-formats.md` now records how rejection works and what each
 former refusal turned out to be — keep it current, and if a file is ever
@@ -49,11 +50,73 @@ silently emit unvalidated values.
 
 Key semantics:
 
-- **The store keeps only non-zero cells** (the CSV publishes zeros) — an
-  absent cell is a zero *within a geography that carries data*.
-  **Suppression is whole-geography**: no stored cells ⇒ wholly
-  suppressed/empty, exposed as `metadata$geographies$has_data`. There is
-  no per-cell sentinel.
+- **[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+  returns the PUBLISHED TABLE, not the store** (2026-07-28,
+  `complete = TRUE` by default): one row per real grid coordinate,
+  published zeros written out, flagged cells carrying `value = NA` +
+  `symbol`/`status` factors. The rule is derived from the file’s own
+  bytes — *absent ⇒ published zero unless the page’s cell-status block
+  says otherwise* — never from a published CSV. Validated cell-for-cell
+  against StatCan’s CSVs on 98-10-0040 / 0019 / 0021 / 0478 / 0655
+  (every row present, no extra row, `max|d| = 0`, every symbol matched)
+  and corroborated by WDS `nbDatapointsCube` = stored + flagged. A page
+  whose tail cannot be read publishes its absences as zeros **and counts
+  them** (`canivt_absent_unclassified`). `complete = FALSE` restores the
+  store-only output; completion is refused above
+  `getOption("canivt.max_cells", 1e8)` grid cells (the corpus grid
+  totals 4.3B rows against 366M stored cells).
+- **The store keeps only non-zero cells** (the CSV publishes zeros) — so
+  an absent cell is *either* a zero or a missing value, and the page’s
+  **cell-status block** is the only thing separating them. **“Absent ⇒
+  zero” is FALSE in every vintage**; it merely looks true on tables that
+  publish no missings. Whole-geography suppression (no stored cells at
+  all ⇒ `metadata$geographies$has_data`) is still correct, just coarse.
+- **The cell-status tail IS decoded** (2026-07-27), opt-in:
+  `read_ivt(missing = TRUE)` → `x$missing`, a coordinate tibble shaped
+  like `cells` minus `value` plus a `status` column, with a
+  per-page-class tally in `attr(., "pages")`. **Both forms**, from one
+  storage rule:
+  - `0x8` → the 1-bit absent mask: masked absent ⇒ genuine zero,
+    **UNMASKED absent ⇒ missing** (`N` in the viewer), `status = NA` (no
+    reason stated). Proven on `97F0020XCB2001070` against the Beyond
+    20/20 viewer (344 missings over the 86 tail-bearing pages of geos
+    1–13, 0 for Nunavut — reproduced exactly) and confirmed from the
+    other side by the CMHC crosstabs (0 unflagged; their B20/20 CSVs
+    publish no missings). Also validated from the tables’ own arithmetic
+    by `dev/mvalidate.R` — a coordinate whose absent cells are all
+    masked reproduces its dimension’s Total to within random rounding,
+    one with cells reported missing falls short by an amount that grows
+    with how many.
+  - `0xa` → the self-describing reason-code array: header
+    `[form][02][W]` (+ `[u16]` when form 02) then a **`[01][W]`** array
+    intro, codes `W` bits MSB-first (not pair-swapped) at the same
+    `lay$grid$bit`. **`W` is a storage choice, not a dialect** — one
+    file mixes widths — and code `0` is always a value or a genuine
+    zero. **What the other codes MEAN is declared by the FILE**, not by
+    the format: header slot **`@698`** points at the table’s own status
+    legend — symbol plus bilingual wording, one record per code, in code
+    order (`ivt_f2_status_legend()`, markers.md §H.1). **Seven distinct
+    legends** over the 115 corpus tables that declare one, and they are
+    *offset from each other* (NDM census `1 = ..`, `2 = X`, `3 = ...`;
+    the profile / `98-400-X` / 2021-custom lineage starts one symbol
+    earlier at `1 = -`), so a fixed table mislabels most of the corpus.
+    Code `1` is the file’s own *nothing here*: filler at a padded grid
+    position, the published symbol at a real cell — the GRID decides,
+    and `coords_of()` already does. A code the legend does not name is
+    counted, never translated (`canivt_status_code_unknown`, 0
+    corpus-wide); a file declaring no legend falls back loudly to the
+    NDM vocabulary (`canivt_status_legend`). `x$missing` carries
+    `symbol` + `status`; the legend rides on
+    `attr(x$missing, "legend")`. The array’s “lineage-specific
+    addressing” was the block read **without the sparse rebuild**;
+    rebuild first and one rule covers 1,273,173/1,273,173 corpus pages.
+    Validated cell-exact in BOTH directions on **ten** tables
+    (98-10-0002/0010/0013/0023/0040/0128/0129/0478/0655/0658) plus two
+    internal checks: present ⇒ code 0 everywhere, and padding ⇒ code 1
+    over 166,965,381 cells at every width.
+
+  54 corpus tables report missings, 624,500,113 in all. See `R/status.R`
+  below and `ivt-format.md`, “The cell-status block”.
 - **Geography metadata is on the DEFAULT path**: `metadata$geographies`
   packs every decoded per-member column (bilingual
   `geo_label`/`geo_name`, `geo_uid`, level/type, geocodes, `dqf_code`,
@@ -71,24 +134,21 @@ Key semantics:
 | `utils-bytes.R` | low-level readers `rd_u16/rd_u32/rd_int_run/rd_pascal`, latin-1 decode. **All offsets 0-based**; helpers convert to R’s 1-based indexing. |
 | `fallback.R` | **loud fallbacks**: `ivt_fallback(msg, class)` raises a classed `canivt_fallback` warning whenever a heuristic supplies values or pages are skipped; `options(canivt.strict = TRUE)` upgrades to an error. `ivt_quietly()` muffles both for detection probes. Wire every new fallback through this. |
 | `container.R` | page-directory anchor `ivt_idx0()` (`u16@558`, validated against the first page marker; `IVT_IDX0_DEFAULT` is the fallback). |
-| `decode.R` | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit cap, computes in-page/straddle/paged roles, the bit grid and the 8-byte directory strides — every level padded to the declared slot allocation (`ivt_f2_dim_slot_alloc()`). `ivt_decode()` walks the paged cartesian and decodes each page (`ivt_f2_record_present()` + `ivt_value_trailer()`; dense pages via `ivt_decode_page_dense()`) → cell tibble (`geo` + one slug column per data dim). Also `ivt_dir_outer_count()` — the **container count witness**: the directory’s own populated span for the outermost paged dimension. |
+| `decode.R` | **the unified cell decoder.** `ivt_layout()` nests every dimension (data innermost, geography outermost), finds the one straddle dim at the 2048-bit cap, computes in-page/straddle/paged roles, the bit grid and the 8-byte directory strides — every level padded to the declared slot allocation (`ivt_f2_dim_slot_alloc()`). `ivt_decode()` walks the paged cartesian and decodes each page (`ivt_f2_record_present()` + `ivt_value_trailer()`; dense pages via `ivt_decode_page_dense()`) → cell tibble (`geo` + one slug column per data dim). `ivt_decode(missing = TRUE)` additionally reads each page’s status tail (`status.R`) **before** decoding it — so a wholly-suppressed page still contributes — and attaches the missing-cell tibble as `attr(cells, "missing")`; `coords_of()` is the shared coordinate build for both. Also `ivt_dir_outer_count()` — the **container count witness**: the directory’s own populated span for the outermost paged dimension. |
 | `container-f2.R` | family-2 page-directory finder + the marker byte model (`ivt_f2_is_marker()`: `b0` width/variant nibbles, `b3 ∈ {08..0e}` head codes); `ivt_f2_geos_per_page()` / `ivt_f2_geography_count()`. |
-| `decode-f2.R` | shared presence-bitmap primitives (the `ivt_f2_` prefix is historical — used by every family): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()`, `ivt_f2_cell_grid()`, `ivt_f2_record_present()` (byte-pair-swap, MSB-first). |
+| `decode-f2.R` | shared presence-bitmap primitives (the `ivt_f2_` prefix is historical — used by every family): `ivt_f2_nextpow2()`, `ivt_f2_bit_layout()`, `ivt_f2_cell_grid()`, `ivt_f2_record_present()` (byte-pair-swap, MSB-first). The grid carries its **bit addressing precomputed** (`ivt_bit_addr()`: plain byte index, pair-swapped byte index, MSB-first shift — the pair-swap is a permutation of the ADDRESS, not a copy of the record); hand `lay$grid` rather than `lay$grid$bit` to any bit reader to reuse it. |
 | `dimdir.R` | **bilingual labels, dimension names, header directory slot table.** `ivt_f2_dim_dir_label1()` → `list(en, fr, name_fr)`, EN/FR chosen structurally (`ivt_f2_dim_dict_en_first()`; `ivt_f2_frscore()` is the loud fallback). **Header `@824 + 14·(k−1)`** holds a 14-byte record per descriptor dimension (`[u32 dir_ptr][u32 ?][u32 n_entries][2B]`) — the primary codebook anchor: `ivt_f2_dim_slots()` reads it, `ivt_f2_dim_dir(raw, k)` resolves dimension `k`’s block directory (`[u32 off][u16 len][u16 len]`, two indirection depths for big chunked geo dirs), self-validated against `n_entries`. Each directory lists that dimension’s codebook in logical order (dictionary/schema, member-id table, ordinals, the `81 02 02 00` doubled-name marker, EN then FR member blocks, footnotes). Readers: `ivt_f2_dim_dir_labels()`, `ivt_f2_dim_dir_ordinals()`, `ivt_f2_dir_footnotes()` (with `scope`/`dimension`/`member_id`; member notes flagged by an `84 01` bitmap, `ivt_f2_footnote_bitmap()`), `ivt_f2_table_footnotes()`. Other header slots: `ivt_f2_master_dir()` (`@544` → master directory at 992) and `ivt_f2_dqf_legend()` (`@712`, `[82 01]`-framed EN/FR per code A–E/R/P). `ivt_f2_dim_count_reconcile()` opens with `ivt_f2_dim_slot_declared()` (adopt the declared count/slots from the `16 00` slot table, quiet) before falling back to `ivt_f2_dim_slot_expand()`, and closes with `ivt_f2_dim_count_container()` (the page directory, `ivt_dir_outer_count()`). |
 | `codebook-f2.R` | **the unified codebook.** `ivt_f2_geo_read(raw, full)` is the single geography dispatcher; `ivt_f2_geo_light()` (metadata default) and `ivt_f2_geographies()` (`geo_attributes = TRUE`) are thin wrappers. Stage 1 `ivt_f2_geo_entries()` locates the geo block directory once and exposes lazy memoized `records`/`strict`/`values` accessors shared by all six readers. Then an ordered specializer chain: flow → inline → schema → custom → bare; a complete uid array wins for big chunked DGUID tables; else Stage 3 `ivt_f2_geo_combined()` is the last-resort net (`canivt_geo_unparsed`, loud). Column identity is **metadata-driven** where declared — the `81 02` field dictionary (`ivt_f2_geo_field_schema()` + `ivt_f2_geo_field_roles()`) maps runs to `geo_name`/`geo_name_fr`/`geo_uid` by the file’s own field names; only without a matching dictionary does it fall to content heuristics. Readers: `ivt_f2_geo_simple()` (cheap names+DGUIDs, schema-addressed), `ivt_f2_geo_attributes()` / `ivt_f2_geo_attrs_dir()` (the **primary** attribute reader — every attribute read positionally, per group `[display + schema fields]` × EN-then-FR runs, ordinals dropped, per-member footnote text blobs skipped via `ivt_f2_dir_is_text_block()`; stride path `ivt_f2_geo_root_dir()` retained but unreached), `ivt_f2_geo_inline()` (combined-string blocks: `"name (code) [type] flag [(pct%)]"` for 1991/2006/2011/2016, and the code-first `"<code> - <name>"` of the Business-Register CD/CSD lineage; runs where no schema is declared **or** the declared one is a `custom` field dictionary naming the file’s own combined columns), `ivt_f2_geo_flow_dir()` / `ivt_f2_flow_sides()` (**origin-destination commuting flows**, geo type `0x0f`: a flow decodes as **two** geographies — the file’s POR/POW schema → `geo_res_*`/`geo_work_*`, pair kept as `geo_uid`; anchored on the uid array, labels joined back by code), `ivt_f2_dim_member_labels()` (data-dim labels via the doubled-name marker). Two loud name fills guarantee a `geo_name` for every member: `ivt_f2_inline_name_subtract()` and `ivt_f2_geo_fill_label()` (both fill NAs only). Snapshot-guarded by `fixtures/geo-snapshot.csv`. **Slugs** (`ivt_dim_slug()`) are generic: lower-cased leading word of the dimension name, made unique. Also the slot declarations: `ivt_f2_time_members()` (`08 00` time table, fed to the count reconcile by `ivt_f2_dim_time_declared()`) and `ivt_f2_dim_slot_table()` (the `16 00` block’s 22-bit per-slot records → `live`/`used`/`deleted`/`code_len`/`codes`/`codes_ok`), feeding `ivt_f2_dim_slot_alloc()`. |
 | `read-f2.R` | **unified metadata + tidy**: `ivt_f2_metadata()`; `ivt_f2_vl_pairs()` + `ivt_f2_dim_name()` (header Variable List names, matched to the descriptor by count); `ivt_f2_dimensions()` (per-dim `name/count/type/is_geography/members`); `ivt_f2_footnotes()` (table + dimension + member notes, renumbered by `ivt_f2_footnote_finalize()`, each with `scope`/`dimension`/`member_id`/`member_refs`) + `ivt_f2_legacy_footnotes()` / `ivt_f2_note_refs()` (the legacy `(N)` markers in labels); `ivt_f2_tidy()`; `ivt_data_colnames()`. |
-| `codebook.R` | shared codebook primitives: `ivt_find_member_blocks()` Pascal-run scanner, `ivt_header_text()` / `ivt_table_info()`, `ivt_footnote_texts()`. |
 | `suba.R` | the **type-00 sub-A** provincial Business-Patterns module (`ivt_f2_suba_annotate()`): measures the non-declared directory stride from the page directory (`ivt_f2_suba_dir_stride()`, ignoring blank pages via `ivt_f2_page_blank()`), recovers the under-declared industry count from codebook chunks (`ivt_f2_suba_industry_codes()`) or from the bilingual member arrays (`ivt_f2_suba_member_arrays()`), and **commits only if the decode reconciles** (industry-Total == Σ detail, or Canada == Σ provinces) — else the file stays honestly UNSUPPORTED. Three placement cases: `dense`, `chunked` (contiguous run + total) and `sparse` (members == the occupied slots). Industry **labels are PROVISIONAL** (`canivt_suba_labels`, loud): reconciliation validates sums, not the code→member assignment. |
-| `read.R` | public [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md), [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md), [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md), `print.ivt` — one path for all families; `ivt_family()` detector + `ivt_is_supported()` gate. `ivt_tidy(dim_names=)` names columns by slug (default) or full label; `x$cells` always keeps slugs (the naming is an output-layer rename shared with [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)). `ivt_tidy(language=)` gives EN (default) or FR labels, falling back per column. **Parquet paths carry a language marker** (`<key>_en/_fr.parquet`); `ivt_members_path()` strips it so one `_members.parquet` sidecar serves both. [`ivt_parquet_language()`](https://mountainmath.github.io/canivt/reference/ivt_parquet_language.md), [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md). Geography columns keep `geo_*` names; `geo_uid` is language-neutral. |
-| `collect.R` | **factor-level context**: `ivt_members(x)` (one row per tidy column × member with `member_id`/`ordinal`/`label`/`level`/`depth`); `collect_ivt(x, members)` converts dimension columns to factors whose levels are the **full** member list in ordinal order (filtered-out members stay as levels). Levels travel as a `<name>_members.parquet` sidecar. **Geography is never levelled** — it is an identity axis (`geo_uid` is the join key), its member list runs to tens of thousands, and its ordinal is a hierarchy traversal, not an analytic order; it was 99.7% of the sidecar. Per-member geography context lives in `metadata$geographies` instead, including the label hierarchy (`geo_depth`/`geo_parent_id`, added by `ivt_f2_metadata()`, omitted when the axis is flat). `ivt_factorize()` still filters `dimension == "Geography"` so an **older cached sidecar** cannot start factorizing `geo_uid`. Ordinals from `ivt_f2_dim_dir_ordinals()` (must be a permutation of `1..count`). `dim_names = "label"` applies on **every** path (on Arrow/Parquet by calling [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md) after the factor conversion), and the result carries the `members` table + source `path` as attributes. `ivt_member_col_map()` resolves each member row to its column by written name **then** by the `dimension`/`dimension_fr` the member table records — so [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md) composes with [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md) in **either order**, label matches never claiming a column an exact match owns. |
-| `catalogue.R` | scrapes the StatCan census datasets index into a product catalogue ([`statcan_ivt_years()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_years.md), [`statcan_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_catalogue.md), [`statcan_ivt_resolve_url()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_resolve_url.md)), cached as Parquet. Needs `rvest` + `xml2`. |
-| `borealis.R` | Borealis Dataverse source: [`borealis_ivt_catalogue()`](https://mountainmath.github.io/canivt/reference/borealis_ivt_catalogue.md) (needs `BOREALIS_DATAVERSE_KEY`, ~90 s, cached — reading the cache needs neither), [`borealis_ivt_download()`](https://mountainmath.github.io/canivt/reference/borealis_ivt_download.md). |
-| `get.R` | `get_statcan_ivt(source, …)` — one-stop accessor. `source` = StatCan catalogue number, Borealis id/key/`file_id`, local custom id, a one-row catalogue tibble, or a named length-one `c(key = "url-or-path")`. Resolves → downloads → decodes → caches tidy Parquet → returns an [`arrow::open_dataset()`](https://arrow.apache.org/docs/r/reference/open_dataset.html) connection. `keep_ivt = FALSE` (default) discards the raw `.ivt`. Also [`list_ivt_cache()`](https://mountainmath.github.io/canivt/reference/list_ivt_cache.md) and [`prune_ivt_cache()`](https://mountainmath.github.io/canivt/reference/prune_ivt_cache.md). |
+| `status.R` | **the page cell-status tail** — which absent cells are zeros and which are MISSING, and why. `ivt_page_status(raw, off, lay, size)` returns `kind ∈ {none, mask, status, unreadable}`; on `status` (the `0xa` array) it also returns per-cell `codes` at every declared width `W ∈ {1,2,4,8}` (`ivt_status_array()`), NULL only where the header does not parse. `ivt_status_scatter()` is the shared sparse rebuild both forms use. The tail is a **sparse array of value-width words addressed by an index bitmap occupying the WHOLE pre-value region** (the `b2` trailer + the `32·(b3−8)` head — so `b3` is in effect an index-size code), read pair-swapped MSB-first, one bit per word; gate `popcount(index)·width == tail length` (1,810,626/1,810,626 mask pages, 0 unreadable). Scattering the written words back to their indexed positions rebuilds the block; its first `rec_bytes` are the mask, read by `ivt_mask_bits()` — MSB-first and, uniquely in this container, **not pair-swapped** — at `lay$grid$bit`. Reports `nan_words` (x87-quieted NaN-shaped words: one status bit destroyed **in the source**), `extra_words` (the undecoded second block) and `covered_bits` = `min(index words, mask words)` — **the index’s reach, not the last word written**: an unwritten word the index *could* have addressed is the file declaring it all-zero, so only cells past the reach feed the `beyond` count (0 corpus-wide). Also `ivt_f2_status_legend()` — the table’s **own** reason-code legend from header slot `@698`: entry 0 is an index array `[04 02][u16 n_codes][u16 per_code]` + `n_codes·per_code` u32 entry indices (`per_code` 2 bilingual, 1 EN-only), each referenced record `[82 01|02 01][u16][flags][u8 sym_len][symbol][00][u16 len][text]`, symbol found by its promised NUL and text required only to *fit* (survey records append a second string). Returns `code`/`symbol`/`text_en`/`text_fr`, NULL where nothing declares; `IVT_STATUS_VOCAB` is the loud NDM-shaped fallback. Reached only via `ivt_decode(missing = TRUE)`. |
+| `complete.R` | **the published table.** `ivt_complete_budget()` (the `canivt.max_cells` guard) and `ivt_complete_cells()` — assembles the full grid from `ivt_decode(complete = TRUE)`’s per-coordinate accumulators, maps reason codes to `symbol`/`status` **factors** through the file’s own `@698` legend (code `0` = value or published zero, `-1` = mask-derived “missing, reason unstated”, a code the legend does not name stays NA and is counted), and delegates the loud reporting to `ivt_status_report()` (decode.R, shared with `ivt_missing_cells()`). `ivt_flagged_cells()` is the `is.na(value)` view that fills `x$missing`. |
+| `read.R` | public [`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md), [`ivt_metadata()`](https://mountainmath.github.io/canivt/reference/ivt_metadata.md), [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md), `print.ivt` — one path for all families; `read_ivt(missing = TRUE)` adds `x$missing` (see `status.R`); `ivt_family()` detector + `ivt_is_supported()` gate. `ivt_tidy(dim_names=)` names columns by slug (default) or full label; `x$cells` always keeps slugs (the naming is an output-layer rename shared with [`ivt_members()`](https://mountainmath.github.io/canivt/reference/ivt_members.md)). `ivt_tidy(language=)` gives EN (default) or FR labels, falling back per column. **Parquet paths carry a language marker** (`<key>_en/_fr.parquet`); `ivt_members_path()` strips it so one `_members.parquet` sidecar serves both. [`ivt_parquet_language()`](https://mountainmath.github.io/canivt/reference/ivt_parquet_language.md), [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md). Geography columns keep `geo_*` names; `geo_uid` is language-neutral. [`ivt_tidy_missing()`](https://mountainmath.github.io/canivt/reference/ivt_tidy_missing.md) is [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md) for `x$missing` — same labelling, `value` replaced by `symbol`/`status` (FR wording swapped in from the legend), so the two tables line up column for column; `ivt_tidy(missing = TRUE)` binds them (missing cells as `value = NA` rows), which is the form to complete to a full grid from. |
+| `stream.R` | **chunked conversion** — the published grid written a slice at a time, so a big table converts on a small machine. The fold is positional: the entry cartesian’s LAST column (the outermost paged dimension) varies slowest, so a slice of it is a contiguous run of output rows — `ivt_decode(outer = )` takes the 0-based member indices to walk and is otherwise the same decode. `ivt_chunk_plan(lay, max_cells)` splits that dimension into `getOption("canivt.chunk_cells", 5e6)`-row chunks (`list(NULL)` = one piece, which is also the only option when the layout has nothing outside the straddle window). `ivt_write_stream()` runs the loop — decode chunk → [`ivt_tidy()`](https://mountainmath.github.io/canivt/reference/ivt_tidy.md) → sink → drop — and **checks that the streamed row count equals the grid**, so a plan that failed to cover the table aborts rather than writing a short file. Two sinks (`ivt_sink_open/_write/_close`): Parquet via `ParquetFileWriter` (schema from the first chunk; stable because labels and the `symbol`/`status` factor levels are table-wide), CSV via ONE connection held open ([`gzfile()`](https://rdrr.io/r/base/connections.html) when the path ends `.gz`) so a chunked gzip is a single stream. The whole-table CSV path writes through the same sink, so the two files are identical by construction. `ivt_csv_path()` / `ivt_csv_missing_path()` / `ivt_csv_is_gz()` are the `.gz` naming rules. Validated cell-for-cell against the whole-table decode on every sliceable corpus table (`test-stream.R`); 98-10-0241 → Parquet peaks at 1.1 GB instead of 6.3 GB. |
+| `collect.R` | **factor-level context**: `ivt_members(x)` (one row per tidy column × member with `member_id`/`ordinal`/`label`/`level`/`depth`); `collect_ivt(x, members)` converts dimension columns to factors whose levels are the **full** member list in ordinal order (filtered-out members stay as levels). Levels travel as a `<name>_members.parquet` sidecar. **Geography is never levelled** — it is an identity axis (`geo_uid` is the join key), its member list runs to tens of thousands, and its ordinal is a hierarchy traversal, not an analytic order; it was 99.7% of the sidecar. Per-member geography context lives in `metadata$geographies` instead, including the label hierarchy (`geo_depth`/`geo_parent_id`, added by `ivt_f2_metadata()`, omitted when the axis is flat). `ivt_factorize()` still filters `dimension == "Geography"` so an **older cached sidecar** cannot start factorizing `geo_uid`. Ordinals from `ivt_f2_dim_dir_ordinals()` (must be a permutation of `1..count`). `dim_names = "label"` applies on **every** path (on Arrow/Parquet by calling [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md) after the factor conversion), and the result carries the `members` table + source `path` as attributes. `ivt_member_col_map()` resolves each member row to its column by written name **then** by the `dimension`/`dimension_fr` the member table records — so [`label_ivt_columns()`](https://mountainmath.github.io/canivt/reference/label_ivt_columns.md) composes with [`collect_ivt()`](https://mountainmath.github.io/canivt/reference/collect_ivt.md) in **either order**, label matches never claiming a column an exact match owns. Also the **cell-status sidecar**: `ivt_missing_path()` (which, unlike `ivt_members_path()`, KEEPS the `_en`/`_fr` marker — its coordinates and its `status` wording are language-specific) and public `ivt_missing(x)`, resolving from an `ivt`, a Parquet path or an Arrow/dplyr connection (attribute, then `path`, walking `$.data`). |
+| `get.R` | `get_statcan_ivt(source, …)` — one-stop accessor. `source` = StatCan catalogue number, Borealis id/key/`file_id`, local custom id, a one-row catalogue tibble, or a named length-one `c(key = "url-or-path")`. Resolves → downloads → decodes → caches tidy Parquet → returns an [`arrow::open_dataset()`](https://arrow.apache.org/docs/r/reference/open_dataset.html) connection. `keep_ivt = FALSE` (default) discards the raw `.ivt`. `missing = TRUE` also decodes and caches the `_missing.parquet` sidecar, attached lazily as `attr(ds, "missing")`; a cached Parquet **without** one is re-decoded rather than silently answering with less. Also [`list_ivt_cache()`](https://mountainmath.github.io/canivt/reference/list_ivt_cache.md) and [`prune_ivt_cache()`](https://mountainmath.github.io/canivt/reference/prune_ivt_cache.md) (both sidecar kinds are infrastructure: filtered out of the listing, pruned when orphaned). |
 | `ground-truth.R` | **internal** — scrapes the public B20/20 HTML viewer (`Rp-eng.cfm`) to build validation fixtures. `ivt_gt_viewer_url()`, `ivt_gt_slice()`, `ivt_ground_truth()`. Returns one row per cell with a `value` + per dimension a slug label and a 1-based `<slug>_id` **position** (the label-independent join key). |
-| `cache.R` / `zzz.R` | `ivt_cache_dir("ivt"\|"data")` (options `canivt.ivt_cache` / `canivt.data_cache`, else [`tempdir()`](https://rdrr.io/r/base/tempfile.html)); `.onLoad` seeds them from `CANIVT_IVT_CACHE` / `CANIVT_DATA_CACHE`. |
-| `download.R` | [`ivt_download()`](https://mountainmath.github.io/canivt/reference/ivt_download.md), `ivt_store_download()` (sniffs zip vs raw), `ivt_pid8()`. |
-| `write.R` | `ivt_write_parquet()/_csv()/_metadata()` (parquet also writes the `_members` sidecar); `ivt_label_depth(labels, unit)` / `ivt_label_parent()` (indentation → hierarchy). The **spaces-per-level is not universally 2**: `ivt_label_indent_unit()` reads it off the label set as the gcd of the observed indents (the census-of-agriculture geography axis, `00040200`/`00040207`/`00040231`, indents ONE space per level over Canada/province/CAR/CD/CCS, which a fixed 2 collapses from five levels to three). Geography infers the unit; data dimensions keep the validated default of 2. |
-| `canivt-package.R` | [`ivt_read_table()`](https://mountainmath.github.io/canivt/reference/ivt_read_table.md) one-shot wrapper + package doc. |
+| `write.R` | `ivt_write_parquet()/_csv()/_metadata()` (parquet also writes the `_members` sidecar; both write the `_missing` sidecar by default when `x$missing` is present — the data table holds only cells that HAVE a value, so without it completing the grid turns every suppressed cell into a zero). **Either writer takes a PATH instead of an `ivt`** and streams (`stream.R`). **CSV is gzipped by default** (`compress = TRUE`): the published grid repeats every label on every row, so it compresses ~20× (30.9 MB → 1.4 MB on 98-10-0066); the extension is the truth about the file (`.gz` appended when missing, a `.gz` path always compressed) and the path actually written is returned. Also `ivt_label_depth(labels, unit)` / `ivt_label_parent()` (indentation → hierarchy). The **spaces-per-level is not universally 2**: `ivt_label_indent_unit()` reads it off the label set as the gcd of the observed indents (the census-of-agriculture geography axis, `00040200`/`00040207`/`00040231`, indents ONE space per level over Canada/province/CAR/CD/CCS, which a fixed 2 collapses from five levels to three). Geography infers the unit; data dimensions keep the validated default of 2. |
 
 ## Key invariants (don’t regress)
 
@@ -162,16 +222,27 @@ The *rules*; the measurements and original bugs behind them are in
   valid entries pointing at them are skipped loudly
   (`canivt_skipped_pages`). Every page is extent-checked against its
   directory entry’s u16 size, with **equality only when `b2 == 0` and
-  `b3 == 08`** (pages with a head block may append an absent-cell mask /
-  allocation slack, so only `≤` applies; `canivt_page_overrun`).
-  Decoding stays presence-authoritative (exactly `popcount` values from
-  the run start), so a tail never affects it.
+  `b3 == 08`** (pages with a head block append the cell-status tail, so
+  only `≤` applies; `canivt_page_overrun`). Decoding stays
+  presence-authoritative (exactly `popcount` values from the run start),
+  so a tail never affects it.
+- **The pre-value region is not padding — it is the tail’s INDEX**
+  (`status.R`): the whole `trailer + head` span is a bitmap, one bit per
+  value-width word of the trailing cell-status block, so `b3` is
+  effectively an index-size code. Gate
+  `popcount(index)·width == tail length`. Read only under
+  `missing = TRUE`; it can never move a value.
 - The page marker’s **low nibble is the value-width code**
   (`0x8`→float64, `0x4`→int32, `0x2`→int16); the high nibble (`0x8` vs
-  `0xa`) only changes the pad/`0xFF` trailer length — `0xa` is **not** a
-  suppression flag. A **zero high nibble in b0 is the DENSE page
-  variant** (1991 profiles): bytes 3–4 are a u16 value COUNT, one value
-  per grid position, zeros stored literally, exact fit
+  `0xa`) changes the pad/`0xFF` trailer length **and selects the page’s
+  trailing cell-status block** — `0x8` → a bare 1-bit absent mask (a
+  *subset* of the absent cells: masked ⇒ genuine zero, unmasked ⇒
+  missing), `0xa` → the self-describing status array that carries the
+  `x`/`...` reason codes. The correlation is exact over the sampled
+  corpus, so `0xa` **is** a suppression-bearing flag after all (the old
+  note here said otherwise). A **zero high nibble in b0 is the DENSE
+  page variant** (1991 profiles): bytes 3–4 are a u16 value COUNT, one
+  value per grid position, zeros stored literally, exact fit
   `4 + count·width == size` (`ivt_decode_page_dense()`).
 - Directory entries are in **geography member-id order**; geos-per-page
   is **computed** (`geo_count / n_pages`), never assumed. Legacy index
@@ -364,14 +435,6 @@ The *rules*; the measurements and original bugs behind them are in
 
 ## Dev workflow
 
-``` r
-
-devtools::load_all(".")
-devtools::document()   # after changing roxygen comments
-devtools::test()       # unit tests always run; decode tests need a sample
-devtools::check()
-```
-
 Integration tests need real `.ivt` files and auto-skip without them:
 
 | env var | file (fallback path) |
@@ -388,12 +451,36 @@ per table under `CANIVT_IVT_CACHE`) through
 and asserts, per table: the `ivt_is_supported()` verdict, strict-mode
 cleanliness (`strict_clean = FALSE` rows are the KNOWN fallbacks — they
 must *warn*, not error, so both a vanished warning and a new failure
-trip the test) and the exact non-zero cell count. 133 tables, ~268M
+trip the test) and the exact non-zero cell count. 170 tables, ~366M
 cells, so it is **opt-in**:
 
 ``` sh
 CANIVT_CORPUS_TESTS=1 Rscript -e 'devtools::test(filter = "corpus")'
 ```
+
+Both sweeps read with **`complete = FALSE`**: the ledgers are contracts
+about the *store* (the file’s own stored-value count is what a decode
+regression moves), and completing 4.3 billion corpus rows would be the
+sweep’s cost rather than its subject.
+
+`fixtures/status-ledger.csv` (`test-status.R`) is the same contract for
+the cell-status tail — one row per corpus table,
+`unreadable`/`contradictory` the two columns that must never move.
+Re-measure it with `dev/msweep.R` (see `dev/README.md`), which also
+produces the corpus status figures quoted in the notes.
+
+`fixtures/complete-ledger.csv` (`test-complete.R`) is the contract for
+the **fold** — the store-only ledgers cannot see it. Per table: the grid
+size (`prod(counts)`, read off the layout alone, so it is checked even
+where the table is too big to complete under the sweep budget) and, for
+the 126 tables under it,
+`rows`/`stored`/`zeros`/`flagged`/`symbolled`/`vsum`. `rows == grid` is
+the assertion that catches an optimization quietly mislaying a page’s
+zeros; `stored` is cross-checked against `corpus-ledger.csv`’s
+`n_cells`. Re-measure with `dev/csweep.R`. `test-stream.R`’s corpus
+sweep runs on the same ledger, decoding every sliceable table one outer
+member at a time and requiring the concatenation to be the whole-table
+decode.
 
 When a gap is closed or a table onboarded, update the ledger row **and**
 `inst/notes/coverage.md` in the same commit.
@@ -421,24 +508,49 @@ attribute table, commuting-flow decoding, footnote scope and geo-name
 completeness are all **done**; the onboarding backlog is cleared
 (2026-07-21). The `81 02 <alloc> 16 00` mid-section is **decoded**
 (2026-07-25) — the file declares its live/deleted slots and member-code
-lengths, so `ivt_f2_dim_slot_expand()` is now only a fallback.
-
-- **type-00 sub-A industry labels are PROVISIONAL** (`R/suba.R`) —
-  reconciliation validates sums, not code→member assignment, and no
-  published ground truth exists. Manual leaf-code evidence (855/855
-  populated members are SIC leaves at shift 0; shifts ±1/±2 scatter
-  272–318 onto aggregate codes) supports the current assignment but the
-  parser deliberately does not run it, so the loud flag stays. (On the
-  sparse-slot path the TOTAL member’s label *is* verified by the gate;
-  the rest of the axis stays provisional.) The `PROVSIC4dec1997`
-  leading-window backlog item is **closed** (2026-07-26): there is no
-  `16 00` slot table anywhere in this cluster; the directory’s own
-  tiling is the witness, and four files onboarded. `PRVNAIC1dec1998`
-  followed the same day via the blank-page + sparse-slot rules — **the
-  corpus refusal ledger is now empty** (`unsupported-formats.md`), with
-  no gate relaxed to get there.
-- **`Rcpp` fast path** — only if pure-R decode becomes a bottleneck (~5
-  s for 7.5M cells is fine).
+lengths, so `ivt_f2_dim_slot_expand()` is now only a fallback. The `0xa`
+array’s reason codes are **fully interpreted** (2026-07-27) — the file
+declares its own legend at `@698`, so there are no uninterpreted codes
+left. - **The SECOND tail block is NOT decoded** (opened 2026-07-27). On
+8 corpus tables (`97-555` 11,463 words … `95f0491xcb01004` 3) index bits
+address words **past** the mask’s `rec_bytes`. Content is packed flag
+words (`0x3333`/`0x1111`/`0x33FF`/ all-ones, nibbles confined to
+`{0,1,3,7,b,f}`, written in the page’s value type), but **not a per-cell
+code array under any of 16 tested encodings** (best 3/400 pages;
+`97F0007` 0/107 everywhere) and its size correlates with no per-cell
+quantity. Two dead leads, recorded so they are not re-run: it does *not*
+resemble the `0xa` `W = 4` form, and it is *not* the cause of
+`97F0015X`’s implausible missing count (that is its mask stopping
+early). Counted as `extra_words`, loud (`canivt_status_extra_block`).
+See `ivt-format.md`, “The second tail block (OPEN)”. - **Mask
+completeness caveats, reported not hidden.** A mask that stops short of
+the grid is a **statement**, not a gap: the page’s word index can
+address every word the grid spans on 1,810,626/1,810,626 corpus mask
+pages, so an unwritten word inside its reach declares that word all-zero
+(⇒ every absent cell it covers is missing). `covered_bits` is the
+index’s reach and `canivt_status_beyond_mask` fires only past it — **0
+corpus-wide** (it was 2,290,657 when measured against the last *written*
+word). Validated semantically by `dev/mvalidate.R`, whose arithmetic
+also closed the `97F0007` viewer discrepancy. 36 corpus tables write no
+tail at all (65 write no mask page). The x87 sNaN artefact destroys one
+status bit per NaN-shaped `width = 8` word **in the source file**
+(`canivt_status_nan_quieted`, raised via `ivt_source_truncation()` so
+strict keeps it a warning). - **type-00 sub-A industry labels are
+PROVISIONAL** (`R/suba.R`) — reconciliation validates sums, not
+code→member assignment, and no published ground truth exists. Manual
+leaf-code evidence (855/855 populated members are SIC leaves at shift 0;
+shifts ±1/±2 scatter 272–318 onto aggregate codes) supports the current
+assignment but the parser deliberately does not run it, so the loud flag
+stays. (On the sparse-slot path the TOTAL member’s label *is* verified
+by the gate; the rest of the axis stays provisional.) The
+`PROVSIC4dec1997` leading-window backlog item is **closed**
+(2026-07-26): there is no `16 00` slot table anywhere in this cluster;
+the directory’s own tiling is the witness, and four files onboarded.
+`PRVNAIC1dec1998` followed the same day via the blank-page + sparse-slot
+rules — **the corpus refusal ledger is now empty**
+(`unsupported-formats.md`), with no gate relaxed to get there. -
+**`Rcpp` fast path** — only if pure-R decode becomes a bottleneck (~5 s
+for 7.5M cells is fine).
 
 Two resolved behaviours are **accepted by design** (detail in
 `decode-history.md`): source-side `DQF_NOTE` truncation (\>252 chars,
