@@ -14,3 +14,6 @@
 ^figure$
 ^dev$
 ^\.posit/assistant$
+^cran-comments\.md$
+^pkgdown$
+^canivt\.png$

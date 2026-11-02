@@ -329,7 +329,7 @@ ivt_f2_suba_annotate <- function(raw, d) {
     key <- paste0(min(rng), ":", max(rng))
     if (is.null(det_cache[[key]])) {
       det <- probe[probe$ind %in% rng, ]
-      det_cache[[key]] <- if (nrow(det)) aggregate(val ~ g + emp, det, sum) else NA
+      det_cache[[key]] <- if (nrow(det)) stats::aggregate(val ~ g + emp, det, sum) else NA
     }
     det_cache[[key]]
   }
@@ -337,7 +337,7 @@ ivt_f2_suba_annotate <- function(raw, d) {
     tot <- probe[probe$ind == tslot, ]
     ds <- det_sum(det_range)
     if (!nrow(tot) || !is.data.frame(ds)) return(NA_real_)
-    ts <- aggregate(val ~ g + emp, tot, sum)
+    ts <- stats::aggregate(val ~ g + emp, tot, sum)
     mm <- merge(ds, ts, by = c("g", "emp"), suffixes = c(".d", ".t"))
     if (!nrow(mm) || nrow(mm) != nrow(ts) || any(mm$val.d != mm$val.t)) return(NA_real_)
     sum(tot$val)                                      # aggregate (for tie-break)
@@ -405,8 +405,8 @@ ivt_f2_suba_annotate <- function(raw, d) {
       tot <- probe[probe$ind == t, ]
       det <- probe[probe$ind != t, ]
       if (!nrow(tot) || !nrow(det)) next
-      ts <- aggregate(val ~ g + emp, tot, sum)
-      ds <- aggregate(val ~ g + emp, det, sum)
+      ts <- stats::aggregate(val ~ g + emp, tot, sum)
+      ds <- stats::aggregate(val ~ g + emp, det, sum)
       mm <- merge(ds, ts, by = c("g", "emp"), suffixes = c(".d", ".t"))
       if (nrow(mm) == nrow(ts) && nrow(mm) == nrow(ds) && all(mm$val.d == mm$val.t))
         ok <- c(ok, i)
