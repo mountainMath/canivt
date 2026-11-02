@@ -24,14 +24,12 @@
 # (`ivt_read_page()`); safeconduct's own download route (a document navigation
 # to the file) is challenged every time there, its read route gets through
 # once per browser (a `Download.cfm` answer is the bare .ivt, 2026-11-02). The
-# read route carries the body as base64 inside one DevTools message, so it is
-# for files up to a cap: tables of 49 KB to 24 MB arrive in 5-40 s, a 27.8 MB
-# one (37 MB as base64) hangs the browser read past its timeout, reproducibly
-# (2026-11-02). The route that handles any size
-# -- the same in-page `fetch()`, handed to Chrome's download machinery as a
-# Blob instead of returned through DevTools, 27 MB in 10 s -- is prototyped
-# in safeconduct's `NOTE-path-scoped-challenge.md`; once `safeconduct::fetch()`
-# downloads that way the file branch in `ivt_fetch_file()` goes. Measured
+# read carries a body up to 16 MB as base64 inside one DevTools message and
+# spills a larger one to a browser download (safeconduct >= 0.1.0.9000, the
+# Suggests floor): tables of 49 KB to 27.8 MB arrive in 5-40 s. With an older
+# safeconduct a read above ~24 MB hangs past its timeout (2026-11-02). Once
+# `safeconduct::fetch()` itself falls back to that in-page route on a
+# challenged navigation, the file branch in `ivt_fetch_file()` goes. Measured
 # on `www12` (2026-11-01/02): a headless pass at the host root takes ~1.6 s, the
 # browser's first in-page read of a `/datasets/` page then gets through about
 # half the time, and every further read from that same browser is challenged
@@ -54,9 +52,7 @@ ivt_has_safeconduct <- function() {
 # server answered it with a 301 to the datasets index for every client, a
 # cleared real browser included; on 2026-11-02 it served the file again (to a
 # real browser and to the in-page read below). A "page, not the file" failure
-# here is that server-side state, not a transport problem. The in-page read is
-# the only route through today and it is a small-file route (see the header):
-# a large table is where safeconduct's Blob download is needed.
+# here is that server-side state, not a transport problem.
 ivt_fetch_file <- function(url, destfile, quiet = FALSE, headers = NULL) {
   if (is.null(headers) && ivt_has_safeconduct()) {
     if (ivt_host_needs_browser(url)) {
