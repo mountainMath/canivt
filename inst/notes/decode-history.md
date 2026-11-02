@@ -4,7 +4,7 @@ The narrative changelog: how each table / vintage was cracked, the per-table
 validation record, and the derivations behind the invariants. Not needed
 day-to-day — consult it for the *why*.
 
-- [`CLAUDE.md`](../../CLAUDE.md) — the working guide (key invariants, doc index).
+- [`CLAUDE.md`](../../.claude/CLAUDE.md) — the working guide (key invariants, doc index).
 - [`code-map.md`](code-map.md) — what every file in `R/` does;
   [`testing.md`](testing.md) — the dev workflow and the regression ledgers.
 - [`coverage.md`](coverage.md) — the **living** completeness tracker. Update *that*

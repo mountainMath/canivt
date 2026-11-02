@@ -13,15 +13,15 @@ test suite has not seen, and warn loudly on every fallback.
 
 | doc | role |
 |-----|------|
-| [`ivt-format.md`](inst/notes/ivt-format.md) | authoritative byte-format reference. **Read before changing the parser.** (User-facing copy: `vignettes/ivt-format.Rmd`.) |
-| [`markers.md`](inst/notes/markers.md) | terse byte-marker catalog. Self-checked by `test-markers.R`. **Update in the same commit as the recognizer.** |
-| [`code-map.md`](inst/notes/code-map.md) | what every file in `R/` does, in full. **Read the relevant row before editing a file.** |
-| [`coverage.md`](inst/notes/coverage.md) | living completeness tracker + measured byte coverage. **Update when a gap opens or closes.** |
-| [`decode-history.md`](inst/notes/decode-history.md) | narrative changelog: how each table was cracked, per-table validation records, invariant derivations. Consult for the *why*. |
-| [`testing.md`](inst/notes/testing.md) | dev workflow: sample files, the three corpus ledgers, the parallel suite. |
-| [`unsupported-formats.md`](inst/notes/unsupported-formats.md) | the UNSUPPORTED ledger: what the gate refuses and why. |
-| [`refactor-plan.md`](inst/notes/refactor-plan.md) | consolidation backlog (open items only). |
-| [`onboarding-backlog.md`](inst/notes/onboarding-backlog.md) | the repeatable per-table onboarding recipe. |
+| [`ivt-format.md`](../inst/notes/ivt-format.md) | authoritative byte-format reference. **Read before changing the parser.** (User-facing copy: `vignettes/ivt-format.Rmd`.) |
+| [`markers.md`](../inst/notes/markers.md) | terse byte-marker catalog. Self-checked by `test-markers.R`. **Update in the same commit as the recognizer.** |
+| [`code-map.md`](../inst/notes/code-map.md) | what every file in `R/` does, in full. **Read the relevant row before editing a file.** |
+| [`coverage.md`](../inst/notes/coverage.md) | living completeness tracker + measured byte coverage. **Update when a gap opens or closes.** |
+| [`decode-history.md`](../inst/notes/decode-history.md) | narrative changelog: how each table was cracked, per-table validation records, invariant derivations. Consult for the *why*. |
+| [`testing.md`](../inst/notes/testing.md) | dev workflow: sample files, the three corpus ledgers, the parallel suite. |
+| [`unsupported-formats.md`](../inst/notes/unsupported-formats.md) | the UNSUPPORTED ledger: what the gate refuses and why. |
+| [`refactor-plan.md`](../inst/notes/refactor-plan.md) | consolidation backlog (open items only). |
+| [`onboarding-backlog.md`](../inst/notes/onboarding-backlog.md) | the repeatable per-table onboarding recipe. |
 
 ## What works today
 
@@ -71,7 +71,7 @@ Key semantics:
   `read_ivt(geo_attributes = TRUE)` adds the full attribute table for large
   chunked tables (~30 s block scan).
 
-## Code map (`R/`) — full detail in [`code-map.md`](inst/notes/code-map.md)
+## Code map (`R/`) — full detail in [`code-map.md`](../inst/notes/code-map.md)
 
 | file | one line |
 |------|----------|
@@ -88,7 +88,7 @@ Key semantics:
 | `read-f2.R` | unified metadata + tidy, dimensions, footnotes |
 | `suba.R` | the type-00 sub-A Business-Patterns module (reconciliation-gated, PROVISIONAL labels) |
 | `read.R` | public `read_ivt()` / `ivt_metadata()` / `ivt_tidy()`, family detector + support gate |
-| `net.R` | the one network transport: `ivt_fetch_file()` / `ivt_fetch_html()` / `ivt_fetch_final_url()` — through `safeconduct` when installed (www12 is behind a Cloudflare browser check), base R otherwise; failures are `canivt_offline` |
+| `net.R` | the one network transport: `ivt_fetch_file()` / `ivt_fetch_html()` / `ivt_fetch_final_url()` — through `safeconduct` when installed (www12 is behind a Cloudflare browser check; one kept browser per challenging host, `ivt_browser_session()`), base R otherwise; failures are `canivt_offline` |
 | `stream.R` | chunked conversion — the published grid written a slice at a time |
 | `collect.R` | `ivt_members()` / `collect_ivt()` factor levels + the `_missing` sidecar resolver |
 | `write.R` | `ivt_write_parquet()/_csv()/_metadata()`; CSV gzipped by default; label indentation → hierarchy |
@@ -98,8 +98,8 @@ Key semantics:
 ## Key invariants (don't regress)
 
 The *rules*; the measurements and original bugs behind them are in
-[`decode-history.md`](inst/notes/decode-history.md) ("Invariant derivations")
-and [`coverage.md`](inst/notes/coverage.md).
+[`decode-history.md`](../inst/notes/decode-history.md) ("Invariant derivations")
+and [`coverage.md`](../inst/notes/coverage.md).
 
 ### Geometry
 
@@ -245,7 +245,7 @@ and [`coverage.md`](inst/notes/coverage.md).
 
 ## Dev workflow
 
-See [`testing.md`](inst/notes/testing.md) for the sample-file env vars, the three
+See [`testing.md`](../inst/notes/testing.md) for the sample-file env vars, the three
 corpus ledgers and the parallel-suite rules. The short version:
 
 ```sh

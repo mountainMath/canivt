@@ -114,5 +114,4 @@ if (requireNamespace("arrow", quietly = TRUE)) {
   # the same file, without holding the completed table in memory
   ivt_write_parquet(path, file.path(tempdir(), "streamed.parquet"))
 }
-#> Error in ivt_tidy(x, labels = labels, dim_names = dim_names, language = language): inherits(x, "ivt") is not TRUE
 ```

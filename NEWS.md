@@ -14,7 +14,11 @@
   it. Either way a failure is still the classed `canivt_offline` error, so the
   exported entry points degrade to a warning + `NULL` as they did. The Borealis
   download (which carries an API-key header) and the `www150` Beyond 20/20 zips
-  are not challenged and keep their plain path. `httr2` is no longer used.
+  are not challenged and keep their plain path. On the challenged host the
+  requests share one browser kept open for the R session, so a catalogue
+  refresh (eleven index pages) passes the check once and survives the host
+  re-challenging it, instead of opening a fresh Chrome per page. `httr2` is
+  no longer used.
 
   Caveat, measured 2026-11-01: `Download.cfm?PID=` currently answers a browser
   that has passed the check — a real one clicking the link on the product's

@@ -26,6 +26,20 @@ remotes::install_github("mountainMath/canivt")
 `arrow` (for Parquet) and `readr` (faster CSV) are optional and used if
 present.
 
+StatCan’s census datasets host (`www12.statcan.gc.ca`: the catalogue
+index, `Download.cfm` and the Beyond 20/20 viewer) sits behind a
+Cloudflare browser check that refuses plain HTTP requests. Install the
+[`safeconduct`](https://github.com/mountainMath/safeconduct) package and
+canivt fetches from that host through a real browser when, and only
+when, a plain request is refused; without it those fetches fail with a
+message saying so. The `www150.statcan.gc.ca` Beyond 20/20 zips and
+Borealis need no browser.
+
+``` r
+
+remotes::install_github("mountainMath/safeconduct")
+```
+
 ## Usage
 
 The recommended way to access IVT tables is to parse them to Parquet,
@@ -135,8 +149,8 @@ byte-marker catalog ship with the package as
 `system.file("notes/markers.md", package = "canivt")`, alongside the
 per-file code map (`notes/code-map.md`) and the dev workflow
 (`notes/testing.md`). See
-[`CLAUDE.md`](https://mountainmath.github.io/canivt/CLAUDE.md) for the
-key invariants and an index of those notes.
+[`CLAUDE.md`](https://github.com/mountainMath/canivt/blob/main/.claude/CLAUDE.md)
+for the key invariants and an index of those notes.
 
 ## Related packages
 

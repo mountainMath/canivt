@@ -2,6 +2,36 @@
 
 ## canivt 0.5.0
 
+- **Every network access goes through one transport (`R/net.R`), which
+  uses the `safeconduct` package when it is installed.** StatCan’s
+  `www12.statcan.gc.ca` host — the census datasets index that
+  `statcan_ivt_catalogue(refresh = TRUE)` scrapes, the
+  `Download.cfm?PID=` endpoint every pre-2021 table downloads from, and
+  the Beyond 20/20 viewer the ground-truth scraper reads — now answers
+  every plain HTTP request with a Cloudflare browser check, so
+  [`download.file()`](https://rdrr.io/r/utils/download.file.html) and
+  [`xml2::read_html()`](http://xml2.r-lib.org/reference/read_xml.md) get
+  a 403 page. With `safeconduct` (a new soft dependency, Suggests)
+  installed, `ivt_fetch_file()`, `ivt_fetch_html()` and
+  `ivt_fetch_final_url()` make a plain request first and open a real
+  Chrome only when it is refused; without it they use base R as before
+  and a refusal on that host says how to install it. Either way a
+  failure is still the classed `canivt_offline` error, so the exported
+  entry points degrade to a warning + `NULL` as they did. The Borealis
+  download (which carries an API-key header) and the `www150` Beyond
+  20/20 zips are not challenged and keep their plain path. On the
+  challenged host the requests share one browser kept open for the R
+  session, so a catalogue refresh (eleven index pages) passes the check
+  once and survives the host re-challenging it, instead of opening a
+  fresh Chrome per page. `httr2` is no longer used.
+
+  Caveat, measured 2026-11-01: `Download.cfm?PID=` currently answers a
+  browser that has passed the check — a real one clicking the link on
+  the product’s `Alternative.cfm` page included — with a 301 to the
+  datasets index, so the pre-2021 downloads fail with that cause
+  attached until StatCan serves the files again. The catalogue scrape
+  and the viewer redirect work.
+
 - **[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
   now returns the published table, not the store.** `x$cells` spans the
   whole grid — one row per real coordinate, the way StatCan’s own CSV

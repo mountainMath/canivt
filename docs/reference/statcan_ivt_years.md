@@ -26,6 +26,8 @@ A tibble with one row per version: `temporal` (the URL parameter, e.g.
 # (no error), so no try() is needed.
 # \donttest{
 statcan_ivt_years()
+#> Sending a browser through to 'www12.statcan.gc.ca'.
+#>   Trying headless Chrome first.
 #> # A tibble: 11 × 3
 #>    temporal census                                          census_year
 #>    <chr>    <chr>                                                 <int>

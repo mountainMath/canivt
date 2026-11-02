@@ -130,7 +130,7 @@ authoritative byte-level spec and the byte-marker catalog ship with the package 
 `system.file("notes/ivt-format.md", package = "canivt")` and
 `system.file("notes/markers.md", package = "canivt")`, alongside the per-file
 code map (`notes/code-map.md`) and the dev workflow (`notes/testing.md`). See
-[`CLAUDE.md`](CLAUDE.md) for the key invariants and an index of those notes.
+[`CLAUDE.md`](https://github.com/mountainMath/canivt/blob/main/.claude/CLAUDE.md) for the key invariants and an index of those notes.
 
 ## Related packages
 

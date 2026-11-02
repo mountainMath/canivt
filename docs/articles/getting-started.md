@@ -48,9 +48,20 @@ the download URLs. The package ships with a cached version for
 convenience, but this can be replaced with an up-to-date scrape by
 passing the `refresh = TRUE` option.
 
+The index lives on `www12.statcan.gc.ca`, which answers plain requests
+with a Cloudflare browser check. A refresh, and any `Download.cfm`
+download, needs the
+[`safeconduct`](https://github.com/mountainMath/safeconduct) package
+installed; canivt then fetches through a real browser only when a plain
+request is refused. The shipped catalogue and the `www150` Beyond 20/20
+zips work without it.
+
 ``` r
 
 catl <- statcan_ivt_catalogue()
+#> Warning: The cached StatCan IVT catalogue is 125 days old.
+#> ℹ Call `statcan_ivt_catalogue(refresh = TRUE)` to rebuild it from the live
+#>   index.
 
 # Find the 1981 census-division / subdivision profile
 library(dplyr)

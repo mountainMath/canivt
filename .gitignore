@@ -45,3 +45,6 @@ vignettes//figure/*.png
 # range-harvest read-through cache (dev prototype)
 dev/harvest-cache/
 .posit/assistant
+
+# Claude Code project guide: the global gitignore hides .claude/*, this one is kept
+!.claude/CLAUDE.md

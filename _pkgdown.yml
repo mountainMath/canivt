@@ -1,7 +1,51 @@
-url: https://mountainmath.github.io/canivt
+url: https://mountainmath.github.io/canivt/
 
 template:
   bootstrap: 5
+  light-switch: true
+
+reference:
+- title: Finding and downloading tables
+  desc: Catalogues of the published IVT products and the downloads into the `ivt` cache. The `www12.statcan.gc.ca` host sits behind a browser check; install `safeconduct` to pass it (see the README).
+- subtitle: Statistics Canada
+  contents:
+  - statcan_ivt_years
+  - statcan_ivt_catalogue
+  - statcan_ivt_resolve_url
+  - statcan_ivt_download
+  - ivt_download
+- subtitle: Borealis Dataverse
+  contents:
+  - borealis_ivt_catalogue
+  - borealis_ivt_download
+- title: Reading a table
+  desc: Decode an `.ivt` file into the published table, its codebook and footnotes, and label it.
+  contents:
+  - read_ivt
+  - ivt_read_table
+  - ivt_metadata
+  - ivt_tidy
+  - label_ivt_columns
+  - ivt_members
+  - collect_ivt
+- title: Flagged cells
+  desc: The cell-status block, opt-in with `read_ivt(missing = TRUE)`. Which absent cells are suppressed, not applicable, and so on, per the file's own legend.
+  contents:
+  - ivt_missing
+  - ivt_tidy_missing
+- title: Writing to Parquet and CSV
+  contents:
+  - ivt_write_parquet
+  - ivt_write_csv
+  - ivt_write_metadata
+  - ivt_parquet_language
+- title: The Parquet cache
+  desc: One step from product id to an Arrow connection, and the cache behind it.
+  contents:
+  - get_statcan_ivt
+  - ivt_cache_dir
+  - list_ivt_cache
+  - prune_ivt_cache
 
 articles:
 - title: Articles

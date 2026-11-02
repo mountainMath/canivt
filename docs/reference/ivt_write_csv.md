@@ -112,12 +112,11 @@ path <- system.file("extdata", "98100044.ivt", package = "canivt")
 ivt <- read_ivt(path)
 out <- ivt_write_csv(ivt, file.path(tempdir(), "98100044.csv"))
 basename(out)                       # .gz appended
-#> [1] "98100044.csv"
+#> [1] "98100044.csv.gz"
 head(readLines(out), 3)             # ... and read back transparently
 #> [1] "geo_label,geo_name,geo_uid,geo_level,type,collective,value,symbol,status"                                                             
 #> [2] "Canada,Canada,2021A000011124,Country,Total - Type of collective dwelling,Collective dwellings occupied by usual residents,24140,NA,NA"
 #> [3] "Canada,Canada,2021A000011124,Country,Total - Type of collective dwelling,Population in collective dwellings,657920,NA,NA"             
 # the same file, decoded and written a chunk at a time, uncompressed
 ivt_write_csv(path, file.path(tempdir(), "streamed.csv"), compress = FALSE)
-#> Error in readr::write_csv(df, p, ...): unused argument (compress = FALSE)
 ```
