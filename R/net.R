@@ -19,8 +19,19 @@
 # safeconduct, whose transport has no header argument; Borealis does not
 # challenge plain requests.
 #
-# On a host known to challenge (`IVT_BROWSER_HOSTS`) a page read gets a FRESH
-# browser per request and a retry on a challenge (`ivt_read_page()`). Measured
+# On a host known to challenge (`IVT_BROWSER_HOSTS`) every request -- a page
+# AND a file -- is an in-page read from a FRESH browser, retried on a challenge
+# (`ivt_read_page()`); safeconduct's own download route (a document navigation
+# to the file) is challenged every time there, its read route gets through
+# once per browser (a `Download.cfm` answer is the bare .ivt, 2026-11-02). The
+# read route carries the body as base64 inside one DevTools message, so it is
+# for files up to a cap: tables of 49 KB to 24 MB arrive in 5-40 s, a 27.8 MB
+# one (37 MB as base64) hangs the browser read past its timeout, reproducibly
+# (2026-11-02). The route that handles any size
+# -- the same in-page `fetch()`, handed to Chrome's download machinery as a
+# Blob instead of returned through DevTools, 27 MB in 10 s -- is prototyped
+# in safeconduct's `NOTE-path-scoped-challenge.md`; once `safeconduct::fetch()`
+# downloads that way the file branch in `ivt_fetch_file()` goes. Measured
 # on `www12` (2026-11-01/02): a headless pass at the host root takes ~1.6 s, the
 # browser's first in-page read of a `/datasets/` page then gets through about
 # half the time, and every further read from that same browser is challenged
@@ -39,16 +50,31 @@ ivt_has_safeconduct <- function() {
 # custom `headers` are needed; otherwise `utils::download.file()`. Any failure
 # (an error, a non-zero status, a missing file) is a `canivt_offline` error.
 #
-# Note on `Download.cfm?PID=` (the pre-2021 census tables): as of 2026-11-01
-# StatCan's server answers it with a 301 to the datasets index for EVERY
-# client, a cleared real browser clicking the link on the product's
-# `Alternative.cfm` page included (measured with a logged redirect chain:
-# check passed, `Download.cfm?PID=` re-requested with its query intact, 301
-# `-> /datasets/Index-eng.cfm`). That is a server-side state, not a transport
-# problem; safeconduct reports it as "the server answered with a page, not the
-# file" and it surfaces here as `canivt_offline` with that cause attached.
+# Note on `Download.cfm?PID=` (the pre-2021 census tables): on 2026-11-01 the
+# server answered it with a 301 to the datasets index for every client, a
+# cleared real browser included; on 2026-11-02 it served the file again (to a
+# real browser and to the in-page read below). A "page, not the file" failure
+# here is that server-side state, not a transport problem. The in-page read is
+# the only route through today and it is a small-file route (see the header):
+# a large table is where safeconduct's Blob download is needed.
 ivt_fetch_file <- function(url, destfile, quiet = FALSE, headers = NULL) {
   if (is.null(headers) && ivt_has_safeconduct()) {
+    if (ivt_host_needs_browser(url)) {
+      # the host lets a fresh browser's first in-page read through and
+      # challenges a document navigation (safeconduct's download route) every
+      # time, so the file comes back as a page read -- the bytes of the
+      # response, which for `Download.cfm` is the bare .ivt
+      resp <- tryCatch(ivt_read_page(url),
+                       error = function(e) ivt_offline_abort(url, parent = e))
+      if (!identical(resp$status_code, 200L))
+        ivt_offline_abort(url, hint = c(x = paste0("'", ivt_url_host(url),
+          "' answered HTTP status ", resp$status_code, ".")))
+      if (grepl("html", resp$type %||% "", fixed = TRUE))
+        ivt_offline_abort(url, hint = c(x = paste0("'", ivt_url_host(url),
+          "' answered with a page, not the file.")))
+      writeBin(resp$content, destfile)
+      return(invisible(destfile))
+    }
     tryCatch(safeconduct::fetch(url, destfile, quiet = quiet),
              error = function(e) ivt_offline_abort(url, parent = e))
     if (!file.exists(destfile)) ivt_offline_abort(url)

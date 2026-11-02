@@ -88,7 +88,7 @@ Key semantics:
 | `read-f2.R` | unified metadata + tidy, dimensions, footnotes |
 | `suba.R` | the type-00 sub-A Business-Patterns module (reconciliation-gated, PROVISIONAL labels) |
 | `read.R` | public `read_ivt()` / `ivt_metadata()` / `ivt_tidy()`, family detector + support gate |
-| `net.R` | the one network transport: `ivt_fetch_file()` / `ivt_fetch_html()` / `ivt_fetch_final_url()` — through `safeconduct` when installed (www12 is behind a Cloudflare browser check that a cleared browser passes ONCE per browser; page reads there get a fresh browser per request, retried on a 403/429, `ivt_read_page()`), base R otherwise; failures are `canivt_offline` |
+| `net.R` | the one network transport: `ivt_fetch_file()` / `ivt_fetch_html()` / `ivt_fetch_final_url()` — through `safeconduct` when installed (www12 is behind a Cloudflare browser check that a cleared browser passes ONCE per browser; page reads AND file downloads there get a fresh browser per request, retried on a 403/429, `ivt_read_page()`; the file read is base64-through-DevTools so SMALL files only until safeconduct's Blob download lands), base R otherwise; failures are `canivt_offline` |
 | `stream.R` | chunked conversion — the published grid written a slice at a time |
 | `collect.R` | `ivt_members()` / `collect_ivt()` factor levels + the `_missing` sidecar resolver |
 | `write.R` | `ivt_write_parquet()/_csv()/_metadata()`; CSV gzipped by default; label indentation → hierarchy |

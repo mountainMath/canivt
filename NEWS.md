@@ -21,11 +21,17 @@
   (eleven index pages) takes about three minutes of fresh browsers rather than
   a kept one. `httr2` is no longer used.
 
-  Caveat, measured 2026-11-01: `Download.cfm?PID=` currently answers a browser
-  that has passed the check — a real one clicking the link on the product's
-  `Alternative.cfm` page included — with a 301 to the datasets index, so the
-  pre-2021 downloads fail with that cause attached until StatCan serves the
-  files again. The catalogue scrape and the viewer redirect work.
+  On that host a file is fetched the same way, as an in-page read from a fresh
+  browser (safeconduct's own download route, a document navigation to the
+  file, is challenged there every time): `Download.cfm?PID=` answers with the
+  bare `.ivt`, and a small pre-2021 table (49 KB) comes through
+  `statcan_ivt_download()` byte-identical in seconds. That read route returns
+  the body through DevTools, so it has a size cap for now: tables up to 24 MB
+  arrive in well under a minute, a 27.8 MB table hangs it. The route that carries any size (the same in-page fetch, handed to
+  Chrome as a Blob download; 27 MB in ten seconds, byte-identical) is written
+  up for `safeconduct`, and canivt will use it through `safeconduct::fetch()`
+  once it lands. (On 2026-11-01 the endpoint answered every client with a 301
+  to the datasets index; it served the files again the next day.)
 * **`read_ivt()` now returns the published table, not the store.** `x$cells`
   spans the whole grid — one row per real coordinate, the way StatCan's own CSV
   download publishes it — with the published zeros written out, flagged cells

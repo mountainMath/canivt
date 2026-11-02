@@ -38,7 +38,7 @@ test_that("ivt_fetch_file without safeconduct raises canivt_offline on an unreac
   expect_false(file.exists(dest))
 })
 
-test_that("ivt_fetch_file routes through safeconduct when installed and no headers are set", {
+test_that("ivt_fetch_file routes through safeconduct's download when installed and no headers are set", {
   skip_if_not_installed("safeconduct")
   seen <- list()
   local_mocked_bindings(ivt_has_safeconduct = function() TRUE)
@@ -48,9 +48,10 @@ test_that("ivt_fetch_file routes through safeconduct when installed and no heade
       writeBin(as.raw(1:4), destfile); invisible(destfile)
     },
     .package = "safeconduct")
+  # a host that is not in IVT_BROWSER_HOSTS: safeconduct's plain-first download
   dest <- withr::local_tempfile(fileext = ".bin")
-  ivt_fetch_file("https://www12.statcan.gc.ca/datasets/Download.cfm?PID=1", dest, quiet = TRUE)
-  expect_equal(seen$url, "https://www12.statcan.gc.ca/datasets/Download.cfm?PID=1")
+  ivt_fetch_file("https://www150.statcan.gc.ca/n1/en/tbl/b2020/x.zip", dest, quiet = TRUE)
+  expect_equal(seen$url, "https://www150.statcan.gc.ca/n1/en/tbl/b2020/x.zip")
   expect_true(file.exists(dest))
 
   # a safeconduct failure is a canivt_offline error, with the cause attached
@@ -58,7 +59,7 @@ test_that("ivt_fetch_file routes through safeconduct when installed and no heade
     fetch = function(url, destfile, ...) stop("blocked", call. = FALSE),
     .package = "safeconduct")
   dest2 <- withr::local_tempfile(fileext = ".bin")
-  expect_error(ivt_fetch_file("https://www12.statcan.gc.ca/x", dest2, quiet = TRUE),
+  expect_error(ivt_fetch_file("https://www150.statcan.gc.ca/x", dest2, quiet = TRUE),
                class = "canivt_offline")
 
   # custom headers never go through safeconduct
@@ -117,4 +118,31 @@ test_that("a challenged read on a challenging host is retried in a fresh browser
   resp <- suppressMessages(ivt_read_page("https://www12.statcan.gc.ca/x"))
   expect_equal(resp$status_code, 403L)
   expect_equal(calls, IVT_READ_TRIES)
+})
+
+test_that("on a challenging host a file is the bytes of an in-page read, a page answer is refused", {
+  skip_if_not_installed("safeconduct")
+  local_mocked_bindings(ivt_has_safeconduct = function() TRUE)
+  local_mocked_bindings(
+    read_page = function(url, ...) list(url = url, status_code = 200L,
+                                        type = "application/x-beyond2020;charset=utf-8",
+                                        headers = list(), content = as.raw(c(4, 0, 32, 0, 9))),
+    fetch = function(...) stop("the download route must not be used here"),
+    .package = "safeconduct")
+  dest <- withr::local_tempfile(fileext = ".bin")
+  ivt_fetch_file("https://www12.statcan.gc.ca/datasets/Download.cfm?PID=109538", dest, quiet = TRUE)
+  expect_identical(readBin(dest, "raw", 10L), as.raw(c(4, 0, 32, 0, 9)))
+
+  # the index page instead of the file (the 2026-11-01 server state)
+  local_mocked_bindings(
+    read_page = function(url, ...) list(url = "https://www12.statcan.gc.ca/datasets/Index-eng.cfm",
+                                        status_code = 200L, type = "text/html; charset=utf-8",
+                                        headers = list(), content = charToRaw("<html></html>")),
+    .package = "safeconduct")
+  dest2 <- withr::local_tempfile(fileext = ".bin")
+  cnd <- tryCatch(ivt_fetch_file("https://www12.statcan.gc.ca/datasets/Download.cfm?PID=1", dest2, quiet = TRUE),
+                  canivt_offline = function(e) e)
+  expect_s3_class(cnd, "canivt_offline")
+  expect_match(paste(cli::ansi_strip(conditionMessage(cnd)), collapse = "\n"), "a page, not the file")
+  expect_false(file.exists(dest2))
 })
