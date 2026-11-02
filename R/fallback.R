@@ -68,10 +68,11 @@ ivt_quietly <- function(expr) {
 # Internal cross-calls use the non-grace `_impl` cores so the signal reaches the
 # right boundary; any error that is NOT a connection failure propagates normally.
 
-ivt_offline_abort <- function(resource, parent = NULL) {
+ivt_offline_abort <- function(resource, parent = NULL, hint = NULL) {
   cli::cli_abort(
     c("Could not reach {.url {resource}}.",
-      i = "Check your internet connection; the resource may also be unavailable."),
+      i = "Check your internet connection; the resource may also be unavailable.",
+      hint),
     class = "canivt_offline", parent = parent, call = NULL)
 }
 
@@ -87,16 +88,9 @@ ivt_offline_grace <- function(expr) {
     })
 }
 
-# Download `url` to `destfile`, converting any connection failure (an error, or a
-# non-zero status / missing file from `download.file()`) into `canivt_offline`.
-# `headers` is passed through (e.g. the Borealis API key).
+# Download `url` to `destfile`, converting any connection failure into
+# `canivt_offline`. The transport (safeconduct when installed, base R otherwise)
+# is chosen in net.R; `headers` is passed through (e.g. the Borealis API key).
 ivt_download_to <- function(url, destfile, quiet = FALSE, headers = NULL) {
-  args <- list(url = url, destfile = destfile, mode = "wb", quiet = quiet)
-  if (!is.null(headers)) args$headers <- headers
-  status <- tryCatch(
-    suppressWarnings(do.call(utils::download.file, args)),
-    error = function(e) ivt_offline_abort(url, parent = e))
-  if (!identical(as.integer(status), 0L) || !file.exists(destfile))
-    ivt_offline_abort(url)
-  invisible(destfile)
+  ivt_fetch_file(url, destfile, quiet = quiet, headers = headers)
 }

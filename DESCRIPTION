@@ -13,7 +13,6 @@ Description: Downloads and parses Statistics Canada Beyond 20/20 .ivt data
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
 Depends:
     R (>= 4.2.0)
 Imports:
@@ -26,12 +25,12 @@ Suggests:
     dataverse,
     dplyr,
     ggplot2,
-    httr2,
     knitr,
     readr,
     rlang,
     rmarkdown,
     rvest,
+    safeconduct,
     testthat (>= 3.0.0),
     withr,
     xml2
@@ -40,3 +39,4 @@ Config/testthat/edition: 3
 Config/testthat/parallel: true
 URL: https://github.com/mountainMath/canivt, https://mountainmath.github.io/canivt/
 BugReports: https://github.com/mountainMath/canivt/issues
+Config/roxygen2/version: 8.1.0

@@ -57,6 +57,13 @@ and the download URLs. The package ships with a cached version for convenience,
 but this can be replaced with an up-to-date scrape by passing the
 `refresh = TRUE` option.
 
+The index lives on `www12.statcan.gc.ca`, which answers plain requests with a
+Cloudflare browser check. A refresh, and any `Download.cfm` download, needs the
+[`safeconduct`](https://github.com/mountainMath/safeconduct) package installed;
+canivt then fetches through a real browser only when a plain request is
+refused. The shipped catalogue and the `www150` Beyond 20/20 zips work without
+it.
+
 ```{r catalogue}
 catl <- statcan_ivt_catalogue()
 

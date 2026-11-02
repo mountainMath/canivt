@@ -229,14 +229,11 @@ ivt_abs_url <- function(href) {
   out
 }
 
-# Fetch + parse an HTML page (xml2/rvest). Isolated for testability. A connection
-# failure is converted to a classed `canivt_offline` error so the scraping entry
-# points can degrade gracefully (see ivt_offline_grace()).
-ivt_read_html <- function(url) {
-  ivt_require_scrape_pkgs()
-  tryCatch(xml2::read_html(url),
-           error = function(e) ivt_offline_abort(url, parent = e))
-}
+# Fetch + parse an HTML page. The transport (safeconduct when installed -- the
+# datasets index sits behind a browser check -- xml2 otherwise) is chosen in
+# net.R; a connection failure is a classed `canivt_offline` error so the
+# scraping entry points can degrade gracefully (see ivt_offline_grace()).
+ivt_read_html <- function(url) ivt_fetch_html(url)
 
 ivt_require_scrape_pkgs <- function() {
   for (p in c("rvest", "xml2")) {

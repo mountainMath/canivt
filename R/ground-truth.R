@@ -31,24 +31,10 @@ ivt_gt_viewer_url <- function(catalogue, catalogue_tbl = NULL) {
   ivt_abs_url(loc)
 }
 
-# Follow a single redirect and return the Location (absolute or site-relative),
-# or NA if the URL is already a 200.
-ivt_gt_redirect_location <- function(url) {
-  if (requireNamespace("httr2", quietly = TRUE)) {
-    # URLRedirect.cfm 302s to a 404 page for HEAD requests, so use GET.
-    resp <- httr2::req_perform(
-      httr2::req_error(
-        httr2::req_options(httr2::request(url), followlocation = FALSE),
-        is_error = function(resp) FALSE))
-    loc <- httr2::resp_header(resp, "location")
-    return(if (is.null(loc)) NA_character_ else loc)
-  }
-  # base fallback: HEAD via curl is awkward, so read headers from a GET.
-  h <- curlGetHeaders(url, verify = TRUE)
-  loc <- grep("^[Ll]ocation:", h, value = TRUE)
-  if (!length(loc)) return(NA_character_)
-  trimws(sub("^[Ll]ocation:", "", loc[length(loc)]))
-}
+# Follow the URLRedirect to the viewer and return its address (absolute or
+# site-relative), or NA if the URL is already a 200. URLRedirect.cfm 302s to a
+# 404 page for HEAD requests, so the transport (net.R) uses a GET.
+ivt_gt_redirect_location <- function(url) ivt_fetch_final_url(url)
 
 # Scrape one pivot slice: the table for geography `gid` (and any `fixed` dimension
 # member overrides, a named list like list(d1 = 1L)). Returns a tidy tibble with
