@@ -676,9 +676,6 @@ read it the same way:
 ``` r
 
 row <- subset(statcan_ivt_catalogue(), catalogue == "1003011")
-#> Warning: The cached StatCan IVT catalogue is 125 days old.
-#> ℹ Call `statcan_ivt_catalogue(refresh = TRUE)` to rebuild it from the live
-#>   index.
 leg <- read_ivt(statcan_ivt_download(row))   # 41,859 geographies, Age(110) × Sex(3)
 ivt_tidy(leg)
 #> # A tibble: 13,813,470 × 8

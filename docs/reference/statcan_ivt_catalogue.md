@@ -52,9 +52,6 @@ could not be reached.
 # warning if offline (no error), so no try() is needed.
 # \donttest{
 catl <- statcan_ivt_catalogue(temporal = 2021)
-#> Warning: The cached StatCan IVT catalogue is 125 days old.
-#> ℹ Call `statcan_ivt_catalogue(refresh = TRUE)` to rebuild it from the live
-#>   index.
 head(catl)
 #> # A tibble: 6 × 12
 #>   census_year temporal catalogue   archived release_date date  topic title pid  

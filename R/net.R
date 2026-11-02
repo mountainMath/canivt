@@ -19,15 +19,16 @@
 # safeconduct, whose transport has no header argument; Borealis does not
 # challenge plain requests.
 #
-# On a host known to challenge (`IVT_BROWSER_HOSTS`) the requests share ONE
-# browser for the R session (`ivt_browser_session()`): safeconduct's per-call
-# route opens a Chrome, passes the check at the host root and closes it again
-# for every URL, and `www12` re-challenges the page's own requests often enough
-# (measured 2026-11-01: intermittently, within seconds of a pass) that a scrape
-# of eleven index pages rarely got through eleven fresh browsers. A kept
-# session reads every page from the same browser and, when the host asks that
-# browser for a check again, passes it and retries the read; it is closed when
-# the R session ends.
+# On a host known to challenge (`IVT_BROWSER_HOSTS`) a page read gets a FRESH
+# browser per request and a retry on a challenge (`ivt_read_page()`). Measured
+# on `www12` (2026-11-01/02): a headless pass at the host root takes ~1.6 s, the
+# browser's first in-page read of a `/datasets/` page then gets through about
+# half the time, and every further read from that same browser is challenged
+# again, headed or not -- the path runs its own per-navigation check that a
+# root pass does not clear. So a browser kept across reads is challenged on
+# every read after its first, while a fresh browser per read with a retry
+# scrapes the eleven index pages in ~3 minutes. Revisit when safeconduct
+# passes the check at the URL itself.
 
 # Is safeconduct installed? Isolated so tests can mock either branch.
 ivt_has_safeconduct <- function() {
@@ -48,8 +49,7 @@ ivt_has_safeconduct <- function() {
 # file" and it surfaces here as `canivt_offline` with that cause attached.
 ivt_fetch_file <- function(url, destfile, quiet = FALSE, headers = NULL) {
   if (is.null(headers) && ivt_has_safeconduct()) {
-    tryCatch(safeconduct::fetch(url, destfile, quiet = quiet,
-                                session = ivt_browser_session(url)),
+    tryCatch(safeconduct::fetch(url, destfile, quiet = quiet),
              error = function(e) ivt_offline_abort(url, parent = e))
     if (!file.exists(destfile)) ivt_offline_abort(url)
     return(invisible(destfile))
@@ -64,17 +64,15 @@ ivt_fetch_file <- function(url, destfile, quiet = FALSE, headers = NULL) {
   invisible(destfile)
 }
 
-# Fetch + parse an HTML page. Through safeconduct when installed (its
-# `page_html()` reads with the same plain-first, browser-on-refusal route and
-# raises on an HTTP error status), otherwise `xml2::read_html()`. A failure is
-# a `canivt_offline` error.
+# Fetch + parse an HTML page. Through safeconduct when installed (a fresh
+# browser per read on a challenging host, retried on a challenge; its
+# `page_html()` raises on any HTTP error status left), otherwise
+# `xml2::read_html()`. A failure is a `canivt_offline` error.
 ivt_fetch_html <- function(url) {
   ivt_require_scrape_pkgs()
   if (ivt_has_safeconduct()) {
-    return(tryCatch(
-      safeconduct::page_html(
-        safeconduct::read_page(url, session = ivt_browser_session(url))),
-      error = function(e) ivt_offline_abort(url, parent = e)))
+    return(tryCatch(safeconduct::page_html(ivt_read_page(url)),
+                    error = function(e) ivt_offline_abort(url, parent = e)))
   }
   tryCatch(xml2::read_html(url),
            error = function(e) ivt_offline_abort(url, parent = e,
@@ -87,9 +85,8 @@ ivt_fetch_html <- function(url) {
 # address did not change.
 ivt_fetch_final_url <- function(url) {
   if (ivt_has_safeconduct()) {
-    resp <- tryCatch(
-      safeconduct::read_page(url, quiet = TRUE, session = ivt_browser_session(url)),
-      error = function(e) ivt_offline_abort(url, parent = e))
+    resp <- tryCatch(ivt_read_page(url),
+                     error = function(e) ivt_offline_abort(url, parent = e))
     final <- resp$url
     if (is.null(final) || identical(final, url)) {
       # a redirect the transport did not follow (the browser route may hand
@@ -107,6 +104,26 @@ ivt_fetch_final_url <- function(url) {
   trimws(sub("^[Ll]ocation:", "", loc[length(loc)]))
 }
 
+# One page read through safeconduct, as `safeconduct::read_page()` returns it
+# (`url`, `status_code`, `headers`, raw `content`). On a challenging host the
+# read is retried, each time in a fresh browser, while the host answers with a
+# browser check (403) or a rate limit (429), up to `IVT_READ_TRIES` times; the
+# last answer is returned whatever it is, so the caller's status handling is
+# unchanged. Elsewhere it is a single plain-first read.
+IVT_READ_TRIES <- 6L
+
+ivt_read_page <- function(url) {
+  tries <- if (ivt_host_needs_browser(url)) IVT_READ_TRIES else 1L
+  resp <- NULL
+  for (i in seq_len(tries)) {
+    resp <- safeconduct::read_page(url, quiet = TRUE)
+    if (!isTRUE(resp$status_code %in% c(403L, 429L))) break
+    if (i < tries)
+      cli::cli_inform("{.val {ivt_url_host(url)}} answered {resp$status_code}; retrying with a fresh browser ({i + 1}/{tries}).")
+  }
+  resp
+}
+
 # The hint attached to a failure on a host known to refuse plain requests, when
 # safeconduct is not there to get past the refusal.
 ivt_net_hint <- function(url) {
@@ -119,33 +136,6 @@ ivt_net_hint <- function(url) {
 
 # Hosts observed to answer plain requests with a browser check (2026-11).
 IVT_BROWSER_HOSTS <- c("www12.statcan.gc.ca")
-
-# The browser kept open per challenging host, for the R session. `NULL` for any
-# other host, so safeconduct takes its plain-first route there. A session whose
-# browser has gone away is reopened by safeconduct at the next read; one that
-# was `close()`d is replaced here. Opening it can fail (no Chrome); the callers
-# raise that as `canivt_offline` like any other transport failure.
-ivt_browser_sessions <- new.env(parent = emptyenv())
-
-ivt_browser_session <- function(url) {
-  if (!ivt_host_needs_browser(url)) return(NULL)
-  host <- ivt_url_host(url)
-  s <- ivt_browser_sessions[[host]]
-  if (!is.null(s) && isTRUE(s$open)) return(s)
-  s <- safeconduct::browser_session(url)
-  assign(host, s, envir = ivt_browser_sessions)
-  s
-}
-
-# Close every kept browser (tests; a user who wants the Chrome gone now).
-ivt_close_browser_sessions <- function() {
-  for (host in ls(ivt_browser_sessions)) {
-    s <- ivt_browser_sessions[[host]]
-    if (isTRUE(s$open)) try(close(s), silent = TRUE)
-    rm(list = host, envir = ivt_browser_sessions)
-  }
-  invisible(NULL)
-}
 
 ivt_host_needs_browser <- function(url) {
   ivt_url_host(url) %in% IVT_BROWSER_HOSTS

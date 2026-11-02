@@ -59,9 +59,6 @@ zips work without it.
 ``` r
 
 catl <- statcan_ivt_catalogue()
-#> Warning: The cached StatCan IVT catalogue is 125 days old.
-#> ℹ Call `statcan_ivt_catalogue(refresh = TRUE)` to rebuild it from the live
-#>   index.
 
 # Find the 1981 census-division / subdivision profile
 library(dplyr)

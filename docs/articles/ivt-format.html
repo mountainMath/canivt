@@ -826,9 +826,6 @@ endpoint that <code><a href="../reference/ivt_download.html">ivt_download()</a><
 read it the same way:</p>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">row</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/subset.html" class="external-link">subset</a></span><span class="op">(</span><span class="fu"><a href="../reference/statcan_ivt_catalogue.html">statcan_ivt_catalogue</a></span><span class="op">(</span><span class="op">)</span>, <span class="va">catalogue</span> <span class="op">==</span> <span class="st">"1003011"</span><span class="op">)</span></span>
-<span><span class="co">#&gt; Warning: The cached StatCan IVT catalogue is 125 days old.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Call `statcan_ivt_catalogue(refresh = TRUE)` to rebuild it from the live</span></span>
-<span><span class="co">#&gt;   index.</span></span>
 <span><span class="va">leg</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/read_ivt.html">read_ivt</a></span><span class="op">(</span><span class="fu"><a href="../reference/statcan_ivt_download.html">statcan_ivt_download</a></span><span class="op">(</span><span class="va">row</span><span class="op">)</span><span class="op">)</span>   <span class="co"># 41,859 geographies, Age(110) × Sex(3)</span></span>
 <span><span class="fu"><a href="../reference/ivt_tidy.html">ivt_tidy</a></span><span class="op">(</span><span class="va">leg</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 13,813,470 × 8</span></span></span>
