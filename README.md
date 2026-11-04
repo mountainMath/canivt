@@ -1,6 +1,7 @@
 # canivt <a href="https://mountainmath.github.io/canivt/"><img src="man/figures/logo.png" align="right" height="120" alt="canivt website" /></a>
 
 <!-- badges: start -->
+[![Version](https://img.shields.io/github/r-package/v/mountainMath/canivt?label=version)](https://github.com/mountainMath/canivt/blob/main/NEWS.md)
 <!-- badges: end -->
 
 **canivt** downloads and parses [Statistics Canada *Beyond 20/20* `.ivt` data

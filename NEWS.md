@@ -1,4 +1,4 @@
-# canivt 0.5.0
+# canivt 0.5.1
 
 * **`read_ivt()` reports what the file did about zero-versus-missing, as
   `x$cell_status`.** Whenever the page status tails are read (`missing = TRUE`
@@ -46,6 +46,9 @@
   hands a body over 16 MB to the browser as a download; an older read hangs
   above about 24 MB. (On 2026-11-01 the endpoint answered every client with a 301
   to the datasets index; it served the files again the next day.)
+
+# canivt 0.5.0
+
 * **`read_ivt()` now returns the published table, not the store.** `x$cells`
   spans the whole grid — one row per real coordinate, the way StatCan's own CSV
   download publishes it — with the published zeros written out, flagged cells
