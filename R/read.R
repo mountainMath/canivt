@@ -122,6 +122,18 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   `complete = FALSE` that sidecar is essential: the exported table then holds
 #'   only the cells that have a value, so reconstructing the full grid from it
 #'   alone fills every suppressed cell with a zero.
+#'
+#'   Whenever the tails are read (`missing = TRUE` or the default
+#'   `complete = TRUE`) the result also carries `cell_status`, the table-level
+#'   reading of them: `pages` (how many pages wrote a mask, a reason-code array,
+#'   no tail, an unreadable or a contradictory one), `n_missing`,
+#'   `reasons_stated`, the file's `legend`, `nan_words`, `extra_words` and a
+#'   one-line `verdict`. It is what separates "this file declares every absent
+#'   cell a zero" from "this file was not read for status": a file whose every
+#'   page carries a readable tail and yields no missing cell has *stated* that
+#'   its absences are zeros -- the 1991 census profiles do exactly that for
+#'   their suppressed income cells, so the suppression is lost at the source
+#'   and no reader can recover it -- while unclassified pages are counted.
 #' @return An object of class `ivt`: a list with `cells` (a tibble of one cell
 #'   per row, keyed by 1-based member-id columns matching the StatCan metadata
 #'   Member IDs; under the default `complete = TRUE` it spans the whole grid and
@@ -171,6 +183,11 @@ ivt_is_supported <- function(raw) !is.na(ivt_family(raw))
 #'   98-400-X2016120 the flag's last digit is `9` exactly for the 888
 #'   geographies with no stored cells, which the Beyond 20/20 viewer renders
 #'   as suppressed).
+#'
+#'   With `missing = TRUE` the list also holds `missing` (the flagged cells on
+#'   their own), and whenever the status tails were read (`missing = TRUE` or
+#'   `complete = TRUE`) `cell_status`, the table-level summary described under
+#'   "Missing values".
 #' @examples
 #' # A small real table (StatCan 98-10-0044) is bundled for examples/tests.
 #' path <- system.file("extdata", "98100044.ivt", package = "canivt")
@@ -222,6 +239,13 @@ read_ivt <- function(path, geo_attributes = FALSE, missing = FALSE,
   }
   out <- list(cells = cells, metadata = meta, path = path, family = family)
   if (isTRUE(missing)) out$missing <- miss
+  # The table-level reading of the status tails, whenever they were read: which
+  # page forms the file wrote, its legend, and whether every absent cell got
+  # classified. A per-file record, so "0 missing" can be told from "not read".
+  if (isTRUE(missing) || isTRUE(complete))
+    out$cell_status <- ivt_cell_status(attr(miss, "pages", exact = TRUE),
+                                       attr(miss, "legend", exact = TRUE),
+                                       nrow(miss))
   structure(out, class = "ivt")
 }
 
@@ -471,5 +495,12 @@ print.ivt <- function(x, ...) {
     } else if (is.null(x$missing))
       "stored cells only (read_ivt(complete=TRUE) for the published grid)"
     else "{nrow(x$missing)} missing cell{?s} decoded (the rest of the absences are zeros)"))
+  # What the file did about zero-versus-missing, from its own page tails.
+  cs <- x$cell_status
+  if (!is.null(cs)) {
+    sym <- if (is.null(cs$legend)) "no status legend declared"
+           else paste0("legend ", paste(cs$legend$symbol, collapse = " "))
+    cli::cli_text(cli::col_grey("cell status: {cs$verdict}; {sym}"))
+  }
   invisible(x)
 }

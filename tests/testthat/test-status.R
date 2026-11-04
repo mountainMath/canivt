@@ -88,6 +88,47 @@ test_that("the bundled table decodes its mask and reports no missing cells", {
   expect_gt(tally[["mask"]], 0L)
   expect_identical(tally[["unreadable"]], 0L)
   expect_identical(tally[["contradictory"]], 0L)
+  # the same tally, as the table-level record a user can find: `x$cell_status`
+  cs <- x$cell_status
+  expect_type(cs, "list")
+  expect_identical(cs$pages[["mask"]], tally[["mask"]])
+  expect_identical(cs$pages[["array"]], tally[["status"]])
+  expect_identical(cs$pages[["none"]], tally[["none"]])
+  expect_identical(cs$n_missing, 0L)
+  expect_false(cs$reasons_stated)
+  expect_identical(cs$legend, leg)
+  expect_identical(cs$nan_words, tally[["nan_words"]])
+  # every page carries a readable tail, so 0 missing is the file's statement
+  expect_match(cs$verdict, "^every absent cell is classified")
+  expect_message(print(x), "cell status: every absent cell is classified")
+})
+
+test_that("cell_status is only built when the status tails were read", {
+  path <- system.file("extdata", "98100044.ivt", package = "canivt")
+  expect_null(read_ivt(path, complete = FALSE)$cell_status)
+  # the completed grid reads them, so it carries the record without `missing`
+  y <- suppressWarnings(read_ivt(path))
+  expect_identical(y$cell_status$pages, read_ivt(path, missing = TRUE,
+                                                 complete = FALSE)$cell_status$pages)
+})
+
+test_that("ivt_cell_status reads the tally into a verdict", {
+  t0 <- c(mask = 3L, none = 0L, status = 0L, unreadable = 0L, extra = 0L,
+          nan_words = 2L, contradictory = 0L, beyond = 0L, status_unread = 0L,
+          status_unknown = 0L)
+  a <- ivt_cell_status(t0, NULL, 0L)
+  expect_match(a$verdict, "every absent cell is classified by the file \\(3 pages")
+  expect_match(a$verdict, "0 missing")
+  expect_identical(a$nan_words, 2L)
+  t1 <- t0; t1[["none"]] <- 1L; t1[["status"]] <- 2L
+  b <- ivt_cell_status(t1, NULL, 7L)
+  expect_true(b$reasons_stated)
+  expect_match(b$verdict, "^5 of 6 pages classify their absent cells \\(7 missing\\); 1 page carry")
+  expect_identical(b$pages, c(mask = 3L, array = 2L, none = 1L, unreadable = 0L,
+                              contradictory = 0L))
+  expect_identical(ivt_cell_status(t0 * 0L, NULL, 0L)$verdict,
+                   "no page carries a cell-status tail")
+  expect_null(ivt_cell_status(NULL, NULL, 0L))
 })
 
 test_that("missing = FALSE (the default) leaves cells and the object untouched", {

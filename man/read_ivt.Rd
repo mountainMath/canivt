@@ -85,6 +85,11 @@ the codebook) corroborates it (e.g. on the 2016 income table
 98-400-X2016120 the flag's last digit is \code{9} exactly for the 888
 geographies with no stored cells, which the Beyond 20/20 viewer renders
 as suppressed).
+
+With \code{missing = TRUE} the list also holds \code{missing} (the flagged cells on
+their own), and whenever the status tails were read (\code{missing = TRUE} or
+\code{complete = TRUE}) \code{cell_status}, the table-level summary described under
+"Missing values".
 }
 \description{
 Parses a Statistics Canada Beyond 20/20 \code{.ivt} table straight from its bytes:
@@ -148,6 +153,18 @@ and \code{\link[=ivt_missing]{ivt_missing()}} gets it back from any of those for
 \code{complete = FALSE} that sidecar is essential: the exported table then holds
 only the cells that have a value, so reconstructing the full grid from it
 alone fills every suppressed cell with a zero.
+
+Whenever the tails are read (\code{missing = TRUE} or the default
+\code{complete = TRUE}) the result also carries \code{cell_status}, the table-level
+reading of them: \code{pages} (how many pages wrote a mask, a reason-code array,
+no tail, an unreadable or a contradictory one), \code{n_missing},
+\code{reasons_stated}, the file's \code{legend}, \code{nan_words}, \code{extra_words} and a
+one-line \code{verdict}. It is what separates "this file declares every absent
+cell a zero" from "this file was not read for status": a file whose every
+page carries a readable tail and yields no missing cell has \emph{stated} that
+its absences are zeros -- the 1991 census profiles do exactly that for
+their suppressed income cells, so the suppression is lost at the source
+and no reader can recover it -- while unclassified pages are counted.
 }
 
 \examples{

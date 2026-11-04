@@ -394,3 +394,46 @@ ivt_status_code_addr <- function(bit) {
   names(out) <- as.character(IVT_STATUS_WIDTHS)
   out
 }
+
+# The table-level cell-status summary that `read_ivt(missing = TRUE)` and the
+# completed grid expose as `x$cell_status`: what the file DID about the
+# zero-versus-missing distinction, as one inspectable record rather than a
+# warning the user has to catch. `tally` is the per-page-class count the decode
+# keeps, `legend` the file's `@698` declaration (NULL where it makes none) and
+# `n_missing` the cells the read classified as missing.
+#
+# `verdict` is the one-line reading of the tally: a file whose every page
+# carries a readable tail has classified every absent cell -- so "0 missing"
+# there is a STATEMENT by the file (every absent cell declared zero), not a gap
+# -- while a file with tail-less, unreadable or contradictory pages leaves
+# their absences unclassified under `complete = FALSE` (published as zeros and
+# counted under `complete = TRUE`).
+ivt_cell_status <- function(tally, legend, n_missing) {
+  if (is.null(tally)) return(NULL)
+  g <- function(k) if (k %in% names(tally)) as.integer(tally[[k]]) else 0L
+  pages <- c(mask = g("mask"), array = g("status"), none = g("none"),
+             unreadable = g("unreadable"), contradictory = g("contradictory"))
+  n_un <- pages[["none"]] + pages[["unreadable"]] + pages[["contradictory"]]
+  read <- pages[["mask"]] + pages[["array"]]
+  verdict <- if (read == 0L && n_un == 0L)
+    "no page carries a cell-status tail"
+  else if (n_un == 0L)
+    sprintf(paste("every absent cell is classified by the file (%d page%s with",
+                  "a status tail): %d missing, every other absence a declared zero"),
+            read, if (read == 1L) "" else "s", as.integer(n_missing))
+  else
+    sprintf(paste("%d of %d page%s classify their absent cells (%d missing);",
+                  "%d page%s carry no readable tail, so their absences are",
+                  "unclassified"),
+            read, read + n_un, if (read + n_un == 1L) "" else "s",
+            as.integer(n_missing), n_un, if (n_un == 1L) "" else "s")
+  list(
+    pages = pages,
+    n_missing = as.integer(n_missing),
+    # the mask only separates zero from missing; a reason needs the array form
+    reasons_stated = pages[["array"]] > 0L,
+    legend = legend,
+    nan_words = g("nan_words"),
+    extra_words = g("extra"),
+    verdict = verdict)
+}

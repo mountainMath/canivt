@@ -1,5 +1,21 @@
 # canivt 0.5.0
 
+* **`read_ivt()` reports what the file did about zero-versus-missing, as
+  `x$cell_status`.** Whenever the page status tails are read (`missing = TRUE`
+  or the default `complete = TRUE`) the result carries a table-level record:
+  how many pages wrote a bare mask, a reason-code array, no tail, an unreadable
+  or a contradictory one (`pages`), the missing-cell count, whether any page
+  states a reason, the file's own `@698` legend, the NaN-quieted and
+  second-block word counts, and a one-line `verdict`; `print()` shows the
+  verdict. The point is to tell "this file declares every absent cell a zero"
+  from "the status was not read": the same tally was only reachable as
+  `attr(x$missing, "pages")` before. Prompted by the 1991 census profiles
+  (95F0170X, 98F0172X, 98F0174X), whose suppressed income cells read as zeros:
+  every one of their income pages carries a readable mask, and the mask covers
+  every absent cell, so the file itself states those cells are zeros -- the
+  suppression is lost at the source, and `cell_status` now says so (GitHub
+  issue #2).
+
 * **Every network access goes through one transport (`R/net.R`), which uses
   the `safeconduct` package when it is installed.** StatCan's
   `www12.statcan.gc.ca` host — the census datasets index that
