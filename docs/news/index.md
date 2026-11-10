@@ -1,6 +1,58 @@
 # Changelog
 
-## canivt 0.5.0
+## canivt 0.5.2
+
+- **The dimension descriptor and the table title are read as records,
+  not as text.** Every `81 01` / `81 02` block of the master directory
+  is a block of fixed-width records stored zero-suppressed – a mask with
+  one bit per record byte, then only the non-zero bytes. The descriptor
+  is an 82-byte record per dimension (member count, type, short name,
+  description) and the title a field of the title record; both are now
+  read that way (`R/records.R`), with the earlier byte walk kept as the
+  loud fallback. 38 corpus tables lose their descriptor fallback
+  warnings and 13 more become strict-clean; stored cell counts are
+  unchanged everywhere.
+
+- **Dimension names change on some tables, and with them the `cells`
+  column names.** A dimension is named by its short name unless that is
+  a leading copy of its description: the custom extracts’
+  `"Housing TenureHousing tenure (5)"` is `"Housing Tenure"`, the survey
+  tables’ `"Timeseries"` is `"Year"` or `"Month"`, and truncated 2001
+  names are complete. 51 corpus tables are affected.
+
+- **`metadata$title_en` / `title_fr` are filled from the title record**
+  where the identity text has none (custom extracts, Business Patterns,
+  several survey tables).
+
+- **The page directory can veto a member count taken from a chunk run.**
+  On the 1981 census-tract profiles (97-570-X1981006 / 007) the run
+  arithmetic doubled the geography count; 006 had decoded wrong and 007
+  was refused. Both now decode with the descriptor’s own count.
+
+- **A descriptor head detached from its records block is followed
+  through the master directory**, which onboards the 1981
+  enumeration-area profile 2A (2,257,784 stored cells).
+
+## canivt 0.5.1
+
+- **[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
+  reports what the file did about zero-versus-missing, as
+  `x$cell_status`.** Whenever the page status tails are read
+  (`missing = TRUE` or the default `complete = TRUE`) the result carries
+  a table-level record: how many pages wrote a bare mask, a reason-code
+  array, no tail, an unreadable or a contradictory one (`pages`), the
+  missing-cell count, whether any page states a reason, the file’s own
+  `@698` legend, the NaN-quieted and second-block word counts, and a
+  one-line `verdict`; [`print()`](https://rdrr.io/r/base/print.html)
+  shows the verdict. The point is to tell “this file declares every
+  absent cell a zero” from “the status was not read”: the same tally was
+  only reachable as `attr(x$missing, "pages")` before. Prompted by the
+  1991 census profiles (95F0170X, 98F0172X, 98F0174X), whose suppressed
+  income cells read as zeros: every one of their income pages carries a
+  readable mask, and the mask covers every absent cell, so the file
+  itself states those cells are zeros – the suppression is lost at the
+  source, and `cell_status` now says so (GitHub issue
+  [\#2](https://github.com/mountainMath/canivt/issues/2)).
 
 - **Every network access goes through one transport (`R/net.R`), which
   uses the `safeconduct` package when it is installed.** StatCan’s
@@ -20,17 +72,26 @@
   entry points degrade to a warning + `NULL` as they did. The Borealis
   download (which carries an API-key header) and the `www150` Beyond
   20/20 zips are not challenged and keep their plain path. On the
-  challenged host the requests share one browser kept open for the R
-  session, so a catalogue refresh (eleven index pages) passes the check
-  once and survives the host re-challenging it, instead of opening a
-  fresh Chrome per page. `httr2` is no longer used.
+  challenged host a page read gets a fresh browser per request and is
+  retried (up to six times) while the host answers with a check or a
+  rate limit: `www12` lets a cleared browser through once and challenges
+  its every later read, so a catalogue refresh (eleven index pages)
+  takes about three minutes of fresh browsers rather than a kept one.
+  `httr2` is no longer used.
 
-  Caveat, measured 2026-11-01: `Download.cfm?PID=` currently answers a
-  browser that has passed the check — a real one clicking the link on
-  the product’s `Alternative.cfm` page included — with a 301 to the
-  datasets index, so the pre-2021 downloads fail with that cause
-  attached until StatCan serves the files again. The catalogue scrape
-  and the viewer redirect work.
+  On that host a file is fetched the same way, as an in-page read from a
+  fresh browser (safeconduct’s own download route, a document navigation
+  to the file, is challenged there every time): `Download.cfm?PID=`
+  answers with the bare `.ivt`, and the pre-2021 tables come through
+  [`statcan_ivt_download()`](https://mountainmath.github.io/canivt/reference/statcan_ivt_download.md)
+  byte-identical in well under a minute (seven tried, 49 KB to 27.8 MB).
+  This needs `safeconduct` 0.1.0.9000 or later, the Suggests floor,
+  whose read hands a body over 16 MB to the browser as a download; an
+  older read hangs above about 24 MB. (On 2026-11-01 the endpoint
+  answered every client with a 301 to the datasets index; it served the
+  files again the next day.)
+
+## canivt 0.5.0
 
 - **[`read_ivt()`](https://mountainmath.github.io/canivt/reference/read_ivt.md)
   now returns the published table, not the store.** `x$cells` spans the

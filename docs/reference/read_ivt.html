@@ -11,7 +11,7 @@ identifiers, footnotes). No companion CSV or metadata download is required."><me
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -148,6 +148,10 @@ the codebook) corroborates it (e.g. on the 2016 income table
 98-400-X2016120 the flag's last digit is <code>9</code> exactly for the 888
 geographies with no stored cells, which the Beyond 20/20 viewer renders
 as suppressed).</p>
+<p>With <code>missing = TRUE</code> the list also holds <code>missing</code> (the flagged cells on
+their own), and whenever the status tails were read (<code>missing = TRUE</code> or
+<code>complete = TRUE</code>) <code>cell_status</code>, the table-level summary described under
+"Missing values".</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -205,6 +209,17 @@ and <code><a href="ivt_missing.html">ivt_missing()</a></code> gets it back from 
 <code>complete = FALSE</code> that sidecar is essential: the exported table then holds
 only the cells that have a value, so reconstructing the full grid from it
 alone fills every suppressed cell with a zero.</p>
+<p>Whenever the tails are read (<code>missing = TRUE</code> or the default
+<code>complete = TRUE</code>) the result also carries <code>cell_status</code>, the table-level
+reading of them: <code>pages</code> (how many pages wrote a mask, a reason-code array,
+no tail, an unreadable or a contradictory one), <code>n_missing</code>,
+<code>reasons_stated</code>, the file's <code>legend</code>, <code>nan_words</code>, <code>extra_words</code> and a
+one-line <code>verdict</code>. It is what separates "this file declares every absent
+cell a zero" from "this file was not read for status": a file whose every
+page carries a readable tail and yields no missing cell has <em>stated</em> that
+its absences are zeros – the 1991 census profiles do exactly that for
+their suppressed income cells, so the suppression is lost at the source
+and no reader can recover it – while unclassified pages are counted.</p>
     </div>
 
     <div class="section level2">
@@ -221,6 +236,8 @@ alone fills every suppressed cell with a zero.</p>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> 448 cells | 14 geographies | 3 dimensions | 10 footnotes</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #555555;">geography labelled by name + uid</span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #555555;">published grid: 448 values, 0 flagged as missing</span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #555555;">cell status: every absent cell is classified by the file (1 page with a status</span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #555555;">tail): 0 missing, every other absence a declared zero; legend .. X ... F 0 s</span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">ivt</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 6 × 6</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>     geo  type collective  value symbol status</span>

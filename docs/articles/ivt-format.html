@@ -26,7 +26,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">canivt</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -148,7 +148,10 @@ misindexed cells.</p>
 <span><span class="co">#&gt; and territories, census divisions, census subdivisions and dissemination areas</span></span>
 <span><span class="co">#&gt; 24347136 cells | 63404 geographies | 3 dimensions | 8 footnotes</span></span>
 <span><span class="co">#&gt; <span style="color: #555555;">geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)</span></span></span>
-<span><span class="co">#&gt; <span style="color: #555555;">published grid: 23433112 values, 914024 flagged as missing</span></span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #555555;">published grid: 23433112 values, 914024 flagged as missing</span></span></span>
+<span><span class="co">#&gt; <span style="color: #555555;">cell status: every absent cell is classified by the file (15851 pages with a</span></span></span>
+<span><span class="co">#&gt; <span style="color: #555555;">status tail): 914024 missing, every other absence a declared zero; legend .. X</span></span></span>
+<span><span class="co">#&gt; <span style="color: #555555;">... F 0 s</span></span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="file-layout-at-a-glance">File layout at a glance<a class="anchor" aria-label="anchor" href="#file-layout-at-a-glance"></a>
@@ -459,6 +462,15 @@ lineage</strong> (a few 1981/1991 profile tables store a one-member
 handles that with no special case, because it is purely positional.
 Exactly one dimension straddles the 2048-bit page boundary (§ below),
 which is what the historical “family” label really named.</p>
+<p>The descriptor itself is a block of fixed-width
+<strong>records</strong>, 82 bytes per dimension — a member count, a
+type tag, a 16-byte short name and a 50-byte description — stored
+<em>zero-suppressed</em>: a mask with one bit per record byte, followed
+by only the non-zero bytes. The same storage holds the table title (one
+field of a 772-byte title record) and every other <code>81 01</code> /
+<code>81 02</code> block the master directory lists. Read with its mask,
+a record gives its fields directly; read as text, the same bytes look
+like a name written twice behind a count of varying width.</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/ivt_metadata.html">ivt_metadata</a></span><span class="op">(</span><span class="fu"><a href="../reference/ivt_download.html">ivt_download</a></span><span class="op">(</span><span class="st">"98100023"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>dimension <span class="op">=</span> <span class="va">meta</span><span class="op">$</span><span class="va">dimension_names</span>,</span>

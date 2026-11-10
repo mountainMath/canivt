@@ -105,6 +105,11 @@ from the codebook) corroborates it (e.g. on the 2016 income table
 geographies with no stored cells, which the Beyond 20/20 viewer renders
 as suppressed).
 
+With `missing = TRUE` the list also holds `missing` (the flagged cells
+on their own), and whenever the status tails were read (`missing = TRUE`
+or `complete = TRUE`) `cell_status`, the table-level summary described
+under "Missing values".
+
 ## Details
 
 Every primary read is positional (header pointers, block directories,
@@ -172,6 +177,19 @@ sidecar is essential: the exported table then holds only the cells that
 have a value, so reconstructing the full grid from it alone fills every
 suppressed cell with a zero.
 
+Whenever the tails are read (`missing = TRUE` or the default
+`complete = TRUE`) the result also carries `cell_status`, the
+table-level reading of them: `pages` (how many pages wrote a mask, a
+reason-code array, no tail, an unreadable or a contradictory one),
+`n_missing`, `reasons_stated`, the file's `legend`, `nan_words`,
+`extra_words` and a one-line `verdict`. It is what separates "this file
+declares every absent cell a zero" from "this file was not read for
+status": a file whose every page carries a readable tail and yields no
+missing cell has *stated* that its absences are zeros – the 1991 census
+profiles do exactly that for their suppressed income cells, so the
+suppression is lost at the source and no reader can recover it – while
+unclassified pages are counted.
+
 ## Examples
 
 ``` r
@@ -187,6 +205,8 @@ ivt
 #> 448 cells | 14 geographies | 3 dimensions | 10 footnotes
 #> geography labelled by name + uid
 #> published grid: 448 values, 0 flagged as missing
+#> cell status: every absent cell is classified by the file (1 page with a status
+#> tail): 0 missing, every other absence a declared zero; legend .. X ... F 0 s
 head(ivt$cells)
 #> # A tibble: 6 × 6
 #>     geo  type collective  value symbol status

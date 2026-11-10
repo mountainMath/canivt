@@ -66,6 +66,9 @@ tab
 #> 24347136 cells | 63404 geographies | 3 dimensions | 8 footnotes
 #> geography labelled by uid (read_ivt(geo_attributes=TRUE) for names)
 #> published grid: 23433112 values, 914024 flagged as missing
+#> cell status: every absent cell is classified by the file (15851 pages with a
+#> status tail): 914024 missing, every other absence a declared zero; legend .. X
+#> ... F 0 s
 ```
 
 ## File layout at a glance
@@ -310,6 +313,15 @@ first and put geography *last*); the nesting handles that with no
 special case, because it is purely positional. Exactly one dimension
 straddles the 2048-bit page boundary (§ below), which is what the
 historical “family” label really named.
+
+The descriptor itself is a block of fixed-width **records**, 82 bytes
+per dimension — a member count, a type tag, a 16-byte short name and a
+50-byte description — stored *zero-suppressed*: a mask with one bit per
+record byte, followed by only the non-zero bytes. The same storage holds
+the table title (one field of a 772-byte title record) and every other
+`81 01` / `81 02` block the master directory lists. Read with its mask,
+a record gives its fields directly; read as text, the same bytes look
+like a name written twice behind a count of varying width.
 
 ``` r
 

@@ -133,7 +133,7 @@ meta$dimensions
 #> [1] 2
 #> 
 #> [[3]]$type
-#> [1] 18
+#> [1] 1
 #> 
 #> [[3]]$is_geography
 #> [1] FALSE
