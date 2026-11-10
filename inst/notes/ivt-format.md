@@ -93,9 +93,12 @@ every pointer resolves to a block directory of the same 8-byte entry shape
 
 ```
 u32 @544  → the MASTER directory (at offset 992; ~10 entries covering the whole
-            file: FACET04 titles EN/FR, the dimension descriptor, the EN/FR
-            identity/notes blobs — the legacy out-of-line title+footnotes blocks
-            are entries here — the product id, and a 15-byte EOF trailer)
+            file: FACET04 titles EN/FR, the descriptor as TWO entries — [2] its
+            dimension-records block `81 02 <ndim> 00 <u16 len>` and [3] its
+            14–16 byte head `81 01 20 00 f0 ..`, normally adjacent (head
+            first) but separately addressed — the EN/FR identity/notes blobs
+            (the legacy out-of-line title+footnotes blocks are entries here)
+            and the product id)
 u32 @712  → the DATA-QUALITY-FLAG legend (15 entries on 2021 tables: EN/FR
             records per code A..E/R/P, framed [82 01][u16][flags][02][code][00]
             [u16 len][text]; a 1-entry stub on pre-DGUID tables)

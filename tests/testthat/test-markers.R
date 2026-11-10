@@ -35,6 +35,26 @@ test_that("ivt_value_trailer decodes the documented b2/b3 formula and aborts on 
   expect_error(ivt_value_trailer(0x82L, 0x00L, 0x07L), class = "canivt_unknown_marker")
 })
 
+test_that("a descriptor head detached from its records block resolves to the records", {
+  # master-directory rows: [2] the `81 02 <ndim> 00` records block, [3] the head
+  rec  <- as.raw(c(0x81L, 0x02L, 0x02L, 0x00L, 0x52L, 0x00L, rep(0x00L, 20L)))
+  head <- mk_descriptor(0x03L)[1:15]
+  md <- function(rec_off, head_off, head_len = 15L)
+    cbind(off = c(10L, rec_off, head_off), len = c(8L, length(rec), head_len))
+  # attached: the records start where the head ends -> the head stands
+  att <- c(raw(100), head, rec, raw(40))
+  expect_identical(ivt_f2_detached_records(att, md(115L, 100L), 3L), NA_integer_)
+  # detached: the head row points at a copy followed by other bytes
+  det <- c(raw(100), rec, raw(60), head, as.raw(rep(0x41L, 40L)))
+  expect_identical(ivt_f2_detached_records(det, md(100L, 186L), 3L), 85L)
+  # ... and the walk origin puts the records block at the usual D + 15
+  expect_identical(det[(85L + 15L + 1L):(85L + 15L + 4L)], rec[1:4])
+  # not a head-only row, or the row before it is not a records block: declined
+  expect_identical(ivt_f2_detached_records(det, md(100L, 186L, 400L), 3L), NA_integer_)
+  expect_identical(ivt_f2_detached_records(det, md(130L, 186L), 3L), NA_integer_)
+  expect_identical(ivt_f2_detached_records(det, md(100L, 186L), 1L), NA_integer_)
+})
+
 test_that("descriptor-signature recognizer accepts b9 in {03, ff} only", {
   # a descriptor is never at file offset 0 (the recognizer guards off < 1), so
   # test at off = 1 behind a pad byte.

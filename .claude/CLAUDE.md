@@ -26,7 +26,7 @@ test suite has not seen, and warn loudly on every fallback.
 ## What works today
 
 **Every `.ivt` in the corpus decodes**, and **the refusal ledger is empty**
-(2026-07-26) — all 177 rows `supported = TRUE`, with no gate relaxed to get
+(2026-07-26) — all 178 rows `supported = TRUE`, with no gate relaxed to get
 there. One descriptor-driven, name/type-agnostic decoder (`decode.R`) plus one
 shared metadata path (`ivt_f2_metadata()`) handle every vintage: 1981–2021
 census and profiles, 2001/2006 F-series, 2016 `98-400-X` crosstabs, custom

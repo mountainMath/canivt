@@ -15,7 +15,7 @@ integration test therefore auto-skips when the files it needs are absent.
 ## The corpus is the regression suite
 
 The local corpus is one folder per table under `CANIVT_IVT_CACHE`
-(`~/data/ivt_raw`) — 177 tables, ~372 M stored cells — so all three sweeps over
+(`~/data/ivt_raw`) — 178 tables, ~374 M stored cells — so all three sweeps over
 it are **opt-in**:
 
 ```sh
@@ -28,7 +28,7 @@ Three ledgers, three different contracts:
 |---|---|---|---|
 | `fixtures/corpus-ledger.csv` | `test-corpus.R` | per table: the `ivt_is_supported()` verdict, strict-mode cleanliness, the exact non-zero cell count | — |
 | `fixtures/status-ledger.csv` | `test-status.R` | the cell-status tail per table; `unreadable` / `contradictory` are the two columns that must never move | `dev/msweep.R` |
-| `fixtures/complete-ledger.csv` | `test-complete.R`, `test-stream.R` | the **fold**: grid size `prod(counts)` for all 177 tables (read off the layout, so it is checked even where the table is too big to complete under the sweep budget) and, for the 133 under it, `rows`/`stored`/`zeros`/`flagged`/`symbolled`/`vsum` | `dev/csweep.R` |
+| `fixtures/complete-ledger.csv` | `test-complete.R`, `test-stream.R` | the **fold**: grid size `prod(counts)` for all 178 tables (read off the layout, so it is checked even where the table is too big to complete under the sweep budget) and, for the 133 under it, `rows`/`stored`/`zeros`/`flagged`/`symbolled`/`vsum` | `dev/csweep.R` |
 
 Notes on what each contract is protecting:
 

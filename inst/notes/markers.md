@@ -179,6 +179,16 @@ via `read_ivt(missing = TRUE)`.
 `b5/b6` vary (`20`/`28`); `b9 ∈ {0x03, 0xff}` (**`0x03`** standard, **`0xff`** the
 Canadian Business Patterns lineage). Recognizer `ivt_f2_is_descriptor()`.
 
+The signature block is only the descriptor's 14–16 byte **head**. The dimension
+records are a second block, `81 02 <ndim> 00 <u16 len>` (`<ndim>` = the number of
+dimensions), which the master directory lists as its own entry — row [2], the
+head being row [3]. On nearly every file the records start where the head ends
+(`head + 14..16`), so one offset serves both. When the directory's head row has
+no `81 02` block at its end and the row before it is one, the head is
+**detached** and the record walk starts at that records block
+(`ivt_f2_detached_records()`; the 1981 EA profile 2A, whose `@32` is zero, and
+`CRO0163850_CT6`, whose inline copy after the `@32` head is stale).
+
 Within the descriptor each dimension is a record `[count][type][sep][name][name]`
 (doubled name; the first copy may be truncated ~14 chars). The type byte is a
 storage/width tag, **not** a fixed dimension identity. The name **separator** is
@@ -421,6 +431,11 @@ layout.
 
 ## Change log
 
+- **2026-11-10** — **The descriptor head and its records are two blocks** (§D).
+  The master directory lists the `81 02 <ndim> 00` records block and the
+  signature head as separate rows; `ivt_f2_detached_records()` follows the
+  directory to the records when the head row stands alone. Onboards
+  `ea_profile_1981_2A` (2,257,784 cells).
 - **2026-07-28** — **`@32` is a block directory** (§B.1), not three unrelated
   pointer slots: `@32`/`@40`/`@48` are entries 0/1/2 of one array of the standard
   8-byte `[u32 off][u16 len][u16 len]` record, and the "modern inline format"

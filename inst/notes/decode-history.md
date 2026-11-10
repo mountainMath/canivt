@@ -963,6 +963,52 @@ Left open: the padding-tail drop in `ivt_decode()` is still silent, and the
 chunk-run reader still skips partial chunks that look ordinal — the veto guards
 the consequence, not the cause.
 
+### ea_profile_1981_2A — a descriptor head detached from its records (2026-11-10)
+
+The second file of issue #3: the 1981 EA profile 2A read **0 dimensions** while
+its sibling 2B decoded. Nothing about the container was different. `@32` is
+zero, so `ivt_f2_descriptor_offset()` went to the master directory, took the
+first row carrying the `81 01 20 00 f0` signature, and walked 4,000 bytes from
+it — but that row points at a copy of the 15-byte head at 6,009,508, followed by
+codebook bytes. The dimension records sit at 1,433, where they always do, behind
+a head slot at 1,418 that has been overwritten.
+
+The master directory had been saying so all along. Measured over the corpus, its
+row [2] is the records block (`81 02 <ndim> 00 <u16 len>`) and row [3] the head;
+the old comment called them "the descriptor" and "a 15-byte EOF trailer". The two
+are adjacent on almost every file, which is why one offset had always been
+enough. `ivt_f2_detached_records()` checks the head row for an `81 02` block at
+its end and, finding none, starts the walk at the records block named in the row
+before — returned as `records − 15` so every caller's window reads the bytes it
+reads on an attached layout. Both blocks come from the directory; nothing is
+scanned, so the path is quiet.
+
+Result: `Characteristics EA '2A' Profile` (70) × `Geography` (41,197), 2,257,784
+stored / 2,883,790 grid, EN + FR member labels. Validation: the 41,197 geography
+codes are identical to 2B's, member for member; EA populations sum to 24,342,875
+against the published 24,343,181 (every count is a multiple of 5 — random
+rounding); population == age total and both dwelling totals agree exactly on
+every EA; male + female, husband-wife + lone-parent, owned + rented each within
+±10 of their total on 100 % of EAs; 8.28 M households, 6.32 M families. Not
+strict-clean: the geography record is framed `[u16 count][10]<name>` with no `01`
+separator, the same `canivt_descriptor_lenient` 2B raises.
+
+One other table moved. `CRO0163850_CT6` has a valid `@32` head whose inline
+records are a **stale copy** (framing bytes overwritten, pre-rename names such as
+"Household Income CAN Quartile Ranges (7)" on a 5-member dimension); the live
+block is the directory's. It now reads the live names with the strict walk and
+no lenient warning — the same names its sibling CT7 carries — with counts and
+all 545,481 cells unchanged. Its `cells` column slugs change accordingly. 24
+`02`-generation files resolve to the records block the same way with identical
+dimensions and warnings.
+
+Left open: the names in that lineage are a short display name followed by a
+longer description that is not a repeat of it ("Housing Tenure" + "Housing
+tenure (5)"), which the doubled-name splitter returns concatenated; the bytes
+between `81 02 <ndim> 00 <u16 len>` and the first record grow with the dimension
+count and probably hold the lengths. The title/bound match on the literal
+`FACET04` also misses the `FACET01`–`03` files (title `NA`).
+
 ## Milestones — how the architecture arrived
 
 ### The published table becomes the default output (2026-07-28)

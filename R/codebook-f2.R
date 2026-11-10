@@ -3024,7 +3024,10 @@ ivt_f2_descriptor_offset <- function(raw) {
   if (!is.null(md)) {
     for (r in seq_len(nrow(md))) {
       off <- as.integer(md[r, "off"])
-      if (ivt_f2_is_descriptor(raw, off)) return(off)
+      if (ivt_f2_is_descriptor(raw, off)) {
+        rec <- ivt_f2_detached_records(raw, md, r)
+        return(if (is.na(rec)) off else rec)
+      }
     }
   }
   hit <- ivt_f2_scan_descriptor(raw)
@@ -3035,6 +3038,39 @@ ivt_f2_descriptor_offset <- function(raw) {
     return(hit)
   }
   if (!is.na(D) && D >= 1L && D + 18L <= n) as.integer(D) else NULL
+}
+
+# The descriptor is TWO master-directory blocks: a 14-16 byte HEAD (the
+# `81 01 20 00 f0 ..` signature) and the dimension RECORDS block
+# (`81 02 <ndim> 00 <u16 len>`, the doubled names), listed in that directory as
+# rows [3] and [2]. On nearly every file the records start where the head ends,
+# so "the descriptor offset" and "where the record walk starts" coincide. A
+# rewritten file can relocate the head alone: the 1981 EA profile 2A keeps its
+# records block at 1433 while the directory's head row points at a copy near the
+# end of the file, followed by codebook bytes, and `@32` is zero. A walk from
+# that head reads no dimension at all.
+#
+# So when master-directory row `r` is a head-only block (its directory length is
+# no more than 16) with no `81 02` block where it ends, and the row before it is
+# an `81 02 <ndim> 00` block, the walk origin is that records block -- returned
+# as `records - 15`, the offset a head of the usual length would have, so every
+# caller's "window from D" reads the same bytes it reads on an attached layout.
+# Both blocks are named by the master directory, so this is structural and quiet.
+# NA when the head is attached or the row before it is not a records block.
+ivt_f2_detached_records <- function(raw, md, r) {
+  n <- length(raw)
+  off <- as.integer(md[r, "off"]); len <- as.integer(md[r, "len"])
+  if (r < 2L || is.na(len) || len > 16L) return(NA_integer_)
+  is_rec <- function(o) {
+    if (is.na(o) || o < 0L || o + 6L > n) return(FALSE)
+    nd <- as.integer(raw[o + 3L])
+    raw[o + 1L] == as.raw(0x81) && raw[o + 2L] == as.raw(0x02) &&
+      raw[o + 4L] == as.raw(0x00) && nd >= 1L && nd <= 32L
+  }
+  for (a in 14:16) if (is_rec(off + a)) return(NA_integer_)      # attached
+  rec <- as.integer(md[r - 1L, "off"])
+  if (!is_rec(rec) || rec < 15L) return(NA_integer_)
+  rec - 15L
 }
 
 # First offset whose 9-byte prefix is the descriptor signature, else NA.
