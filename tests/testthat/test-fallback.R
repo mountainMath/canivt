@@ -261,3 +261,32 @@ test_that("the container count witness stays silent when it has nothing to say",
   expect_no_warning(out <- ivt_f2_dim_count_container(raw(0), dims))
   expect_identical(out, dims)
 })
+
+test_that("the container vetoes a chunk-run count its pages contradict", {
+  # The veto half of the container witness. A straddle window's positions past
+  # the member count are padding; a value stored there contradicts the count.
+  # (The corpus cases are 97-570-X1981006 / -007: descriptor 3,338, chunk-run
+  # arithmetic 6,666, directory two windows per member.)
+  path <- system.file("extdata", "98100044.ivt", package = "canivt")
+  skip_if(!nzchar(path))
+  raw <- readBin(path, "raw", file.size(path))
+  dims <- ivt_f2_descriptor(raw)$dims
+  js <- ivt_layout(raw)$straddle
+  expect_false(ivt_count_contradicted(raw, dims))
+  short <- dims; short[[js]]$count <- 7L          # values sit at members 8..14
+  expect_true(ivt_count_contradicted(raw, short))
+  expect_true(ivt_count_contradicted(raw(0), dims))   # no layout: contradicted
+
+  # a contradicted candidate is withdrawn in favour of a descriptor count the
+  # container accepts -- quietly, the descriptor being the primary path
+  ch <- list(list(k = js, was = dims[[js]], cc = 7L))
+  expect_no_warning(out <- ivt_f2_dim_count_chunk_veto(raw, short, ch))
+  expect_identical(out, dims)
+  # ... and kept, loudly, when the container does not side with the descriptor
+  ch2 <- list(list(k = js, was = short[[js]], cc = dims[[js]]$count))
+  expect_warning(out2 <- ivt_f2_dim_count_chunk_veto(raw, dims, ch2),
+                 class = "canivt_chunked_count")
+  expect_identical(out2, dims)
+  # nothing provisional: untouched
+  expect_no_warning(expect_identical(ivt_f2_dim_count_chunk_veto(raw, dims, list()), dims))
+})

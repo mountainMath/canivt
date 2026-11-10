@@ -26,7 +26,7 @@ test suite has not seen, and warn loudly on every fallback.
 ## What works today
 
 **Every `.ivt` in the corpus decodes**, and **the refusal ledger is empty**
-(2026-07-26) — all 170 rows `supported = TRUE`, with no gate relaxed to get
+(2026-07-26) — all 177 rows `supported = TRUE`, with no gate relaxed to get
 there. One descriptor-driven, name/type-agnostic decoder (`decode.R`) plus one
 shared metadata path (`ivt_f2_metadata()`) handle every vintage: 1981–2021
 census and profiles, 2001/2006 F-series, 2016 `98-400-X` crosstabs, custom
@@ -180,6 +180,16 @@ and [`coverage.md`](../inst/notes/coverage.md).
   last entry that decodes AND carries cells; needs ≥ 2 paged levels, declines on
   slot holes, never stops at the first gap, only ever raises
   (`canivt_container_count`).
+- **The page directory also VETOES a chunk-run count**
+  (`ivt_f2_dim_count_chunk_veto()` / `ivt_count_contradicted()`): witness (3) is
+  provisional until the container has been heard, and is withdrawn — quietly,
+  the descriptor's count being the primary path — when the pages contradict it
+  and do **not** contradict the descriptor. The test is the straddle's **last
+  window**: positions past `count − (windows − 1)·ipc` are padding, so a value
+  stored there means the count is wrong (97-570-X1981006/007: 3,338 declared,
+  6,666 from the run arithmetic, two windows per member in the directory). Runs
+  after every other codebook reconcile — it needs the other dimensions' final
+  counts.
 - **A "sparse" directory is a correct directory read against a wrong count.**
   Outer levels pad to `nextpow2()` and an unwritten window is a zero entry — the
   same absence as a suppressed geography. **The stride witnesses the count**

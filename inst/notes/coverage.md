@@ -95,7 +95,7 @@ decoded (see below).
   The fold has its own corpus ledger (2026-07-28,
   `fixtures/complete-ledger.csv`, measured by `dev/csweep.R`) — the corpus and
   status ledgers are both contracts about the *store*, so nothing watched it
-  before. It pins `prod(lay$counts)` for all 170 tables and, for the 126 whose
+  before. It pins `prod(lay$counts)` for all 177 tables and, for the 133 whose
   grid fits the 5M-cell sweep budget, the identity
   `stored + zeros + flagged == rows == grid` plus the value sum: 0 grid
   mismatches, 0 store mismatches against the corpus ledger, over 57,004,403
@@ -499,7 +499,8 @@ each lineage (narrative + validation records in
 | 1991 legacy (1003011) + 1991 profiles (98F0172X, 95F0170X) | dense `0x0_` page variant (one value per grid position, zeros literal); positional inline geo directory |
 | 1991 enumeration-area census (1006454 / PID 128) | chunk-run count probe on every dimension (geo `count 52` = chunk count → 13,372 EAs, 8,308,875 cells) |
 | 1996 (94F0009XDB96078, 95F0250XDB96001, 95F0223XDB96001, 95F0200XDB96003, b28ea47, 95f0205xdb96003) | digit-initial descriptor names, `@558` `k = 2`, chunked counts |
-| 1981/1986 profiles (97-570-X1981004/1002, 97-570-X1986002) | geography-LAST lineage (`ivt_f2_geo_dim_index()`), double-01 count reconcile, INVERTED descriptor |
+| 1981/1986 profiles (97-570-X1981002–005, 97-570-X1986002–005) | geography-LAST lineage (`ivt_f2_geo_dim_index()`), double-01 count reconcile, INVERTED descriptor |
+| 1981 CT profiles Part A/B (97-570-X1981006, 97-570-X1981007) | the container's **veto** over a chunk-run count (`ivt_f2_dim_count_chunk_veto()`): the descriptor's 3,338 geographies was right, the run arithmetic's 6,666 put values in the last window's padding — 006 had decoded *wrong* (37 of 73 characteristics), 007 was refused |
 | 2001 F-series (97F0020XCB2001070, 97F0015XCB2001041, 95f0487/95f0491/95f0494/95f0338/95F0377/97F0007) | `0x09` u16 width tag; prose-bleed name recovery; chunked-count reconcile |
 | 2001 census DA-level (95f0437xcb01001, pid59227) | the descriptor record as a count oracle — a rebuilt descriptor's "256" is the codebook chunk size (`ivt_f2_desc_declared_count()`); plus the member-count bound on ordinal runs, so consecutive DA codes stop faking a delimiter |
 | 2006 (97-563-XCB2006072/58, 97-554-XCB2006027, 97-555-XCB2006058, cro0172986) | b3 head-block rule + suppression tails; `canivt_geo_datadim` for uid-less custom geography |

@@ -608,17 +608,19 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   # wired into `ivt_f2_descriptor_02()` for the byte-0 == 0x02 generation; without
   # it the layout mis-spans the page directory and the file preflight-rejects.
   # LOUD (canivt_chunked_count).
+  # The adoption is PROVISIONAL until the container has been heard
+  # (`ivt_f2_dim_count_chunk_veto()`, at the end): the run arithmetic cannot tell
+  # a partial chunk it failed to count from a longer run, so the descriptor's
+  # own count is kept in `chunked` to be restored if the page directory sides
+  # with it.
+  chunked <- list()
   for (k in seq_along(dims)) {
     c0 <- as.integer(dims[[k]]$count)
     if (is.na(c0) || isTRUE(dims[[k]]$double01)) next
     dir <- ivt_f2_dim_dir(raw, k, slots)
     cc <- tryCatch(ivt_f2_slot_chunked_count(raw, dir), error = function(e) NA_integer_)
     if (!is.na(cc) && cc != c0) {
-      nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
-      ivt_fallback(sprintf(paste(
-        "Dimension %d (\"%s\") descriptor count %d is contradicted by a chunked",
-        "codebook; its true member count (%d) was recovered from the chunk-run",
-        "geometry."), k, nm, c0, cc), class = "canivt_chunked_count")
+      chunked[[length(chunked) + 1L]] <- list(k = k, was = dims[[k]], cc = as.integer(cc))
       dims[[k]]$count <- as.integer(cc)
       # a chunk run that reaches PAST the declared slot table means that table was
       # block-local after all -- drop the slot positions it supplied (no corpus
@@ -665,7 +667,8 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
   amb <- which(vapply(dims, function(d)
     !isTRUE(d$declared) &&
       (isTRUE(d$double01) || identical(as.integer(d$count), 0L)), logical(1)))
-  if (!length(amb)) return(ivt_f2_dim_count_container(raw, dims))
+  if (!length(amb))
+    return(ivt_f2_dim_count_container(raw, ivt_f2_dim_count_chunk_veto(raw, dims, chunked)))
   for (k in amb) {
     zero <- identical(as.integer(dims[[k]]$count), 0L)
     fix_zero <- function() {                          # count-0 last resort: 1, loud
@@ -690,7 +693,44 @@ ivt_f2_dim_count_reconcile <- function(raw, dims) {
     if (!is.na(mc$count) && mc$count >= 1L) dims[[k]]$count <- mc$count
     else if (zero) fix_zero()
   }
-  ivt_f2_dim_count_container(raw, dims)
+  ivt_f2_dim_count_container(raw, ivt_f2_dim_count_chunk_veto(raw, dims, chunked))
+}
+
+# The container's VETO over a chunk-run count. The chunk-run recovery above
+# replaces a descriptor count on arithmetic alone, and that arithmetic has a
+# blind spot: it takes the number of runs from how many trailing partial chunks
+# it can see, so a copy whose partial is not counted makes the remaining runs
+# look longer. The 1981 CT profiles (97-570-X1981006 / -007) do exactly that --
+# their geography is laid down as FOUR copies of `13 x [256] + [10]` = 3,338
+# (the count the descriptor states), but two of the four 10-member partials
+# read as ordinal runs and are skipped, leaving `52 x [256]` against two
+# partials: two runs of 6,666.
+#
+# The page directory decides (`ivt_count_contradicted()`): the chunk-run count
+# is withdrawn only when the container CONTRADICTS it and does NOT contradict
+# the descriptor's -- so every table where the descriptor really was short (its
+# own count cannot read the pages either) keeps the recovery, loud as before
+# (`canivt_chunked_count`). A withdrawn candidate supplies no value: the
+# descriptor's count stands, which is the primary path, so it is quiet. Runs
+# after every other codebook reconcile, because the layout it probes needs the
+# other dimensions' final counts (the profile "Values" placeholder reads 32
+# until the double-01 rule has settled it).
+ivt_f2_dim_count_chunk_veto <- function(raw, dims, chunked) {
+  for (ch in chunked) {
+    k <- ch$k; c0 <- as.integer(ch$was$count)
+    alt <- dims; alt[[k]] <- ch$was
+    if (c0 >= 1L && ivt_count_contradicted(raw, dims) &&
+        !ivt_count_contradicted(raw, alt)) {
+      dims <- alt
+      next
+    }
+    nm <- dims[[k]]$name; if (is.null(nm) || is.na(nm)) nm <- "?"
+    ivt_fallback(sprintf(paste(
+      "Dimension %d (\"%s\") descriptor count %d is contradicted by a chunked",
+      "codebook; its true member count (%d) was recovered from the chunk-run",
+      "geometry."), k, nm, c0, ch$cc), class = "canivt_chunked_count")
+  }
+  dims
 }
 
 # The LAST count witness, and the one the codebook cannot outvote: the page

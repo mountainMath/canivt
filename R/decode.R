@@ -172,6 +172,66 @@ ivt_dir_outer_count <- function(raw, dims) {
   if (got > n0) list(dim = jo, count = as.integer(got)) else NULL
 }
 
+# DOES THE CONTAINER CONTRADICT THESE COUNTS? The veto half of the container
+# witness. `ivt_dir_outer_count()` above can only RAISE a count; this asks the
+# opposite question of a count some heuristic proposes (the chunk-run recovery in
+# `ivt_f2_dim_count_reconcile()`): can the pages the file actually wrote be read
+# under it at all? Two statements, both the file's own:
+#
+#   * the detection gate (`ivt_page_preflight()`) -- page extents, capacity and
+#     the directory spanning the entry cartesian;
+#   * the straddle dimension's LAST WINDOW. A window holds `ipc` positions and
+#     the last one only `count - (windows - 1) * ipc` real members; the positions
+#     after that are padding, where nothing can be stored. A value there has no
+#     member to belong to, so the count -- and with it the window count the
+#     whole directory nesting hangs off -- is wrong.
+#
+# The 1981 CT profiles are the case in point: 97-570-X1981006 / -007 declare
+# 3,338 geographies, i.e. two 2048-position windows per characteristic, and
+# their directories hold exactly `2 * members` contiguous entries. Read as
+# 6,666 geographies (four windows) every second entry lands in window 3, whose
+# pages then carry ~1,275 values against 522 real positions.
+#
+# Returns TRUE on a contradiction, FALSE when the sampled pages are consistent
+# (up to `max_pages` non-empty last-window pages). A straddle addressed through
+# a declared slot map is not judged by its tail (holes are tallied by the
+# decode, `canivt_slot_hole`).
+ivt_count_contradicted <- function(raw, dims, max_pages = 64L) {
+  # a probe: the fallbacks the layout raises are re-raised by the real read
+  lay <- tryCatch(ivt_quietly(ivt_layout_impl(raw, d = list(dims = dims))),
+                  error = function(e) NULL)
+  if (is.null(lay)) return(TRUE)
+  ok <-tryCatch(ivt_quietly(ivt_page_preflight(raw, lay)), error = function(e) FALSE)
+  if (!isTRUE(ok)) return(TRUE)
+  js <- lay$straddle
+  if (!is.null(lay$slot_pos[[js]])) return(FALSE)
+  win <- as.integer(lay$ent_counts[1L]); ipc1 <- as.integer(lay$ipc[1L])
+  last <- as.integer(lay$counts[js]) - (win - 1L) * ipc1   # real positions, last window
+  if (last >= ipc1) return(FALSE)                            # no padding tail to test
+  idx0 <- tryCatch(ivt_idx0(raw), error = function(e) NA_integer_)
+  if (is.na(idx0)) return(TRUE)
+  n <- length(raw); ne <- length(lay$ent_counts)
+  outer_n <- if (ne > 1L) prod(as.numeric(lay$ent_counts[-1L])) else 1
+  seen <- 0L
+  for (i in seq_len(min(outer_n, 4096)) - 1L) {
+    k <- (win - 1) * as.numeric(lay$estride[1L]); r <- i
+    if (ne > 1L) for (t in 2:ne) {                 # mixed-radix outer coordinate
+      k <- k + (r %% lay$ent_counts[t]) * as.numeric(lay$estride[t])
+      r <- r %/% lay$ent_counts[t]
+    }
+    if (!ivt_entry_addressable(k, idx0)) break
+    en <- ivt_dir_entry(raw, idx0 + 8L * as.integer(k), n)
+    if (is.null(en) || !en$marker) next
+    pg <- tryCatch(ivt_quietly(ivt_decode_page(raw, en$off, lay, en$size)),
+                   error = function(e) NULL)
+    if (is.null(pg) || !nrow(pg$tuples)) next
+    if (any(pg$tuples[, 1L] > last)) return(TRUE)
+    seen <- seen + 1L
+    if (seen >= max_pages) break
+  }
+  FALSE
+}
+
 # Derive the full layout from the header descriptor: how the dimensions split into
 # in-page / straddle / paged roles, the in-page presence bit grid, the directory
 # entry strides, and the per-page presence record size. Geography is dimension 1

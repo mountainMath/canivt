@@ -915,6 +915,54 @@ different packing, not a count problem. (Both onboarded later the same day: the
 first by the directory-tiling stride rule, the second by the blank-page and
 sparse-slot rules — see the two entries at the foot of this file.)
 
+### 97-570-X1981006 / -007 — the container vetoes a chunk-run count (2026-11-10)
+
+Issue #3 reported `97-570-X1981007` (1981 CT profile, Part B) refused while its
+siblings "decode fine". One of those siblings did not: **`97-570-X1981006`
+(Part A) decoded WRONG** — 209,516 cells on 37 of its 73 characteristics, spread
+over geography ids up to 6,666 — behind a `canivt_chunked_count` warning. It was
+never in the ledger, so nothing caught it.
+
+Both files declare 3,338 geographies, and the chunk-run recovery replaced that
+with 6,666. The geography codebook is laid down as **four** copies of
+`13 × [256] + [10]`, but two of the four 10-member partials read as ordinal runs
+and are skipped, so `ivt_f2_slot_chunked_count()` saw 52 full chunks against two
+partials: two runs of `26 × 256 + 10`. The arithmetic is self-consistent; it is
+just counting the wrong thing.
+
+The page directory says which count is right, twice over:
+
+- **Windows per member.** 3,338 geographies need two 2048-position windows,
+  6,666 need four. The directories hold exactly `2 × members` contiguous entries
+  (146 = 2 × 73; 828 = 2 × 414). Read four-wide, 006 folds two characteristics
+  into each "member" and reaches member 37 of 73 — past the span check's halfway
+  line by one — while 007 reaches 207 of 414 and fails it by one. The refusal
+  and the misdecode are the same bug on either side of an inequality.
+- **The last window's padding.** Under 6,666 the last window holds 522 real
+  positions, yet its pages carry ~1,275 values. A value in the padding tail has
+  no member to belong to. (`ivt_decode()` drops that tail silently, which is
+  how 006 lost cells without a word.)
+
+`ivt_count_contradicted()` (decode.R) asks exactly that of a set of counts —
+the detection gate, plus no value past `count − (windows − 1)·ipc` in the last
+window — and `ivt_f2_dim_count_chunk_veto()` (dimdir.R) makes the chunk-run
+adoption provisional: withdrawn when the container contradicts it and does not
+contradict the descriptor. Every table where the descriptor really was short
+keeps the recovery, because there the descriptor's count cannot read the pages
+either. Corpus effect: the two new rows, nothing else moved.
+
+Validation (file-internal, no external truth): both decode strict-clean at
+1 × 73 × 3,338 = 236,341 stored / 243,674 grid and 1 × 414 × 3,338 = 1,234,912
+stored / 1,381,932 grid (15,318 flagged, all legend-named). 36 CMA/CA rows +
+3,302 tracts in each, identical geography names; each CMA's population within
+random-rounding distance of the sum of its tracts in Part A (max |d| 85 over
+36); Part A 100 % population vs Part B 20 %-sample population correlate at
+0.999997 over all 3,338 geographies. St. John's reads 154,820.
+
+Left open: the padding-tail drop in `ivt_decode()` is still silent, and the
+chunk-run reader still skips partial chunks that look ordinal — the veto guards
+the consequence, not the cause.
+
 ## Milestones — how the architecture arrived
 
 ### The published table becomes the default output (2026-07-28)
