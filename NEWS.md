@@ -1,3 +1,35 @@
+# canivt 0.5.2
+
+* **The dimension descriptor and the table title are read as records, not as
+  text.** Every `81 01` / `81 02` block of the master directory is a block of
+  fixed-width records stored zero-suppressed -- a mask with one bit per record
+  byte, then only the non-zero bytes. The descriptor is an 82-byte record per
+  dimension (member count, type, short name, description) and the title a field
+  of the title record; both are now read that way (`R/records.R`), with the
+  earlier byte walk kept as the loud fallback. 38 corpus tables lose their
+  descriptor fallback warnings and 13 more become strict-clean; stored cell
+  counts are unchanged everywhere.
+
+* **Dimension names change on some tables, and with them the `cells` column
+  names.** A dimension is named by its short name unless that is a leading copy
+  of its description: the custom extracts' `"Housing TenureHousing tenure (5)"`
+  is `"Housing Tenure"`, the survey tables' `"Timeseries"` is `"Year"` or
+  `"Month"`, and truncated 2001 names are complete. 51 corpus tables are
+  affected.
+
+* **`metadata$title_en` / `title_fr` are filled from the title record** where
+  the identity text has none (custom extracts, Business Patterns, several
+  survey tables).
+
+* **The page directory can veto a member count taken from a chunk run.** On the
+  1981 census-tract profiles (97-570-X1981006 / 007) the run arithmetic doubled
+  the geography count; 006 had decoded wrong and 007 was refused. Both now
+  decode with the descriptor's own count.
+
+* **A descriptor head detached from its records block is followed through the
+  master directory**, which onboards the 1981 enumeration-area profile 2A
+  (2,257,784 stored cells).
+
 # canivt 0.5.1
 
 * **`read_ivt()` reports what the file did about zero-versus-missing, as
