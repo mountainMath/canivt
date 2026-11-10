@@ -1186,16 +1186,18 @@ ivt_f2_geo_dir_span <- function(raw) {
 #
 # `@544` -> the MASTER directory (at offset 992 on every known layout, also
 # reachable via `@992`/`@1000` and `@12` with one indirection). Its ~10 entries
-# cover whole-file sections in a stable order: [1] the FACET04 + EN title block,
-# [2] the descriptor's dimension RECORDS block (`81 02 <ndim> 00 <u16 len>`, the
-# doubled names), [3] the 14-16 byte descriptor HEAD (the `81 01 20 00 f0 ..`
+# cover whole-file sections in a stable order: [1] the EN title block, [2] the
+# descriptor's dimension RECORDS block (`81 02 <ndim> 52 00`, 82-byte records),
+# [3] the 14-16 byte descriptor HEAD (the `81 01 20 00 f0 ..`
 # signature `@32` points at; the records normally start where it ends, but the
 # two are separate blocks and can sit apart -- `ivt_f2_detached_records()`),
 # [4] the EN identity text (modern: the inline "Product ID: ... Title:
 # ..." block; legacy/2016: the out-of-line title + notes blob the header EN title
 # pointer `@48` also addresses), [5] the product-id string, [6-8] small framing
-# blocks, [9] the FACET04 + FR title, [10/11] the FR identity/notes blob. Decoded
-# on 98-10-0241/0023 (10 entries), 1003011 and 98-400-X2016387 (11).
+# blocks, [9] the FR title block, [10/11] the FR identity/notes blob. Decoded
+# on 98-10-0241/0023 (10 entries), 1003011 and 98-400-X2016387 (11). Every
+# `81 01` / `81 02` block among them is a zero-suppressed fixed-width record
+# (records.R).
 #
 # `@712` -> the DATA-QUALITY-FLAG LEGEND directory (2021 tables: 15 entries; the
 # pre-DGUID tables carry a 1-entry 6-byte stub). Entry 1 is a u32 index list; each

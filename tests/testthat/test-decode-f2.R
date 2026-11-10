@@ -539,7 +539,10 @@ test_that("1991 inline geography codebook decodes GEOUIDs and bilingual names", 
   # the header descriptor declares the dimensions even without an inline Variable List
   d <- ivt_f2_descriptor(raw)
   expect_equal(vapply(d$dims, function(x) x$count, 1L), c(41859L, 110L, 3L))
-  expect_match(d$title, "1991 Census")
+  # the title is the title record's own field; "1991 Census ..." is the source
+  # field beside it, which the text scan used to run into the title
+  expect_match(d$title, "^E9101 - Population by Single Years of Age")
+  expect_match(ivt_f2_title_blocks(raw)[[1L]]$source, "1991 Census")
 
   g <- ivt_f2_geo_inline(raw)
   expect_equal(nrow(g), 41859L)

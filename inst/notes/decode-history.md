@@ -1002,12 +1002,74 @@ all 545,481 cells unchanged. Its `cells` column slugs change accordingly. 24
 `02`-generation files resolve to the records block the same way with identical
 dimensions and warnings.
 
-Left open: the names in that lineage are a short display name followed by a
-longer description that is not a repeat of it ("Housing Tenure" + "Housing
-tenure (5)"), which the doubled-name splitter returns concatenated; the bytes
-between `81 02 <ndim> 00 <u16 len>` and the first record grow with the dimension
-count and probably hold the lengths. The title/bound match on the literal
-`FACET04` also misses the `FACET01`–`03` files (title `NA`).
+What that paragraph used to list as left open — the concatenated names and the
+`FACET04` literal — is the next entry.
+
+### The descriptor was never text: zero-suppressed records (2026-11-10)
+
+Two loose ends from the entry above looked unrelated. The custom-extract names
+came back concatenated ("Housing TenureHousing tenure (5)"), because the
+"doubled name" splitter expects the second copy to repeat the first. And the
+title was whatever followed the literal `FACET04`, so the files signed
+`FACET01`–`03` had none.
+
+Looking for a length field ahead of the title text turned up something else. The
+title block opens `81 01 04 03 ff ff ff ff …`; `0x0304` is 772, and the run of
+`ff` is exactly as long as a bitmap over 772 bytes would be if the text were
+dense at the front. Read as a mask — pair-swapped, MSB-first, the same
+addressing as a value page's presence bitmap — its popcount equals the number of
+bytes that follow, to the byte, and those bytes dropped into the set positions
+give `FACET04`, then three strings each starting on a 255-byte boundary. The
+block is a 772-byte record with its zeros removed.
+
+The same rule was then tried on every `81 01` / `81 02` block in every master
+directory in the corpus: **790 blocks, 790 exact fits** (padding bits zero, no
+stored zero, end at the directory entry's end). The dimension records block is
+`81 02 <ndim> 52 00` — `0x52` = 82 bytes per dimension:
+
+```
+[u32 count][u32 type][u32 flag][char name[16]][char description[50]][u32]
+```
+
+That one layout explains every special case the byte walk had accumulated:
+
+- the "truncated first copy (~14 chars)" is a 16-byte field with a terminator;
+- "u16 counts are tagged by the type byte" is a u32 whose zero bytes are absent;
+- the Business Patterns "geography record with no `01` separator" has flag 0;
+- the "double-01 ambiguity" is count 1 beside flag 1 with type 0 between them;
+- prose "bleeding into" a 2001 descriptor ("Geographyens (pGeographytut de r")
+  is stale buffer content left in the name field AFTER its NUL terminator — the
+  string ends at the NUL, and the record reads "Geography" / "Geography".
+
+`ivt_f2_descriptor()` now unpacks the block first (`records.R`). Corpus effect,
+measured by snapshotting every file's descriptor before and after: support
+verdicts and member counts identical on every file but one; **38 files lose
+their descriptor fallback warnings** (`canivt_descriptor_lenient`,
+`_from_slots`, `canivt_declared_count`, several `canivt_chunked_count`), because
+the count that used to be rebuilt from the codebook is simply declared; 51 files
+get corrected names. The one count change is `00040231`, whose block declares a
+third dimension — a one-member "Date" the walk never saw; its 6,540 published
+rows are unchanged and gain a `date` column, like its siblings `00040200/207`.
+Thirteen ledger rows become fully `strict_clean`; stored cell counts are
+identical on all 178.
+
+Two things the declared read does **not** settle:
+
+- On the `02 00 20 00` generation the record count is not always the member
+  count — the sub-A Business-Register files declare PROV/CAN 15 where the
+  reconciled read has 13, CA/CMA 255 for 141. Adopting it lost the sub-A
+  reconciliation on five files, so that generation keeps the codebook as its
+  count source and takes names and types only.
+- Which text field is "the name" is a choice. The rule adopted compares the two
+  fields of the record and nothing else: description when the short name is a
+  leading copy of it, short name otherwise. It reproduces what the walk returned
+  on the census lineage and on `CRO0166131`, and makes its sibling `CRO0163850`
+  consistent with it ("Housing Tenure", not the concatenation).
+
+The lesson is the one the cell-status tail taught in July: a region that needs a
+growing list of framing exceptions is being read at the wrong level. The mask
+was in plain sight as the descriptor "signature" — `f0 .. .. 80` are the first
+mask bytes of the 32-byte head record.
 
 ## Milestones — how the architecture arrived
 

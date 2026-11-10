@@ -173,6 +173,37 @@ page = [4B marker][rec_bytes presence][ INDEX = the whole pre-value region ][val
 Recognizer: `ivt_page_status()` (status.R), reader `ivt_mask_bits()`; reached only
 via `read_ivt(missing = TRUE)`.
 
+## D.0 Zero-suppressed records — the storage of every `81 01` / `81 02` block
+
+```
+81 01 <u16 nbytes>                 <mask> <stored bytes>     one record
+81 02 <u16 nrec> <u16 recbytes>    <mask> <stored bytes>     nrec records
+```
+
+`<mask>` holds one bit per record byte (`nrec · recbytes` of them), padded to a
+16-bit word, its bytes **pair-swapped** and read **MSB-first** — the presence
+bitmap's convention (§J). A set bit means the byte is stored, in order, in the
+run that follows; a clear bit means it is zero. Recognizer `ivt_zs_block()`
+(`R/records.R`), gated three ways: padding bits clear, no stored byte zero, and
+the block ending exactly where its directory entry does. All **790** such blocks
+the corpus's master directories name fit (313 `81 02`, 477 `81 01`).
+
+| block | record | read by |
+|-------|--------|---------|
+| `81 02 <ndim> 52 00` | **82-byte dimension record**: `[u32 count][u16 type][u16 class][u32 flag][char short name 16][char description 50][u32 ?]` — master-directory row [2] | `ivt_f2_dimrec_block()` / `ivt_f2_dimrec_dims()` |
+| `81 01 04 03` (772 bytes) | **title block**: `[char sig 7 = "FACET0<digit>"][char title 255][char source 255][char series 255]` — rows [1] (EN) and [8]/[9] (FR) | `ivt_f2_title_blocks()` |
+| `81 01 c3 00` (195 bytes) | the `02`-generation title block: `[sig 7][title 60][source 64][series 64]` | `ivt_f2_title_blocks()` |
+| `81 01 20 00` | the 32-byte descriptor head; §D's "signature" bytes `f0 .. .. 80` are its mask | located only (`ivt_f2_is_descriptor()`) |
+| `81 02 <n> 00 20 00`, `81 02 02 00 56 00` | 32- and 86-byte records | fit the storage; fields not read |
+
+The text walk of §D reads the same dimension records *without* the mask, which
+is where its special cases came from: a u8-or-u16 count (one u32 whose zero high
+bytes are not stored), a missing `01` separator (the flag field is 0), a
+truncated first name copy (a 16-byte field), the double-01 record (count 1,
+type 0, flag 1), and the 2001 "prose bleed" (stale bytes after the name field's
+NUL). `ivt_f2_descriptor()` reads the records first and quietly; §D's walk is
+the loud fallback for a file with no records block.
+
 ## D. Dimension-descriptor signature (9 bytes)
 
 `81 01 20 00 f0 .. .. 80 [b9]` — opens the descriptor block on **every** layout.
@@ -431,6 +462,11 @@ layout.
 
 ## Change log
 
+- **2026-11-10** — **The `81 01` / `81 02` blocks are zero-suppressed
+  fixed-width records** (§D.0). A mask of one bit per record byte, then the
+  non-zero bytes. The dimension descriptor is an 82-byte record per dimension
+  and the title a field of the title block; both are now read as records
+  (`R/records.R`), and the §D byte walk and the `FACET04` literal are fallbacks.
 - **2026-11-10** — **The descriptor head and its records are two blocks** (§D).
   The master directory lists the `81 02 <ndim> 00` records block and the
   signature head as separate rows; `ivt_f2_detached_records()` follows the

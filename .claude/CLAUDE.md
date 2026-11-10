@@ -83,6 +83,7 @@ Key semantics:
 | `decode-f2.R` | presence-bitmap primitives; the grid carries its bit addressing precomputed |
 | `status.R` | the page cell-status tail + the `@698` reason-code legend |
 | `complete.R` | the published table: grid fold, code → `symbol`/`status` factors |
+| `records.R` | zero-suppressed fixed-width records (every `81 01` / `81 02` master-directory block): the title block and the 82-byte dimension records — **the primary descriptor read** |
 | `dimdir.R` | bilingual labels, dimension names, the `@824` header slot table, count reconcile |
 | `codebook-f2.R` | the unified codebook: geography dispatcher + specializer chain, slot/time declarations, slugs |
 | `read-f2.R` | unified metadata + tidy, dimensions, footnotes |
@@ -209,20 +210,37 @@ and [`coverage.md`](../inst/notes/coverage.md).
 
 ### Descriptor and dimension identity
 
-- **`ivt_f2_descriptor()` anchors dimension records on the doubled name**, not a
-  fixed marker: the **first copy may be truncated** (~14 chars; longest matching
-  prefix wins), and the name may start with an uppercase letter **or a digit**.
-  The type byte is a storage/classification tag, **not** dimension identity. The
-  header **`n_dim` field is unreliable** — gate on `length(d$dims)`. Handles the
-  **INVERTED layout** and **PROSE-BLEED names** (2001 F-series).
+- **The `81 01` / `81 02` master-directory blocks are ZERO-SUPPRESSED fixed-width
+  records** (`records.R`): a mask with one bit per record byte (pair-swapped,
+  MSB-first, like a presence bitmap) followed by the non-zero bytes only. Gate:
+  padding bits zero, no stored zero, block ends where its directory entry ends.
+  Read them through `ivt_zs_block()`, never as text — "doubled names", "u8 vs
+  u16 counts" and "a missing `01` separator" were all this storage seen without
+  its mask.
+- **`ivt_f2_descriptor()` reads the 82-byte dimension RECORDS block first**
+  (`[u32 count][u32 type][u32 flag][short name 16][description 50][u32]`),
+  quietly, on an exact fit. `name` is the description when the short name is a
+  leading copy of it, otherwise the short name. On the `02` generation the
+  record count can exceed the member count, so the codebook stays the count
+  source there and the records supply names only.
+- **The byte walk is the loud fallback** for a file with no records block: it
+  anchors on the doubled name (the **first copy may be truncated**, ~14 chars;
+  the name may start with an uppercase letter **or a digit**) and handles the
+  **INVERTED layout** and **PROSE-BLEED names**. The type is a
+  storage/classification tag, **not** dimension identity. The header **`n_dim`
+  field is unreliable** — gate on `length(d$dims)`.
+- **The title is the title block's field, not text after a literal**: the
+  signature is `FACET0<digit>` (a revision digit), and `metadata$title_en` /
+  `title_fr` fall back to the block where the identity text has none.
 - **Geography is the first descriptor dimension EXCEPT the profile lineage**
   (`ivt_f2_geo_dim_index()` — a 1-member "Values" placeholder first, geography
   LAST). Identification is **never by type byte**: the geography type is a
   storage-width tag for the member count (**u16** for
   `0x10`/`0x0d`/`0x0a`/`0x0c`/`0x09`/`0x0f`, u8 otherwise). Use
   `ivt_f2_geo_count()`, **not** `ivt_f2_header_geo_count()`, for any geography
-  sizing. A reference-period / facet dimension (type `0x0e`) is **not**
-  geography-folded.
+  sizing. A reference-period / facet dimension is **not** geography-folded
+  (the `0x0e` the byte walk reads as its "type" is a zero-suppression mask byte;
+  the record's type word is 1).
 - `cells` data columns are named by a purely generic, **name-agnostic slug**
   (`ivt_dim_slug()`), in descriptor order, so `geo` need not be first. **No code
   branches on dimension names or type bytes** — everything the decoder needs is

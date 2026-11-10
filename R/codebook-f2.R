@@ -4027,14 +4027,75 @@ ivt_f2_descriptor <- function(raw)
   ivt_memo(raw, "descriptor",
            function() ivt_f2_suba_annotate(raw, ivt_f2_descriptor_impl(raw)))
 
+# The descriptor as the dimension records block declares it (records.R), or NULL
+# when the file has no such block at the place asked: the master directory
+# (`D = NULL`) or around the descriptor offset `D`. Quiet -- a declaration read
+# on an exact fit is not a fallback. The counts still go through
+# `ivt_f2_dim_count_reconcile()`, which is what reads each dimension's declared
+# slot positions.
+ivt_f2_descriptor_declared <- function(raw, D = NULL) {
+  b <- tryCatch(ivt_f2_dimrec_block(raw, D), error = function(e) NULL)
+  dims <- if (is.null(b)) NULL
+          else tryCatch(ivt_f2_dimrec_dims(raw, b), error = function(e) NULL)
+  if (is.null(dims) || !length(dims)) return(NULL)
+  dims <- ivt_f2_dim_count_reconcile(raw, dims)
+  out <- list(n_dim = length(dims), dims = dims,
+              title = ivt_f2_declared_title(raw)$en, declared = TRUE)
+  out
+}
+
+# Name the `02`-generation descriptor from the dimension records block. That
+# generation's counts come from the codebook (`ivt_f2_descriptor_02()`), whose
+# name read picks up neighbouring bytes ("SEXods", "Periodser"); the records
+# block holds each name in a fixed field. Adopted only when the block declares
+# exactly the dimensions the codebook read found, so the two are aligned by
+# position; counts are never touched.
+ivt_f2_descriptor_02_named <- function(raw, d02) {
+  b <- tryCatch(ivt_f2_dimrec_block(raw), error = function(e) NULL)
+  if (is.null(b)) {
+    D <- ivt_quietly(tryCatch(ivt_f2_descriptor_offset(raw),
+                              error = function(e) NULL))
+    if (!is.null(D)) b <- tryCatch(ivt_f2_dimrec_block(raw, D),
+                                   error = function(e) NULL)
+  }
+  rec <- if (is.null(b)) NULL
+         else tryCatch(ivt_f2_dimrec_dims(raw, b), error = function(e) NULL)
+  if (!is.null(rec) && length(rec) == length(d02$dims)) {
+    for (k in seq_along(rec))
+      d02$dims[[k]][c("name", "type", "short_name", "description")] <-
+        rec[[k]][c("name", "type", "short_name", "description")]
+    d02$declared_names <- TRUE
+  }
+  tt <- ivt_f2_declared_title(raw)$en
+  if (!is.na(tt)) d02$title <- tt
+  d02
+}
+
 ivt_f2_descriptor_impl <- function(raw) {
   n <- length(raw)
+  # PRIMARY read: the dimension RECORDS block, a zero-suppressed table of 82-byte
+  # records the master directory names (records.R). It declares every
+  # dimension's count, type and both name fields in fixed positions, and is
+  # accepted only on an exact fit, so nothing below it is needed where it exists
+  # -- the byte walk further down reads the same block WITHOUT its mask and is
+  # kept as the loud fallback for a file that carries no such block.
+  #
+  # The `02 00 20 00` survey generation is the exception for COUNTS: its record
+  # count can exceed the member count (the sub-A Business-Register files declare
+  # PROV/CAN 15 where 13 members exist, CA/CMA 255 for 141), so the codebook read
+  # below stays its count source and the records supply names and types only.
+  gen02 <- length(raw) >= 1L && as.integer(raw[1L]) == 0x02L
+  if (!gen02) {
+    dec <- ivt_f2_descriptor_declared(raw)
+    if (!is.null(dec)) return(dec)
+  }
   # The older `02 00 20 00` survey generation (file byte 0 == 0x02) frames its
   # descriptor block irregularly; read its dimensions from the (regular) codebook
   # instead. Falls through to the byte-walk when the slot table does not resolve.
   if (length(raw) >= 1L && as.integer(raw[1L]) == 0x02L) {
     d02 <- tryCatch(ivt_f2_descriptor_02(raw), error = function(e) NULL)
-    if (!is.null(d02) && length(d02$dims) >= 1L) return(d02)
+    if (!is.null(d02) && length(d02$dims) >= 1L)
+      return(ivt_f2_descriptor_02_named(raw, d02))
   }
   D <- ivt_f2_descriptor_offset(raw)
   # No descriptor BLOCK anywhere (no signature, @32 == 0, no master-dir / scan hit):
@@ -4055,6 +4116,11 @@ ivt_f2_descriptor_impl <- function(raw) {
     return(fs)
   }
   D <- as.integer(D)
+  # the records block again, now from the descriptor offset: a file without a
+  # master directory still has it where the head ends (or, inverted, ending
+  # where the head starts)
+  dec <- ivt_f2_descriptor_declared(raw, D)
+  if (!is.null(dec)) return(dec)
   ndim <- rd_u16(raw, D + 16L)
 
   # Walk a bounded byte region for dimension records; a record is a 0x01 whose
@@ -4207,7 +4273,14 @@ ivt_f2_descriptor_impl <- function(raw) {
   # the dimension records sit between the fixed header and the "FACET04" title;
   # bound the search there so stray 0x01 bytes in later binary do not match.
   txt <- intToUtf8(ifelse(v >= 32L & v <= 126L, v, 46L))
-  facet <- regexpr("FACET04", txt)
+  # The title block is a master-directory block of its own (records.R), so its
+  # offset bounds the records where the directory names it; the signature text
+  # is searched for only on a file without that directory. The signature is
+  # "FACET0<digit>" -- the digit is a format revision, not a constant.
+  facet <- -1L
+  for (tb in ivt_f2_title_blocks(raw))
+    if (tb$off > D + 18L && tb$off < win) { facet <- tb$off - D + 1L; break }
+  if (facet < 0L) facet <- as.integer(regexpr("FACET0[0-9]", txt))
   Lend <- if (facet > 0) facet - 1L else {
     # The older `02 00 20 00` container generation (Health Statistics 1999,
     # Census of Agriculture 1996, Small Area Business 1996) carries no "FACET04"
@@ -4391,8 +4464,14 @@ ivt_f2_descriptor_impl <- function(raw) {
     }
   }
 
-  title <- regmatches(txt, regexpr("FACET04[^.]*", txt))
-  title <- if (length(title)) trimws(sub("FACET04", "", title)) else NA_character_
+  # the title as the title block declares it; the text after the signature only
+  # on a file whose master directory names no such block
+  title <- ivt_f2_declared_title(raw)$en
+  if (is.na(title)) {
+    title <- regmatches(txt, regexpr("FACET0[0-9][^.]*", txt))
+    title <- if (length(title)) trimws(sub("FACET0[0-9]", "", title))
+             else NA_character_
+  }
   # The double-01-framed records are AMBIGUOUS: the genuine reference-period
   # record is [type][count][01][01]<name> ("Year (2)": 0e 02 01 01), but the
   # profile lineage's placeholder "Values" dimension shares the byte shape

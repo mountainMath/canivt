@@ -285,6 +285,15 @@ geography *last*); the nesting handles that with no special case, because it is
 purely positional. Exactly one dimension straddles the 2048-bit page boundary
 (§ below), which is what the historical "family" label really named.
 
+The descriptor itself is a block of fixed-width **records**, 82 bytes per
+dimension — a member count, a type tag, a 16-byte short name and a 50-byte
+description — stored *zero-suppressed*: a mask with one bit per record byte,
+followed by only the non-zero bytes. The same storage holds the table title
+(one field of a 772-byte title record) and every other `81 01` / `81 02` block
+the master directory lists. Read with its mask, a record gives its fields
+directly; read as text, the same bytes look like a name written twice behind a
+count of varying width.
+
 ```{r}
 meta <- ivt_metadata(ivt_download("98100023"))
 data.frame(dimension = meta$dimension_names,

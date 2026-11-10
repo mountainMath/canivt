@@ -42,7 +42,9 @@ test_that("the descriptor recovers the reference-period (facet) dimension of 98-
   expect_equal(vapply(d$dims, function(x) x$count, 1L),
                c(174L, 9L, 5L, 18L, 6L, 22L, 2L))
   year <- d$dims[[7L]]
-  expect_equal(year$type, 0x0eL)             # reference-period / facet type byte
+  # the record's type word is 1; the `0e` the byte walk called a
+  # "reference-period type" is a byte of the block's zero-suppression mask
+  expect_equal(year$type, 1L)
   expect_equal(year$count, 2L)
   expect_match(year$name, "^Year")
   # the descriptor geography count is 174. Year is the innermost *in-page*

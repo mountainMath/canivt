@@ -93,7 +93,7 @@ every pointer resolves to a block directory of the same 8-byte entry shape
 
 ```
 u32 @544  → the MASTER directory (at offset 992; ~10 entries covering the whole
-            file: FACET04 titles EN/FR, the descriptor as TWO entries — [2] its
+            file: the EN/FR title blocks, the descriptor as TWO entries — [2] its
             dimension-records block `81 02 <ndim> 00 <u16 len>` and [3] its
             14–16 byte head `81 01 20 00 f0 ..`, normally adjacent (head
             first) but separately addressed — the EN/FR identity/notes blobs
@@ -894,6 +894,94 @@ exports out-of-line title blocks at header `@40`/`@48`. The 1981 profile has
 up empty — this also fills the previously-NA identity on the 1996 and 2016
 `98-400-X` tables.
 
+## Zero-suppressed records (the `81 01` / `81 02` blocks)
+
+Every block the master directory lists under an `81 01` or `81 02` tag is a
+**fixed-width record with its zero bytes removed** (`records.R`):
+
+```
+81 01 <u16 nbytes>               <mask> <stored bytes>     one record
+81 02 <u16 nrec> <u16 recbytes>  <mask> <stored bytes>     nrec records
+```
+
+The mask has one bit per record byte, addressed exactly like a value page's
+presence bitmap — bytes **pair-swapped**, bits **MSB-first**, padded to whole
+16-bit words. A set bit means "this byte is stored"; a clear bit means "this
+byte is zero" and nothing was written for it. The stored bytes follow in record
+order. The block length is therefore a function of the content, and the read is
+gated three ways: padding bits past the last record byte are zero, no stored
+byte is zero, and the block ends where its directory entry ends. Corpus-wide
+**790 of 790** such blocks fit (313 `81 02`, 477 `81 01`).
+
+Seen without the mask these blocks look like free text with irregular framing,
+which is how they were first read. Each oddity of that reading is the
+suppression:
+
+| what the byte walk saw | what the record holds |
+|---|---|
+| a dimension name "stored twice", first copy cut at ~14 characters | two fields: a 16-byte short name (NUL-terminated, so ≤ 15 characters) and a 50-byte description |
+| a count that is u8 or u16 "depending on the type byte" | one u32; its zero high bytes are not stored |
+| a geography record with no `01` separator | the flag field is 0, so no byte is stored for it |
+| a `[type][count] 01 01` record whose count sits elsewhere | the same three u32s with different bytes zero |
+| French prose "bleeding" between the two name copies (2001) | stale bytes left in the name field after its NUL terminator; the string ends at the NUL |
+| title, source and series text run together | three fixed text fields whose NUL padding is suppressed |
+
+Three record shapes are identified:
+
+**The dimension records** — `81 02 <ndim> 52 00`, 82 bytes per dimension, in
+descriptor order (master-directory row [2]):
+
+```
+ 0- 3  u32   member count
+ 4- 5  u16   type tag (storage / classification, never identity)
+ 6- 7  u16   class word: 0 almost everywhere; where set, 1 on a geography
+             and 2 on a time dimension (28 corpus dimensions) — carried as
+             `class`, not read: most geographies leave it 0
+ 8-11  u32   flag (1; 0 on some geography records)
+12-27  char  short name, NUL-terminated
+28-77  char  description, NUL-terminated
+78-81  u32   unidentified
+```
+
+`ivt_f2_descriptor()` reads this block first and returns each dimension's
+`count`, `type`, `short_name`, `description` and a `name` chosen from the two
+text fields by their relation alone: the description when the short name is a
+leading copy of it (the census record — "Household Size " / "Household Size
+(3)"), the short name otherwise (a custom extract's display name beside an
+unrelated description — "CondoStat/Type" / "Condominium status and structural
+type" — or a survey variable beside its label — "REGION" / "Canada, Provinces
+and Territories"). The block is found from the master directory, else where the
+descriptor head ends, else ending where the head starts (the inverted layout).
+The byte walk described under "The dimension descriptor" below remains as the
+loud fallback for a file with no such block (in the corpus: the two CMHC movers
+tables whose descriptor region is overwritten by a footnote, and a handful of
+`02`-generation files without a master directory).
+
+On the `02 00 20 00` survey generation the record's count can exceed the member
+count (the sub-A Business-Register files declare PROV/CAN 15 for 13 members,
+CA/CMA 255 for 141), so there the codebook stays the count source and the
+records supply names and types only (`ivt_f2_descriptor_02_named()`).
+
+**The title block** — one `81 01` record, listed twice (English, then French;
+rows [1] and [8]/[9]):
+
+```
+772 bytes (`04` generation)   sig[7]  title[255]  source[255]  series[255]
+195 bytes (`02` generation)   sig[7]  title[60]   source[64]   series[64]
+```
+
+`sig` is the text `FACET0<digit>`; the digit is a format revision (`FACET04` on
+most files, `01`–`03` on older ones), not a constant to match on.
+`ivt_f2_title_blocks()` reads it; `metadata$title_en` / `title_fr` fall back to
+it where the identity text supplies none.
+
+**The descriptor head** — `81 01 20 00`: one 32-byte record. Its first mask
+bytes are the `f0 .. .. 80` that `ivt_f2_is_descriptor()` matches as a
+signature. The fields are not decoded.
+
+A fourth shape, `81 02 <n> 00 20 00` (32-byte records, master-directory row
+[6]/[7]), fits the storage rule and is otherwise unread.
+
 ## The older `02 00 20 00` survey-generation container
 
 Every table discussed so far starts with the 4-byte signature `04 00 20 00`. A
@@ -1070,7 +1158,13 @@ before relying on it beyond these two eras).
 
 The descriptor block (header `@32`) declares **every** dimension, in both formats,
 so it is the file's own statement of the dimension structure (the legacy format
-has no inline "Variable List" to parse). Layout:
+has no inline "Variable List" to parse).
+
+**Superseded as the primary read (2026-11-10):** the records are a
+zero-suppressed table of fixed 82-byte records — see "Zero-suppressed records"
+above — and `ivt_f2_descriptor()` unpacks that. What follows describes the same
+bytes as the mask-less byte walk sees them; it is the loud fallback and the
+historical record of how the counts were first found. Layout as walked:
 
 ```
 desc+16  u16   number of dimensions (3 / 3)

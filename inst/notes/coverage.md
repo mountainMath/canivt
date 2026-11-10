@@ -163,6 +163,32 @@ decoded (see below).
   of `32·(b3−8)` bytes (`b3 ∈ {08..0e}`); value run starts at
   `4 + presence_len + trailer + head` (`ivt_value_trailer()`).
 
+## [x] The descriptor and the title are records, not text (2026-11-10)
+
+Every `81 01` / `81 02` block the master directory lists is a **zero-suppressed
+fixed-width record** block (markers.md §D.0, `R/records.R`) — 790 of 790 in the
+corpus fit, gated on the padding bits, on no stored zero, and on the block ending
+where its directory entry ends. Two of them are now read as records:
+
+- **the dimension descriptor** — 82 bytes per dimension (count, type, class,
+  flag, short name, description). `ivt_f2_descriptor()` reads it first and
+  quietly; the doubled-name byte walk is the loud fallback. 38 corpus files lose
+  descriptor fallbacks (`canivt_descriptor_lenient` / `_from_slots` /
+  `canivt_declared_count`), 13 of them becoming fully strict-clean (ledger
+  flipped), and 51 files get corrected dimension names — the custom extracts'
+  concatenated `"Housing TenureHousing tenure (5)"` is `"Housing Tenure"`.
+  Verdicts and stored cell counts are unchanged on all 178 ledger rows; one
+  table gains a declared dimension (`00040231`'s 1-member "Date", same cells).
+- **the table title** — a field of the title record, English and French, so
+  `metadata$title_en` / `title_fr` are filled on the lineages whose identity
+  text has none, and the `FACET04` literal is no longer a parsing anchor.
+
+Left as they were: three files with no records block where the directory or the
+descriptor head would put one (`CMHC2016_movers_T2`, `h2530002`,
+`PROVSIC4dec1997` keep their loud descriptor fallbacks), and the `02`
+generation's member COUNTS, where the record count can exceed the member count
+and the codebook stays the source (the records supply names only).
+
 ## [~] Read but not surfaced (recoverable, just not exposed)
 
 - [~] Block-framing `<u16>` length prefixes — we scan instead of using them.
@@ -191,8 +217,13 @@ decoded (see below).
   pursued; they sit beside `@552` (geography field count) and `@572` (codebook
   region start) and are most likely more of the same bookkeeping. Recorded so
   the count is not re-derived: they are the *only* unnamed scalars below `@824`.
-- [?] Descriptor sub-header bytes (`f0 20 00 80`, `8f c8 0f f8`, per-dimension
-  display masks `f3 ff f0 ff` / `c0 ff c0 ff`).
+- [x] Descriptor sub-header bytes (`f0 20 00 80`, `8f c8 0f f8`, per-dimension
+  "display masks" `f3 ff f0 ff` / `c0 ff c0 ff`) — **answered** (2026-11-10):
+  they are the **zero-suppression masks** of the `81 01` / `81 02` record blocks,
+  one bit per record byte (markers.md §D.0). What stays `[?]` is inside the
+  records: the 32-byte descriptor head's fields, the dimension record's last
+  u32 and its `class` word (1 on some geographies, 2 on some time dimensions),
+  and the 32- / 86-byte record blocks nothing reads.
 - [x] What the `b2` trailer / `b3` head bytes *contain* — **answered**
   (2026-07-27): the whole pre-value region is the **index bitmap** of the page's
   trailing cell-status block, one bit per value-width word. It was catalogued
@@ -500,7 +531,7 @@ each lineage (narrative + validation records in
 | 1991 enumeration-area census (1006454 / PID 128) | chunk-run count probe on every dimension (geo `count 52` = chunk count → 13,372 EAs, 8,308,875 cells) |
 | 1996 (94F0009XDB96078, 95F0250XDB96001, 95F0223XDB96001, 95F0200XDB96003, b28ea47, 95f0205xdb96003) | digit-initial descriptor names, `@558` `k = 2`, chunked counts |
 | 1981/1986 profiles (97-570-X1981002–005, 97-570-X1986002–005) | geography-LAST lineage (`ivt_f2_geo_dim_index()`), double-01 count reconcile, INVERTED descriptor |
-| 1981 EA profile 2A (ea_profile_1981_2A) | a descriptor HEAD detached from its RECORDS block (`ivt_f2_detached_records()`): `@32` is zero and the master directory's head row points at a copy far from the records, so the walk starts at the records block the directory names in the row before. 70 characteristics × 41,197 EAs, 2,257,784 stored; not strict-clean (the geography record has no `01` separator — `canivt_descriptor_lenient`, as on 2B) |
+| 1981 EA profile 2A (ea_profile_1981_2A) | a descriptor HEAD detached from its RECORDS block (`ivt_f2_detached_records()`): `@32` is zero and the master directory's head row points at a copy far from the records, so the walk starts at the records block the directory names in the row before. 70 characteristics × 41,197 EAs, 2,257,784 stored; not strict-clean (bare-code geography, `canivt_geo_bare_codes`; the descriptor itself has been a quiet record read since 2026-11-10) |
 | 1981 CT profiles Part A/B (97-570-X1981006, 97-570-X1981007) | the container's **veto** over a chunk-run count (`ivt_f2_dim_count_chunk_veto()`): the descriptor's 3,338 geographies was right, the run arithmetic's 6,666 put values in the last window's padding — 006 had decoded *wrong* (37 of 73 characteristics), 007 was refused |
 | 2001 F-series (97F0020XCB2001070, 97F0015XCB2001041, 95f0487/95f0491/95f0494/95f0338/95F0377/97F0007) | `0x09` u16 width tag; prose-bleed name recovery; chunked-count reconcile |
 | 2001 census DA-level (95f0437xcb01001, pid59227) | the descriptor record as a count oracle — a rebuilt descriptor's "256" is the codebook chunk size (`ivt_f2_desc_declared_count()`); plus the member-count bound on ordinal runs, so consecutive DA codes stop faking a delimiter |

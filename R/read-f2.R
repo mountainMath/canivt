@@ -475,6 +475,24 @@ ivt_f2_metadata <- function(raw, dir = NULL) {
     mi <- ivt_f2_master_identity(raw)
     if (!is.null(mi)) info <- mi
   }
+  # The title block (records.R) declares the table title in both languages on
+  # every file whose master directory names one; it fills what the identity text
+  # did not supply (custom extracts, Business Patterns, the survey generations).
+  # An identity "title" that is empty or holds control bytes is not a title: the
+  # inline scan ran into binary (a Business-Patterns header has no identity
+  # text at all). Drop it so the declared one can stand.
+  for (k in c("title_en", "title_fr")) {
+    t <- info[[k]]
+    if (!is.null(t) && !is.na(t) &&
+        (!nzchar(trimws(t)) || grepl("[\001-\010\016-\037]", t, useBytes = TRUE)))
+      info[[k]] <- NA_character_
+  }
+  if (is.na(info$title_en) || is.na(info$title_fr)) {
+    tt <- ivt_f2_declared_title(raw)
+    if (is.na(info$title_en)) info$title_en <- tt$en
+    if (is.na(info$title_fr) && !identical(tt$fr, info$title_en))
+      info$title_fr <- tt$fr
+  }
   dims <- ivt_f2_dimensions(raw)
   n_geo <- ivt_f2_geo_count(raw)
   # `n_geo == 0`: the table has NO geography dimension (the survey generations'
