@@ -963,6 +963,57 @@ Left open: the padding-tail drop in `ivt_decode()` is still silent, and the
 chunk-run reader still skips partial chunks that look ordinal — the veto guards
 the consequence, not the cause.
 
+### ea_profile_1986_2A / 2B — a description + code dictionary is not an EN/FR pair (2026-11-10)
+
+Issue #5: the 1986 EA profiles returned `geo_uid = NA` for all 44,042
+geographies, with the 8-digit EA identifier in `geo_name_fr`. The geography is
+stored data-style (`ivt_f2_geo_datadim()`), and its field dictionary is
+`Geography desc. | Geography code | _Sort` — a description and a code, no
+language pair. The generic label reader knows only the English / French
+vocabulary, so it took the two dense runs for a language pair by content score
+(loudly) and the code landed in the French column. `ivt_f2_geo_field_role()` did
+not recognise "Geography code" at all (`GEO.?CODE` allowed one character between
+the words).
+
+`ivt_f2_geo_datadim_declared()` now reads such a dictionary by its own
+declaration, ahead of the generic reader: the dense (non-`_`) fields must all
+carry a role, exactly one of them the name, none French, at least one a code,
+and be as many as the dimension's text runs — then run *i* is field *i*. A
+declared code with no separate UID column is the member's identifier and is
+surfaced as `geo_uid`. Still `canivt_geo_datadim` (loud); the content-score
+language warning no longer fires on these files.
+
+Validation: 44,042 unique 8-digit `geo_uid`s, set-equal to `EAUID` in the 1986
+geographic attribute file (0 missing either way), identical and in the same
+order in 2A and 2B. The description is the EA's CSD name with its type appended
+("BRIGUS T", "NORTH RIVER CO"): `CSDNAME` is a prefix of it on 99.0 % of EAs.
+
+Left open: `canivt_descriptor_reloc` ("`@32` does not resolve; located by
+signature scan") fires 17 times in one `ivt_metadata()` call on these files.
+
+### ea_profile_1981_2B — rows 418–422 are wrong IN THE SOURCE FILE past EA 4,096 (2026-11-10)
+
+Issue #6: the last five characteristics (the shelter-cost rows: average gross
+rent, rent > 25 %, owner one-family households, average owner payments, owner
+payments > 25 %) decode to implausible values. **The decode is right; the file
+does not hold the expected values.** Recorded so it is not re-investigated.
+
+- Layout: 2,048 EAs per page, 21 windows × 422 characteristics. All 8,862
+  directory entries are populated and the pages tile bytes 165,652–29,720,040
+  exactly — no gap, no overlap, nothing unreferenced. All five rows carry the
+  same `82 01 80 08` (int16) pages as their neighbours; no cell is flagged.
+- The break is at **EA 4,096 exactly** (two pages), on all five rows and on no
+  other. Before it the rows are plausible (rent median $253; rows 419/422 97–98 %
+  multiples of 5; row 420 correlates 0.94 with owned dwellings). After it they
+  are not (rent median $29; 3 % and 19 % multiples of 5; rows 420/421 nearly
+  empty — their pages shrink from ~3,500 to ~550 bytes).
+- EA 4,096 is `24001253`, mid-Quebec: the break is not geographic. Row 420's EA
+  sum is 9.7 % of the Canada total; 4,096 / 41,197 is 9.9 %.
+
+The original is dated 2008-08-11, two years after the other three EA profile
+files of the same delivery. No warning was added: it could only be a content
+plausibility heuristic, and the file's own status mask says nothing here.
+
 ### ea_profile_1981_2A — a descriptor head detached from its records (2026-11-10)
 
 The second file of issue #3: the 1981 EA profile 2A read **0 dimensions** while

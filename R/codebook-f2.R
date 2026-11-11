@@ -1058,7 +1058,7 @@ ivt_f2_geo_field_role <- function(field) {
     if (grepl("UID|IDU", u)) "geo_uid"
     else if (grepl("FRAN", u)) "geo_name_fr"           # "Desc Francais" / "Francais"
     else if (grepl("LEVEL|NIVEAU", u)) "geo_level"
-    else if (grepl("ALT.?GEO|GEO.?CODE", u)) "geo_code"
+    else if (grepl("ALT.?GEO|GEO[A-Z]*.?CODE", u)) "geo_code"   # "Geo Code" / "Geography code"
     else if (grepl("DESC|NAME|NOM", u)) "geo_name"
     else if (grepl("^DQ|DQF", u)) "dqf_code"
     else if (grepl("GNR|TGN|TNR", u)) "tnr_short_form"
@@ -1342,6 +1342,11 @@ ivt_f2_geo_datadim <- function(raw, n_geo) {
     return(NULL)                                                # uid-bearing -> combined
   d <- ivt_f2_descriptor(raw); if (is.null(d) || !length(d$dims)) return(NULL)
   gi <- ivt_f2_geo_dim_index(raw, d)
+  # A dictionary that DECLARES a description + code pair is read by that
+  # declaration, before the generic label reader can take the two runs for an
+  # English / French pair.
+  dc <- ivt_f2_geo_datadim_declared(raw, d$dims[[gi]], ents$dir, schema, n_geo)
+  if (!is.null(dc)) return(dc)
   lab <- ivt_f2_dim_dir_label1(raw, d$dims[[gi]], ents$dir)
   if (is.null(lab) || is.null(lab$en) || length(lab$en) != n_geo || anyNA(lab$en))
     return(NULL)
@@ -1368,6 +1373,65 @@ ivt_f2_geo_datadim <- function(raw, n_geo) {
   }
   list(geo_label = lab$en, geo_name = lab$en, geo_name_fr = fr,
        geo_uid = rep(NA_character_, n_geo))
+}
+
+# A data-style geography whose field dictionary declares a DESCRIPTION and a CODE
+# column rather than an English / French pair -- the 1986 EA profiles
+# (`ea_profile_1986_2A` / `_2B`): "Geography desc." | "Geography code" | "_Sort",
+# 44,042 enumeration areas, the description being the EA's CSD name and the code
+# its 8-digit EA identifier. The generic label reader knows only the EN/FR
+# vocabulary, so it took the two dense runs for a language pair (by content
+# score) and the EA identifier surfaced as `geo_name_fr`, with `geo_uid` all NA.
+#
+# Here the file's own dictionary maps the runs: its DENSE fields (the ones not
+# `_`-prefixed -- `_Sort` / `_Description` / `_ItemNotes` are internal or sparse,
+# see dim-members.R) must every one carry a role, exactly one of them the name,
+# none of them French, at least one a code, and they must be as many as the
+# dimension's text runs -- then run i IS field i, in dictionary order. The code a
+# dictionary declares with no separate UID column is the member's identifier, so
+# it is surfaced as `geo_uid` (not also as `geo_code`). The map is self-validated
+# the way `ivt_f2_geo_combined()` validates its own (a code run is space-free and
+# digit-bearing), so a codebook whose run order does not follow its dictionary
+# returns NULL and the caller's generic read stands. Loud, like the rest of the
+# data-style path (`canivt_geo_datadim`). Returns a light-style column list or NULL.
+ivt_f2_geo_datadim_declared <- function(raw, dim, dir, schema, n_geo) {
+  if (!length(schema)) return(NULL)
+  dense <- schema[!startsWith(schema, "_")]
+  roles <- ivt_f2_geo_field_role(dense)
+  if (length(dense) < 2L || anyNA(roles) || anyDuplicated(roles) ||
+      sum(roles == "geo_name") != 1L || any(roles == "geo_name_fr") ||
+      !any(roles %in% c("geo_code", "geo_uid"))) return(NULL)
+  nm <- dim$name
+  if (is.null(nm) || is.na(nm) || !nzchar(nm)) return(NULL)
+  mk <- ivt_f2_dir_marker_entry(raw, nm, dir)
+  runs <- ivt_f2_dim_member_runs(raw, dir, n_geo, mk, slots = dim$slot_used %||% dim$slots)
+  # the member-ordinal (Code) run is not a dictionary field -- set it aside
+  runs <- Filter(function(t) {
+    iv <- suppressWarnings(as.integer(t))
+    !(!anyNA(iv) && identical(sort(iv), seq_len(n_geo)))
+  }, runs)
+  if (length(runs) != length(dense)) return(NULL)
+  if (any(lengths(runs) != n_geo)) return(NULL)
+  for (i in which(roles %in% c("geo_code", "geo_uid"))) {
+    t <- trimws(runs[[i]])
+    if (anyNA(t) || any(grepl("[[:space:]]", t)) || !all(grepl("[0-9]", t))) return(NULL)
+  }
+  out <- list(geo_label = runs[[which(roles == "geo_name")]])
+  for (role in IVT_F2_GEO_ROLE_ORDER) {
+    i <- which(roles == role)
+    if (length(i)) out[[role]] <- trimws(runs[[i]])
+  }
+  if (is.null(out[["geo_uid"]])) {                 # the code IS the identifier:
+    out[["geo_uid"]] <- out[["geo_code"]]          # one column, not two copies
+    out[["geo_code"]] <- NULL
+  }
+  mapped <- paste(sprintf("%s->%s", dense, roles), collapse = ", ")
+  ivt_fallback(paste(
+    "Geography read as a data-style dimension (field dictionary + per-member label",
+    "blocks); columns mapped by the dimension's OWN field dictionary ({mapped}),",
+    "the declared code surfaced as `geo_uid`."),
+    "canivt_geo_datadim")
+  out
 }
 
 # Backfill `geo_name` from the display `geo_label` for members that carry a label

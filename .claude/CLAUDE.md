@@ -22,6 +22,7 @@ test suite has not seen, and warn loudly on every fallback.
 | [`unsupported-formats.md`](../inst/notes/unsupported-formats.md) | the UNSUPPORTED ledger: what the gate refuses and why. |
 | [`refactor-plan.md`](../inst/notes/refactor-plan.md) | consolidation backlog (open items only). |
 | [`onboarding-backlog.md`](../inst/notes/onboarding-backlog.md) | the repeatable per-table onboarding recipe. |
+| [`open-test-failures.md`](../inst/notes/open-test-failures.md) | pick-up note: the corpus-suite failures recorded 2026-11-10 (stale geo snapshot, unledgered folders). Delete when closed. |
 
 ## What works today
 

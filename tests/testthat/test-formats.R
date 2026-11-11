@@ -216,3 +216,36 @@ test_that("consecutive member CODES are not mistaken for an ordinal delimiter", 
   expect_false(ivt_f2_is_ordinal(c(1, 2, 4), n = 100L))
   expect_false(ivt_f2_is_ordinal(c(1, 2), n = 100L))
 })
+
+# Issue #5: a data-style geography whose field dictionary declares a description
+# and a CODE ("Geography desc." | "Geography code" | "_Sort") is not an English /
+# French pair. The 1986 EA profiles used to surface the 8-digit EA identifier as
+# `geo_name_fr`, with `geo_uid` all NA.
+test_that("a geography field dictionary's code column has a role", {
+  expect_equal(
+    ivt_f2_geo_field_role(c("Geography desc.", "Geography code", "_Sort")),
+    c("geo_name", "geo_code", NA))
+  # the established vocabulary is unchanged
+  expect_equal(
+    ivt_f2_geo_field_role(c("English Desc", "Desc Français", "Geo Code",
+                            "UID/IDU", "Level/Niveau", "DQ")),
+    c("geo_name", "geo_name_fr", "geo_code", "geo_uid", "geo_level", "dqf_code"))
+})
+
+for (id in c("ea_profile_1986_2A", "ea_profile_1986_2B")) {
+  local({
+    key <- id
+    test_that(sprintf("%s reads its declared geography code as geo_uid", key), {
+      p <- locate_sample_ivt("", key)
+      skip_if(p == "", sprintf("no corpus file %s (not in IVT cache)", key))
+      g <- suppressWarnings(ivt_metadata(p))$geographies
+      expect_length(g$geo_uid, 44042L)
+      expect_false(anyNA(g$geo_uid))
+      expect_true(all(grepl("^[0-9]{8}$", g$geo_uid)))
+      expect_equal(anyDuplicated(g$geo_uid), 0L)
+      expect_equal(g$geo_uid[1:3], c("10001001", "10001002", "10001003"))
+      expect_equal(trimws(g$geo_name[2]), "BRIGUS T")
+      expect_null(g[["geo_name_fr"]])
+    })
+  })
+}
